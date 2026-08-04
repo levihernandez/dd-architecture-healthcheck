@@ -12,15 +12,24 @@
   "dependencies": {
     "@datadog/browser-logs": "^7.0.0",
     "@datadog/browser-rum": "^7.0.0",
+    "@dnd-kit/core": "^6.3.1",
+    "@dnd-kit/sortable": "^10.0.0",
+    "@dnd-kit/utilities": "^3.2.2",
+    "@radix-ui/react-dialog": "^1.1.23",
+    "@radix-ui/react-popover": "^1.1.23",
+    "@radix-ui/react-tabs": "^1.1.21",
     "@tanstack/react-query": "^5.18.1",
     "@tanstack/react-query-devtools": "^5.18.1",
     "axios": "^1.6.7",
     "clsx": "^2.1.0",
+    "cmdk": "^1.1.1",
     "date-fns": "^3.3.1",
+    "framer-motion": "^12.43.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-router-dom": "^6.22.0",
-    "recharts": "^2.12.0"
+    "recharts": "^2.12.0",
+    "sonner": "^2.0.7"
   },
   "devDependencies": {
     "@types/react": "^18.2.55",

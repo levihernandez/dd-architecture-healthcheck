@@ -4,40 +4,55 @@
 
 @layer base {
   body {
-    @apply bg-gray-50 text-gray-900 antialiased;
+    @apply bg-surface-subtle text-ink antialiased;
+  }
+  :focus-visible {
+    @apply outline-none ring-2 ring-dd-purple/60 ring-offset-1 ring-offset-white;
   }
 }
 
 @layer components {
   .card {
-    @apply bg-white rounded-lg shadow-sm border border-gray-200 p-6;
+    @apply bg-white rounded-lg shadow-xs border border-border p-6 transition-shadow;
   }
   .btn {
-    @apply inline-flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2;
+    @apply inline-flex items-center gap-2 px-3.5 py-2 rounded text-sm font-medium transition-all active:scale-[0.98];
   }
   .btn-primary {
-    @apply btn bg-dd-purple text-white hover:bg-dd-purple-dark focus:ring-dd-purple;
+    @apply btn bg-dd-purple text-white shadow-xs hover:bg-dd-purple-dark;
   }
   .btn-secondary {
-    @apply btn bg-white text-gray-700 border border-gray-300 hover:bg-gray-50 focus:ring-gray-400;
+    @apply btn bg-white text-ink border border-border-strong hover:bg-surface-subtle;
   }
   .btn-danger {
-    @apply btn bg-red-600 text-white hover:bg-red-700 focus:ring-red-500;
+    @apply btn bg-red-600 text-white hover:bg-red-700;
+  }
+  .btn-ghost {
+    @apply btn bg-transparent text-ink-muted hover:bg-surface-sunken hover:text-ink;
   }
   .badge {
     @apply inline-flex items-center px-2 py-0.5 rounded text-xs font-medium;
   }
   .input {
-    @apply block w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm placeholder-gray-400
-           focus:border-dd-purple focus:outline-none focus:ring-1 focus:ring-dd-purple;
+    @apply block w-full rounded border border-border-strong px-3 py-2 text-sm shadow-xs placeholder-ink-faint bg-white
+           focus:border-dd-purple focus:outline-none focus:ring-1 focus:ring-dd-purple transition-colors;
   }
   .label {
-    @apply block text-sm font-medium text-gray-700 mb-1;
+    @apply block text-sm font-medium text-ink-muted mb-1;
   }
 }
 
 /* Custom scrollbar */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
-::-webkit-scrollbar-track { background: #f1f5f9; }
-::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #d3d3dc; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #b0b0bc; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
