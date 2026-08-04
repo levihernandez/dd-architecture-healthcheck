@@ -1,0 +1,350 @@
+import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { inventoryApi } from '../services/api';
+import { useOrgAndScanFilters } from '../hooks/useFilters';
+import LoadingState, { EmptyState } from '../components/common/LoadingState';
+
+const PROVIDER_META: Record<string, { label: string; color: string; bg: string; border: string; icon: string }> = {
+  aws:        { label: 'Amazon Web Services', color: 'text-amber-700',  bg: 'bg-amber-50',  border: 'border-amber-200', icon: '☁' },
+  gcp:        { label: 'Google Cloud Platform', color: 'text-blue-700', bg: 'bg-blue-50',   border: 'border-blue-200',  icon: '⛅' },
+  azure:      { label: 'Microsoft Azure',      color: 'text-cyan-700',  bg: 'bg-cyan-50',   border: 'border-cyan-200',  icon: '🌤' },
+  kubernetes: { label: 'Kubernetes',           color: 'text-violet-700',bg: 'bg-violet-50', border: 'border-violet-200',icon: '⎈' },
+  docker:     { label: 'Docker',               color: 'text-sky-700',   bg: 'bg-sky-50',    border: 'border-sky-200',   icon: '🐳' },
+};
+
+const fallback = { label: 'Unknown', color: 'text-gray-700', bg: 'bg-gray-50', border: 'border-gray-200', icon: '☁' };
+
+function ProviderBadge({ provider }: { provider: string }) {
+  const m = PROVIDER_META[provider] ?? fallback;
+  return (
+    <span className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full border ${m.bg} ${m.color} ${m.border}`}>
+      {m.icon} {provider.toUpperCase()}
+    </span>
+  );
+}
+
+function StatCard({ label, value, sub, color = 'gray' }: {
+  label: string; value: string | number; sub?: string; color?: 'gray' | 'green' | 'amber' | 'red' | 'violet';
+}) {
+  const colors = {
+    gray:   'bg-gray-50 border-gray-200 text-gray-800',
+    green:  'bg-green-50 border-green-200 text-green-800',
+    amber:  'bg-amber-50 border-amber-200 text-amber-800',
+    red:    'bg-red-50 border-red-200 text-red-800',
+    violet: 'bg-violet-50 border-violet-200 text-violet-800',
+  };
+  return (
+    <div className={`rounded-xl border p-4 ${colors[color]}`}>
+      <div className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1">{label}</div>
+      <div className="text-2xl font-bold">{value}</div>
+      {sub && <div className="text-xs text-gray-500 mt-0.5">{sub}</div>}
+    </div>
+  );
+}
+
+export default function CloudInventory() {
+  const { selectedOrgId, selectedScanId } = useOrgAndScanFilters();
+  const [activeProvider, setActiveProvider] = useState<string | null>(null);
+  const [tagSearch, setTagSearch] = useState('');
+
+  const enabled = Boolean(selectedOrgId && selectedScanId);
+  const { data, isLoading, error } = useQuery({
+    queryKey: ['cloud-inventory', selectedOrgId, selectedScanId],
+    queryFn: () => inventoryApi.cloud(selectedOrgId, selectedScanId),
+    enabled,
+    retry: false,
+  });
+
+  return (
+    <div className="max-w-6xl space-y-8">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Cloud Inventory</h1>
+          <p className="text-sm text-gray-500 mt-1">
+            Cloud account connections, provider-sourced tags on hosts, and alignment with Datadog standard keys
+          </p>
+        </div>
+      </div>
+
+      {!selectedScanId ? (
+        <EmptyState message="Run a scan to view cloud inventory" />
+      ) : isLoading ? (
+        <LoadingState />
+      ) : error || !data ? (
+        <EmptyState message="No cloud data found for this scan" />
+      ) : (
+        <>
+          {data.usingFallback && (
+            <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-700">
+              <strong>Note:</strong> Tag sources extracted from host raw data (pre-fix scan). Run a new scan to get per-source tag tracking in the database.
+            </div>
+          )}
+
+          {/* ── Summary stats ─────────────────────────────────────────────── */}
+          <div className="grid grid-cols-4 gap-4">
+            <StatCard
+              label="Cloud Accounts"
+              value={data.accounts.length}
+              sub={data.detectedProviders.join(' · ').toUpperCase() || 'none configured'}
+              color={data.accounts.length > 0 ? 'violet' : 'gray'}
+            />
+            <StatCard
+              label="Providers Detected"
+              value={data.detectedProviders.length}
+              sub="from host tags_by_source"
+              color={data.detectedProviders.length > 0 ? 'green' : 'amber'}
+            />
+            <StatCard
+              label="Hosts with Cloud Tags"
+              value={data.hostsWithCloudTags}
+              sub={`of ${data.totalHosts} total hosts (${data.totalHosts > 0 ? Math.round(data.hostsWithCloudTags / data.totalHosts * 100) : 0}%)`}
+              color={data.hostsWithCloudTags > 0 ? 'green' : 'amber'}
+            />
+            <StatCard
+              label="Unique Cloud Tag Keys"
+              value={Object.values(data.keysBySource).flat().length}
+              sub={`across ${data.detectedProviders.length} provider(s)`}
+              color="gray"
+            />
+          </div>
+
+          {/* ── Cloud Accounts ─────────────────────────────────────────────── */}
+          <section>
+            <h2 className="text-lg font-bold text-gray-900 mb-3">Cloud Account Connections</h2>
+            {data.accounts.length === 0 ? (
+              <div className="card text-center py-8 text-gray-400">
+                <div className="text-3xl mb-2">☁</div>
+                <div className="text-sm">No cloud integrations configured</div>
+                <div className="text-xs mt-1">Configure AWS, GCP, or Azure integrations in Datadog to see account details here.</div>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 gap-3">
+                {data.accounts.map((acc, i) => {
+                  const m = PROVIDER_META[acc.provider] ?? fallback;
+                  return (
+                    <div key={i} className={`rounded-xl border ${m.border} ${m.bg} p-4`}>
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="flex items-center gap-3">
+                          <span className="text-2xl">{m.icon}</span>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className={`text-sm font-bold ${m.color}`}>{acc.accountName ?? acc.accountId ?? acc.provider}</span>
+                              <ProviderBadge provider={acc.provider} />
+                            </div>
+                            {acc.accountId && acc.accountId !== acc.accountName && (
+                              <div className="text-xs text-gray-500 font-mono mt-0.5">{acc.accountId}</div>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex gap-2 shrink-0">
+                          <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${
+                            acc.hasErrors ? 'bg-red-50 border-red-200 text-red-700' : 'bg-green-50 border-green-200 text-green-700'
+                          }`}>
+                            {acc.hasErrors ? '⚠ Errors' : '✓ OK'}
+                          </span>
+                          <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${
+                            acc.metricsEnabled ? 'bg-green-50 border-green-200 text-green-700' : 'bg-gray-100 border-gray-200 text-gray-500'
+                          }`}>
+                            {acc.metricsEnabled ? 'Metrics ✓' : 'Metrics ✗'}
+                          </span>
+                          <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${
+                            acc.resourceCollectionEnabled ? 'bg-green-50 border-green-200 text-green-700' : 'bg-gray-100 border-gray-200 text-gray-500'
+                          }`}>
+                            {acc.resourceCollectionEnabled ? 'Resource Coll. ✓' : 'Resource Coll. ✗'}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </section>
+
+          {/* ── DD Key Alignment ───────────────────────────────────────────── */}
+          {data.mappingGaps.length > 0 && (
+            <section>
+              <h2 className="text-lg font-bold text-gray-900 mb-1">Cloud Tag → Datadog Key Alignment</h2>
+              <p className="text-sm text-gray-500 mb-3">
+                Whether standard Datadog tag keys are present as cloud provider tag keys on your hosts.
+                Missing keys mean cloud metadata isn't propagating to DD observability surfaces.
+              </p>
+              <div className="grid grid-cols-3 gap-3">
+                {data.mappingGaps.map(gap => (
+                  <div key={gap.ddKey} className={`rounded-xl border p-4 ${
+                    gap.found ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'
+                  }`}>
+                    <div className="flex items-center gap-2 mb-2">
+                      <code className={`text-sm font-bold font-mono ${gap.found ? 'text-green-800' : 'text-red-800'}`}>
+                        {gap.ddKey}
+                      </code>
+                      <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${
+                        gap.found ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                      }`}>
+                        {gap.found ? '✓ Found' : '✗ Missing'}
+                      </span>
+                    </div>
+                    <div className="text-xs text-gray-500">
+                      Cloud variants: {gap.cloudVariants.slice(0, 4).map(v => (
+                        <code key={v} className="bg-white border border-gray-200 px-1 rounded mr-1">{v}</code>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {/* ── Tags by Provider ───────────────────────────────────────────── */}
+          {data.detectedProviders.length > 0 && (
+            <section>
+              <div className="flex items-center justify-between mb-3">
+                <div>
+                  <h2 className="text-lg font-bold text-gray-900">Cloud-Sourced Tag Inventory</h2>
+                  <p className="text-sm text-gray-500 mt-0.5">
+                    Tags discovered on hosts grouped by the cloud provider that applied them
+                  </p>
+                </div>
+                <input
+                  type="text"
+                  placeholder="Filter tag keys…"
+                  className="input w-44 text-sm"
+                  value={tagSearch}
+                  onChange={(e) => setTagSearch(e.target.value)}
+                />
+              </div>
+
+              {/* Provider tabs */}
+              <div className="flex gap-1 mb-4 border-b border-gray-200">
+                <button
+                  onClick={() => setActiveProvider(null)}
+                  className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+                    activeProvider === null ? 'border-violet-600 text-violet-700' : 'border-transparent text-gray-500 hover:text-gray-700'
+                  }`}
+                >
+                  All providers
+                </button>
+                {data.detectedProviders.map(p => {
+                  const m = PROVIDER_META[p] ?? fallback;
+                  return (
+                    <button
+                      key={p}
+                      onClick={() => setActiveProvider(p === activeProvider ? null : p)}
+                      className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors flex items-center gap-1.5 ${
+                        activeProvider === p ? 'border-violet-600 text-violet-700' : 'border-transparent text-gray-500 hover:text-gray-700'
+                      }`}
+                    >
+                      {m.icon} {p.toUpperCase()}
+                      <span className="text-xs bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded-full">
+                        {(data.keysBySource[p] ?? []).length}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Tag tables per provider */}
+              <div className="space-y-5">
+                {(activeProvider ? [activeProvider] : data.detectedProviders).map(provider => {
+                  const m = PROVIDER_META[provider] ?? fallback;
+                  const rows = (data.tagsBySource[provider] ?? [])
+                    .filter(r => !tagSearch || r.key.toLowerCase().includes(tagSearch.toLowerCase()) || r.value.toLowerCase().includes(tagSearch.toLowerCase()));
+
+                  // Group by key
+                  const byKey: Record<string, Array<{ value: string; hostCount: number }>> = {};
+                  for (const r of rows) {
+                    if (!byKey[r.key]) byKey[r.key] = [];
+                    byKey[r.key].push({ value: r.value, hostCount: r.hostCount });
+                  }
+                  const keys = Object.keys(byKey).sort();
+
+                  return (
+                    <div key={provider} className={`rounded-xl border ${m.border} overflow-hidden`}>
+                      <div className={`px-4 py-3 ${m.bg} flex items-center justify-between`}>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xl">{m.icon}</span>
+                          <span className={`font-semibold ${m.color}`}>{m.label}</span>
+                          <span className={`text-xs px-2 py-0.5 rounded-full border ${m.border} ${m.color} bg-white/60`}>
+                            {keys.length} tag keys · {rows.length} values
+                          </span>
+                        </div>
+                        <div className="text-xs text-gray-500">
+                          {data.hostsWithCloudTags} hosts tagged
+                        </div>
+                      </div>
+
+                      {keys.length === 0 ? (
+                        <div className="px-4 py-6 text-center text-sm text-gray-400">
+                          {tagSearch ? 'No tags match the filter' : 'No tags detected from this provider'}
+                        </div>
+                      ) : (
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="bg-gray-50 text-xs text-gray-500 uppercase tracking-wide">
+                              <th className="text-left px-4 py-2 w-1/3">Tag Key</th>
+                              <th className="text-left px-4 py-2">Values (top per key)</th>
+                              <th className="text-right px-4 py-2 w-24">Unique Values</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-100">
+                            {keys.map(key => {
+                              const vals = byKey[key].sort((a, b) => b.hostCount - a.hostCount);
+                              return (
+                                <tr key={key} className="hover:bg-gray-50/50 transition-colors">
+                                  <td className="px-4 py-2.5">
+                                    <code className={`text-xs font-mono font-semibold px-1.5 py-0.5 rounded border ${m.bg} ${m.border} ${m.color}`}>
+                                      {key}
+                                    </code>
+                                  </td>
+                                  <td className="px-4 py-2.5">
+                                    <div className="flex flex-wrap gap-1">
+                                      {vals.slice(0, 6).map(({ value, hostCount }) => (
+                                        <span key={value} className="inline-flex items-center gap-1 text-xs bg-gray-100 text-gray-700 border border-gray-200 px-1.5 py-0.5 rounded">
+                                          {value}
+                                          <span className="text-gray-400 text-[10px]">{hostCount}</span>
+                                        </span>
+                                      ))}
+                                      {vals.length > 6 && (
+                                        <span className="text-xs text-gray-400">+{vals.length - 6} more</span>
+                                      )}
+                                    </div>
+                                  </td>
+                                  <td className="px-4 py-2.5 text-right tabular-nums text-gray-600">{vals.length}</td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          )}
+
+          {/* ── No cloud tags guidance ─────────────────────────────────────── */}
+          {data.detectedProviders.length === 0 && (
+            <section className="card text-center py-10 space-y-3">
+              <div className="text-4xl">☁</div>
+              <div className="text-base font-semibold text-gray-700">No cloud provider tags detected on hosts</div>
+              <div className="text-sm text-gray-500 max-w-lg mx-auto">
+                Cloud provider tags are applied to hosts when the Datadog Agent runs on cloud instances and the
+                cloud integration is configured. Check that your AWS/GCP/Azure integration is enabled in Datadog
+                and that the Agent has permission to read instance metadata.
+              </div>
+              <div className="text-xs text-gray-400 bg-gray-50 border border-gray-200 rounded-lg p-4 max-w-lg mx-auto text-left space-y-1">
+                <div className="font-semibold text-gray-600 mb-2">What to check:</div>
+                <div>• AWS: Enable "Collect tags" in the AWS integration tile</div>
+                <div>• GCP: Grant the Agent's service account <code>compute.instanceAdmin.v1</code> read access</div>
+                <div>• Azure: Enable "Resource group level" tag collection in Azure integration</div>
+                <div>• Verify the Agent has <code>EC2DescribeInstances</code> or equivalent permissions</div>
+              </div>
+            </section>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
