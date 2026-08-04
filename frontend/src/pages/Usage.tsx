@@ -2,6 +2,9 @@ import { useQuery } from '@tanstack/react-query';
 import { usageApi } from '../services/api';
 import { useOrgAndScanFilters } from '../hooks/useFilters';
 import type { UsageProductSummary } from '../types';
+import PageHeader from '../components/ui/PageHeader';
+import { SkeletonCards, SkeletonTable } from '../components/ui/Skeleton';
+import DataTable, { type Column } from '../components/common/DataTable';
 
 function fmt(value: number | null, unit: string): string {
   if (value === null) return '—';
@@ -20,54 +23,54 @@ function money(n: number) {
   return n > 0 ? `$${n.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}` : '';
 }
 
-function ProductRow({ p }: { p: UsageProductSummary }) {
-  const totalCost = p.committedCost + p.onDemandCost;
-  const onDemandPct = totalCost > 0 ? (p.onDemandCost / totalCost) * 100 : 0;
-
-  return (
-    <tr className={`border-b border-gray-100 hover:bg-gray-50 transition-colors ${p.hasOnDemand ? 'bg-red-50/40' : ''}`}>
-      <td className="py-3 px-4">
-        <div className="flex items-center gap-2">
-          {p.hasOnDemand && <span className="text-red-500 text-xs font-bold">ON-DEMAND</span>}
-          <span className="font-medium text-gray-900 text-sm">{p.name}</span>
-        </div>
-      </td>
-      <td className="py-3 px-4 text-right font-mono text-sm text-gray-700">
-        {p.value !== null ? (
-          <span title={`${p.value.toLocaleString()} ${p.unit}`}>{fmt(p.value, p.unit)}</span>
-        ) : (
-          <span className="text-gray-400 text-xs">no data</span>
-        )}
-      </td>
-      <td className="py-3 px-4 text-right text-sm text-gray-600">{p.value !== null ? p.unit : ''}</td>
-      <td className="py-3 px-4 text-right font-mono text-sm text-green-700">{money(p.committedCost)}</td>
-      <td className="py-3 px-4 text-right font-mono text-sm">
-        {p.hasOnDemand ? (
-          <span className="text-red-600 font-semibold">{money(p.onDemandCost)}</span>
-        ) : (
-          <span className="text-gray-300">—</span>
-        )}
-      </td>
-      <td className="py-3 px-4">
-        {p.hasOnDemand ? (
-          <div className="flex items-center gap-2">
-            <div className="flex-1 bg-gray-200 rounded-full h-2">
-              <div
-                className="bg-red-500 h-2 rounded-full"
-                style={{ width: `${Math.min(100, onDemandPct)}%` }}
-              />
-            </div>
-            <span className="text-xs text-red-600 font-medium whitespace-nowrap">{onDemandPct.toFixed(0)}% OD</span>
+const productColumns: Column<UsageProductSummary>[] = [
+  { key: 'name', header: 'Product', sortable: true, render: (p) => (
+    <div className="flex items-center gap-2">
+      {p.hasOnDemand && <span className="text-red-500 text-xs font-bold">ON-DEMAND</span>}
+      <span className="font-medium text-ink text-sm">{p.name}</span>
+    </div>
+  ) },
+  { key: 'value', header: 'Usage', sortable: true, sortAccessor: (p) => p.value ?? -1, render: (p) => (
+    <div className="text-right">
+      {p.value !== null ? (
+        <span title={`${p.value.toLocaleString()} ${p.unit}`} className="font-mono text-sm text-ink-muted">{fmt(p.value, p.unit)}</span>
+      ) : (
+        <span className="text-ink-faint text-xs">no data</span>
+      )}
+    </div>
+  ) },
+  { key: 'unit', header: 'Unit', render: (p) => <span className="text-sm text-ink-muted">{p.value !== null ? p.unit : ''}</span> },
+  { key: 'committedCost', header: 'Committed', sortable: true, render: (p) => <span className="font-mono text-sm text-green-700">{money(p.committedCost)}</span> },
+  { key: 'onDemandCost', header: 'On-Demand', sortable: true, render: (p) => (
+    p.hasOnDemand ? <span className="font-mono text-sm text-red-600 font-semibold">{money(p.onDemandCost)}</span> : <span className="text-ink-faint">—</span>
+  ) },
+  { key: 'status', header: 'Status', render: (p) => {
+    const totalCost = p.committedCost + p.onDemandCost;
+    const onDemandPct = totalCost > 0 ? (p.onDemandCost / totalCost) * 100 : 0;
+    if (p.hasOnDemand) {
+      return (
+        <div className="flex items-center gap-2 min-w-32">
+          <div className="flex-1 bg-surface-sunken rounded-full h-2">
+            <div className="bg-red-500 h-2 rounded-full" style={{ width: `${Math.min(100, onDemandPct)}%` }} />
           </div>
-        ) : totalCost > 0 ? (
-          <span className="text-xs text-green-600 font-medium">✓ In allotment</span>
-        ) : (
-          <span className="text-xs text-gray-400">—</span>
-        )}
-      </td>
-    </tr>
-  );
-}
+          <span className="text-xs text-red-600 font-medium whitespace-nowrap">{onDemandPct.toFixed(0)}% OD</span>
+        </div>
+      );
+    }
+    if (totalCost > 0) return <span className="text-xs text-green-600 font-medium">✓ In allotment</span>;
+    return <span className="text-xs text-ink-faint">—</span>;
+  } },
+];
+
+const chargeColumns: Column<{ charge_type: string; product_name: string; cost: number }>[] = [
+  { key: 'product_name', header: 'Product', sortable: true, render: (c) => <span className="text-sm text-ink">{c.product_name}</span> },
+  { key: 'charge_type', header: 'Type', sortable: true, render: (c) => (
+    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${c.charge_type === 'on_demand' ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>
+      {c.charge_type === 'on_demand' ? 'On-Demand' : 'Committed'}
+    </span>
+  ) },
+  { key: 'cost', header: 'Cost', sortable: true, render: (c) => <span className="font-mono text-sm font-semibold text-ink">{money(c.cost)}</span> },
+];
 
 function UsageBarChart({ history, metricKey, unit }: {
   history: Array<Record<string, unknown>>;
@@ -89,7 +92,7 @@ function UsageBarChart({ history, metricKey, unit }: {
             style={{ height: `${max > 0 ? Math.round((p.value / max) * 40) : 0}px`, minHeight: p.value > 0 ? 2 : 0 }}
             title={`${p.month}: ${fmt(p.value, unit)}`}
           />
-          <span className="text-[9px] text-gray-400 leading-none">{p.month.slice(5)}</span>
+          <span className="text-[9px] text-ink-faint leading-none">{p.month.slice(5)}</span>
         </div>
       ))}
     </div>
@@ -108,9 +111,10 @@ export default function Usage() {
   if (!selectedOrgId) {
     return (
       <div className="max-w-5xl mx-auto">
-        <div className="card text-center py-16 text-gray-400">
+        <PageHeader title="Plan & Usage" subtitle="Current consumption vs. contracted allotments and on-demand charges" />
+        <div className="card text-center py-16 text-ink-faint">
           <div className="text-4xl mb-3">📊</div>
-          <div className="font-semibold text-gray-600">Select an organization to view usage data</div>
+          <div className="font-semibold text-ink-muted">Select an organization to view usage data</div>
         </div>
       </div>
     );
@@ -118,8 +122,10 @@ export default function Usage() {
 
   if (isLoading) {
     return (
-      <div className="max-w-5xl mx-auto">
-        <div className="card text-center py-16 text-gray-400">Loading usage data…</div>
+      <div className="max-w-5xl mx-auto space-y-6">
+        <PageHeader title="Plan & Usage" subtitle="Current consumption vs. contracted allotments and on-demand charges" />
+        <SkeletonCards count={3} />
+        <SkeletonTable rows={6} cols={6} />
       </div>
     );
   }
@@ -127,14 +133,11 @@ export default function Usage() {
   if (error || !data) {
     return (
       <div className="max-w-5xl mx-auto space-y-4">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Plan & Usage</h1>
-          <p className="text-sm text-gray-500 mt-1">Current consumption vs. contracted allotments and on-demand charges</p>
-        </div>
+        <PageHeader title="Plan & Usage" subtitle="Current consumption vs. contracted allotments and on-demand charges" />
         <div className="card text-center py-16">
           <div className="text-4xl mb-3">📭</div>
-          <div className="font-semibold text-gray-700 mb-2">No usage data available yet</div>
-          <div className="text-sm text-gray-500 max-w-md mx-auto">
+          <div className="font-semibold text-ink mb-2">No usage data available yet</div>
+          <div className="text-sm text-ink-muted max-w-md mx-auto">
             Run a new scan to collect usage data from the Datadog Usage API.
             The usage collector requires <strong>Usage Read</strong> permissions on your app key.
           </div>
@@ -145,46 +148,42 @@ export default function Usage() {
 
   const onDemandProducts = data.products.filter(p => p.hasOnDemand);
   const inAllotmentProducts = data.products.filter(p => !p.hasOnDemand && (p.committedCost > 0 || p.value !== null));
+  const orderedProducts = [...onDemandProducts, ...inAllotmentProducts];
   const totalCommitted = data.costCharges.filter(c => c.charge_type === 'committed').reduce((s, c) => s + c.cost, 0);
   const totalOnDemand = data.costCharges.filter(c => c.charge_type === 'on_demand').reduce((s, c) => s + c.cost, 0);
   const totalCost = totalCommitted + totalOnDemand;
 
   return (
     <div className="max-w-5xl mx-auto space-y-6">
-      {/* Header */}
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Plan & Usage</h1>
-          <p className="text-sm text-gray-500 mt-1">
-            {data.reportMonth} usage — collected {new Date(data.collectedAt).toLocaleDateString()}
-          </p>
-        </div>
-        {onDemandProducts.length > 0 && (
+      <PageHeader
+        title="Plan & Usage"
+        subtitle={`${data.reportMonth} usage — collected ${new Date(data.collectedAt).toLocaleDateString()}`}
+        actions={onDemandProducts.length > 0 ? (
           <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-2 text-right">
             <div className="text-xs text-red-500 font-semibold uppercase tracking-wide">On-Demand Charges</div>
             <div className="text-xl font-bold text-red-600">{money(totalOnDemand)}</div>
             <div className="text-xs text-red-400">{onDemandProducts.length} product{onDemandProducts.length !== 1 ? 's' : ''} over allotment</div>
           </div>
-        )}
-      </div>
+        ) : undefined}
+      />
 
       {/* Cost summary cards */}
       {totalCost > 0 && (
         <div className="grid grid-cols-3 gap-4">
           <div className="card text-center py-4">
-            <div className="text-xs text-gray-500 uppercase tracking-wide mb-1">Total Estimated Cost</div>
-            <div className="text-2xl font-bold text-gray-900">{money(totalCost)}</div>
-            <div className="text-xs text-gray-400 mt-1">{data.reportMonth}</div>
+            <div className="text-xs text-ink-muted uppercase tracking-wide mb-1">Total Estimated Cost</div>
+            <div className="text-2xl font-bold text-ink">{money(totalCost)}</div>
+            <div className="text-xs text-ink-faint mt-1">{data.reportMonth}</div>
           </div>
           <div className="card text-center py-4">
             <div className="text-xs text-green-600 uppercase tracking-wide mb-1">Committed Spend</div>
             <div className="text-2xl font-bold text-green-700">{money(totalCommitted)}</div>
-            <div className="text-xs text-gray-400 mt-1">In-allotment usage</div>
+            <div className="text-xs text-ink-faint mt-1">In-allotment usage</div>
           </div>
           <div className={`card text-center py-4 ${totalOnDemand > 0 ? 'bg-red-50 border-red-200' : ''}`}>
             <div className="text-xs text-red-500 uppercase tracking-wide mb-1">On-Demand Charges</div>
-            <div className={`text-2xl font-bold ${totalOnDemand > 0 ? 'text-red-600' : 'text-gray-400'}`}>{totalOnDemand > 0 ? money(totalOnDemand) : '$0'}</div>
-            <div className="text-xs text-gray-400 mt-1">{totalOnDemand > 0 ? 'Overage charges' : 'No overages'}</div>
+            <div className={`text-2xl font-bold ${totalOnDemand > 0 ? 'text-red-600' : 'text-ink-faint'}`}>{totalOnDemand > 0 ? money(totalOnDemand) : '$0'}</div>
+            <div className="text-xs text-ink-faint mt-1">{totalOnDemand > 0 ? 'Overage charges' : 'No overages'}</div>
           </div>
         </div>
       )}
@@ -212,11 +211,11 @@ export default function Usage() {
       )}
 
       {/* Product table */}
-      <div className="card overflow-hidden p-0">
-        <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
           <div>
-            <h2 className="font-bold text-gray-900">Product Usage Breakdown</h2>
-            <p className="text-xs text-gray-500 mt-0.5">Usage metrics and estimated costs by product for {data.reportMonth}</p>
+            <h2 className="font-bold text-ink">Product Usage Breakdown</h2>
+            <p className="text-xs text-ink-muted mt-0.5">Usage metrics and estimated costs by product for {data.reportMonth}</p>
           </div>
           {data.products.length > 0 && (
             <div className="flex items-center gap-3 text-xs">
@@ -226,25 +225,14 @@ export default function Usage() {
           )}
         </div>
         {data.products.length > 0 ? (
-          <table className="w-full">
-            <thead>
-              <tr className="bg-gray-50 border-b border-gray-100">
-                <th className="py-2.5 px-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Product</th>
-                <th className="py-2.5 px-4 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">Usage</th>
-                <th className="py-2.5 px-4 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">Unit</th>
-                <th className="py-2.5 px-4 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">Committed</th>
-                <th className="py-2.5 px-4 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">On-Demand</th>
-                <th className="py-2.5 px-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {/* On-demand first */}
-              {onDemandProducts.map(p => <ProductRow key={p.name} p={p} />)}
-              {inAllotmentProducts.map(p => <ProductRow key={p.name} p={p} />)}
-            </tbody>
-          </table>
+          <DataTable
+            columns={productColumns}
+            data={orderedProducts}
+            rowKey={(p) => p.name}
+            tableId="usage-products"
+          />
         ) : (
-          <div className="text-center py-10 text-gray-400 text-sm">
+          <div className="card text-center py-10 text-ink-faint text-sm">
             No product usage data found in this scan.
           </div>
         )}
@@ -253,7 +241,7 @@ export default function Usage() {
       {/* Usage trends (history sparklines) */}
       {data.usageHistory.length > 1 && (
         <div className="card">
-          <h2 className="font-bold text-gray-900 mb-4">Usage Trends — Last {data.usageHistory.length} Months</h2>
+          <h2 className="font-bold text-ink mb-4">Usage Trends — Last {data.usageHistory.length} Months</h2>
           <div className="grid grid-cols-2 md:grid-cols-3 gap-6">
             {[
               { label: 'Infra Hosts (p99)', key: 'agent_host_top99p', unit: 'hosts' },
@@ -267,8 +255,8 @@ export default function Usage() {
               if (latestVal === null) return null;
               return (
                 <div key={key}>
-                  <div className="text-xs font-semibold text-gray-700 mb-1">{label}</div>
-                  <div className="text-lg font-bold text-gray-900 font-mono mb-1">{fmt(latestVal, unit)}</div>
+                  <div className="text-xs font-semibold text-ink-muted mb-1">{label}</div>
+                  <div className="text-lg font-bold text-ink font-mono mb-1">{fmt(latestVal, unit)}</div>
                   <UsageBarChart history={data.usageHistory} metricKey={key} unit={unit} />
                 </div>
               );
@@ -279,44 +267,22 @@ export default function Usage() {
 
       {/* Raw charges table (if cost data available) */}
       {data.costCharges.length > 0 && (
-        <div className="card overflow-hidden p-0">
-          <div className="px-5 py-4 border-b border-gray-100">
-            <h2 className="font-bold text-gray-900">All Charges — {data.reportMonth}</h2>
-            <p className="text-xs text-gray-500 mt-0.5">From Datadog estimated cost API (committed + on-demand)</p>
+        <div className="space-y-2">
+          <div>
+            <h2 className="font-bold text-ink">All Charges — {data.reportMonth}</h2>
+            <p className="text-xs text-ink-muted mt-0.5">From Datadog estimated cost API (committed + on-demand)</p>
           </div>
-          <table className="w-full">
-            <thead>
-              <tr className="bg-gray-50 border-b border-gray-100">
-                <th className="py-2.5 px-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Product</th>
-                <th className="py-2.5 px-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Type</th>
-                <th className="py-2.5 px-4 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">Cost</th>
-              </tr>
-            </thead>
-            <tbody>
-              {[...data.costCharges]
-                .sort((a, b) => b.cost - a.cost)
-                .map((c, i) => (
-                  <tr key={i} className="border-b border-gray-50 hover:bg-gray-50">
-                    <td className="py-2.5 px-4 text-sm text-gray-800">{c.product_name}</td>
-                    <td className="py-2.5 px-4">
-                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-                        c.charge_type === 'on_demand'
-                          ? 'bg-red-100 text-red-700'
-                          : 'bg-green-100 text-green-700'
-                      }`}>
-                        {c.charge_type === 'on_demand' ? 'On-Demand' : 'Committed'}
-                      </span>
-                    </td>
-                    <td className="py-2.5 px-4 text-right font-mono text-sm font-semibold text-gray-900">{money(c.cost)}</td>
-                  </tr>
-                ))}
-            </tbody>
-          </table>
+          <DataTable
+            columns={chargeColumns}
+            data={[...data.costCharges].sort((a, b) => b.cost - a.cost)}
+            rowKey={(c) => `${c.product_name}-${c.charge_type}`}
+            tableId="usage-charges"
+          />
         </div>
       )}
 
       {/* Permission note */}
-      <div className="text-xs text-gray-400 text-center pb-4">
+      <div className="text-xs text-ink-faint text-center pb-4">
         Usage data requires <strong>Usage Read</strong> permission on your Datadog app key.
         Cost data requires <strong>Billing Read</strong> permission.
         Re-run a scan to refresh.

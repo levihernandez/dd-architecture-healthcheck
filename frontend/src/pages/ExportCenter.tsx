@@ -1,6 +1,8 @@
+import { toast } from 'sonner';
 import { exportApi } from '../services/api';
 import { useOrgAndScanFilters } from '../hooks/useFilters';
 import { EmptyState } from '../components/common/LoadingState';
+import PageHeader from '../components/ui/PageHeader';
 
 const EXPORT_FORMATS = [
   { format: 'json' as const, label: 'JSON', icon: '{ }', description: 'Complete structured export including all findings, scorecard, and AI assessment', color: 'border-blue-200 hover:border-blue-400' },
@@ -12,14 +14,22 @@ const EXPORT_FORMATS = [
 export default function ExportCenter() {
   const { selectedOrgId, selectedScanId } = useOrgAndScanFilters();
 
+  const handleDownload = (format: 'json' | 'csv' | 'markdown' | 'html', label: string) => {
+    if (!selectedScanId) {
+      toast.error('Select a completed scan first');
+      return;
+    }
+    try {
+      exportApi.download(selectedScanId, selectedOrgId, format);
+      toast.success(`Downloading ${label} export…`);
+    } catch {
+      toast.error(`Failed to start ${label} export`);
+    }
+  };
+
   return (
     <div className="max-w-3xl space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Export Center</h1>
-          <p className="text-gray-500 text-sm mt-1">Download health check results in various formats</p>
-        </div>
-      </div>
+      <PageHeader title="Export Center" subtitle="Download health check results in various formats" />
 
       {!selectedScanId ? (
         <EmptyState message="Select a completed scan to export" />
@@ -27,22 +37,23 @@ export default function ExportCenter() {
         <>
           <div className="grid md:grid-cols-2 gap-4">
             {EXPORT_FORMATS.map(({ format, label, icon, description, color }) => (
-              <div
+              <button
                 key={format}
-                className={`card cursor-pointer border-2 transition-all ${color}`}
-                onClick={() => exportApi.download(selectedScanId, selectedOrgId, format)}
+                type="button"
+                className={`card w-full text-left cursor-pointer border-2 transition-all ${color}`}
+                onClick={() => handleDownload(format, label)}
               >
                 <div className="flex items-start gap-4">
                   <div className="text-2xl font-mono w-10 text-center">{icon}</div>
                   <div>
-                    <h3 className="font-semibold text-gray-900">{label}</h3>
-                    <p className="text-sm text-gray-500 mt-1">{description}</p>
-                    <button className="mt-3 text-sm text-dd-purple font-medium hover:text-dd-purple-dark">
+                    <h3 className="font-semibold text-ink">{label}</h3>
+                    <p className="text-sm text-ink-muted mt-1">{description}</p>
+                    <span className="mt-3 inline-block text-sm text-dd-purple font-medium hover:text-dd-purple-dark">
                       Download {label} →
-                    </button>
+                    </span>
                   </div>
                 </div>
-              </div>
+              </button>
             ))}
           </div>
 

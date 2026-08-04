@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
+import { toast } from 'sonner';
 import { useOrgAndScanFilters } from '../../hooks/useFilters';
 import { aiSettingsApi } from '../../services/api';
 
@@ -123,7 +124,7 @@ export default function FloatingChat() {
 
   const send = useCallback(async (text: string) => {
     if (!text.trim() || isStreaming) return;
-    if (!selectedOrgId) { alert('Select an org first'); return; }
+    if (!selectedOrgId) { toast.error('Select an org first'); return; }
 
     const userMessage: Message = { role: 'user', content: text.trim() };
     const nextMessages = [...messages, userMessage];

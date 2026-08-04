@@ -1,18 +1,22 @@
+import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { scansApi, inventoryApi } from '../services/api';
 import { useOrgAndScanFilters } from '../hooks/useFilters';
-import { OrgScorecardCard } from '../components/common/ScoreCard';
 import EvidenceTable from '../components/common/EvidenceTable';
-import LoadingState, { EmptyState } from '../components/common/LoadingState';
+import { EmptyState } from '../components/common/LoadingState';
 import { MissingTagPill } from '../components/common/TagPill';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
-import { GRADE_COLORS } from '../types';
+import PageHeader from '../components/ui/PageHeader';
+import FilterChip, { FilterChipRow } from '../components/ui/FilterChip';
+import { SkeletonCard, SkeletonText } from '../components/ui/Skeleton';
+import type { FindingSeverity } from '../types';
 
 const REQUIRED_TAGS = ['env', 'service', 'version'];
 const RECOMMENDED_TAGS = ['team', 'owner', 'cost_center'];
 
 export default function UnifiedTaggingScorecard() {
   const { selectedOrgId, selectedScanId } = useOrgAndScanFilters();
+  const [severityFilter, setSeverityFilter] = useState<FindingSeverity | 'all'>('all');
 
   const { data: scorecard, isLoading: scorecardLoading } = useQuery({
     queryKey: ['scorecard', selectedScanId],
@@ -51,26 +55,36 @@ export default function UnifiedTaggingScorecard() {
 
   const tagMappings = tags.filter((t) => t.suggested_mapping);
 
-  if (scorecardLoading || findingsLoading) return <LoadingState />;
+  const severityCounts = useMemo(() => {
+    const counts: Record<FindingSeverity, number> = { critical: 0, high: 0, medium: 0, low: 0, info: 0 };
+    findings.forEach((f) => { counts[f.severity] = (counts[f.severity] ?? 0) + 1; });
+    return counts;
+  }, [findings]);
+
+  const filteredFindings = severityFilter === 'all' ? findings : findings.filter((f) => f.severity === severityFilter);
+
+  const isLoading = scorecardLoading || findingsLoading;
 
   return (
     <div className="max-w-5xl space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Unified Tagging Scorecard</h1>
-          <p className="text-gray-500 text-sm mt-1">
-            Assessment of env, service, and version tag coverage across your infrastructure
-          </p>
-        </div>
-      </div>
+      <PageHeader
+        title="Unified Tagging Scorecard"
+        subtitle="Assessment of env, service, and version tag coverage across your infrastructure"
+      />
 
       {!selectedScanId ? (
         <EmptyState message="Run a scan to see tagging analysis" />
+      ) : isLoading ? (
+        <div className="space-y-6">
+          <SkeletonCard />
+          <SkeletonCard />
+          <SkeletonText lines={4} />
+        </div>
       ) : (
         <>
           {/* Tag coverage chart */}
           <div className="card">
-            <h2 className="text-lg font-semibold text-gray-900 mb-4">Tag Coverage by Key</h2>
+            <h2 className="text-lg font-semibold text-ink mb-4">Tag Coverage by Key</h2>
             <div className="h-48">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={tagCoverageData} layout="vertical">
@@ -92,10 +106,10 @@ export default function UnifiedTaggingScorecard() {
 
           {/* Tag standard compliance */}
           <div className="card">
-            <h2 className="text-lg font-semibold text-gray-900 mb-3">Unified Service Tagging Compliance</h2>
+            <h2 className="text-lg font-semibold text-ink mb-3">Unified Service Tagging Compliance</h2>
             <div className="space-y-3">
               <div>
-                <h3 className="text-sm font-semibold text-gray-700 mb-2">Required Tags</h3>
+                <h3 className="text-sm font-semibold text-ink-muted mb-2">Required Tags</h3>
                 <div className="flex flex-wrap gap-2">
                   {REQUIRED_TAGS.map((key) => {
                     const found = tags.find((t) => t.tag_key === key);
@@ -106,7 +120,7 @@ export default function UnifiedTaggingScorecard() {
                 </div>
               </div>
               <div>
-                <h3 className="text-sm font-semibold text-gray-700 mb-2">Recommended Tags</h3>
+                <h3 className="text-sm font-semibold text-ink-muted mb-2">Recommended Tags</h3>
                 <div className="flex flex-wrap gap-2">
                   {RECOMMENDED_TAGS.map((key) => {
                     const found = tags.find((t) => t.tag_key === key);
@@ -122,17 +136,17 @@ export default function UnifiedTaggingScorecard() {
           {/* Tag mapping suggestions */}
           {tagMappings.length > 0 && (
             <div className="card">
-              <h2 className="text-lg font-semibold text-gray-900 mb-3">Tag Mapping Suggestions</h2>
-              <p className="text-sm text-gray-500 mb-3">
+              <h2 className="text-lg font-semibold text-ink mb-3">Tag Mapping Suggestions</h2>
+              <p className="text-sm text-ink-muted mb-3">
                 These existing tags may correspond to standard tag keys. Review and remap as needed.
               </p>
               <div className="space-y-2">
                 {tagMappings.map((t) => (
                   <div key={t.tag_key} className="flex items-center gap-3 bg-amber-50 border border-amber-200 rounded p-3">
                     <code className="text-sm text-amber-800 bg-amber-100 px-2 py-0.5 rounded">{t.tag_key}</code>
-                    <span className="text-gray-500">→</span>
+                    <span className="text-ink-muted">→</span>
                     <code className="text-sm text-green-800 bg-green-100 px-2 py-0.5 rounded">{t.suggested_mapping}</code>
-                    <span className="text-xs text-gray-500">
+                    <span className="text-xs text-ink-muted">
                       ({t.host_occurrence_count} hosts)
                     </span>
                   </div>
@@ -144,10 +158,26 @@ export default function UnifiedTaggingScorecard() {
           {/* Findings */}
           {findings.length > 0 && (
             <div className="card">
-              <h2 className="text-lg font-semibold text-gray-900 mb-3">
-                Tagging Findings ({findings.length})
-              </h2>
-              <EvidenceTable findings={findings} />
+              <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+                <h2 className="text-lg font-semibold text-ink">
+                  Tagging Findings ({filteredFindings.length}{filteredFindings.length !== findings.length ? ` of ${findings.length}` : ''})
+                </h2>
+                <FilterChipRow>
+                  <FilterChip label="All" active={severityFilter === 'all'} count={findings.length} onClick={() => setSeverityFilter('all')} />
+                  {(['critical', 'high', 'medium', 'low', 'info'] as FindingSeverity[])
+                    .filter((s) => severityCounts[s] > 0)
+                    .map((s) => (
+                      <FilterChip
+                        key={s}
+                        label={s[0].toUpperCase() + s.slice(1)}
+                        active={severityFilter === s}
+                        count={severityCounts[s]}
+                        onClick={() => setSeverityFilter(s)}
+                      />
+                    ))}
+                </FilterChipRow>
+              </div>
+              <EvidenceTable findings={filteredFindings} />
             </div>
           )}
         </>

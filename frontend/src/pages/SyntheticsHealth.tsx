@@ -1,10 +1,16 @@
+import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { scansApi, analyticsApi } from '../services/api';
 import { useOrgAndScanFilters } from '../hooks/useFilters';
 import { ddBaseUrl, ddUrl } from '../utils/ddUrl';
 import EvidenceTable from '../components/common/EvidenceTable';
 import MetricCard from '../components/common/MetricCard';
-import LoadingState, { EmptyState } from '../components/common/LoadingState';
+import DataTable from '../components/common/DataTable';
+import { EmptyState } from '../components/common/LoadingState';
+import PageHeader from '../components/ui/PageHeader';
+import FilterChip, { FilterChipRow } from '../components/ui/FilterChip';
+import { SkeletonCards, SkeletonTable } from '../components/ui/Skeleton';
+import type { FindingSeverity } from '../types';
 
 function DDLink({ href, label = 'Open in Datadog' }: { href: string; label?: string }) {
   return (
@@ -26,6 +32,7 @@ export default function SyntheticsHealth() {
   const { orgs, selectedOrgId, selectedScanId } = useOrgAndScanFilters();
   const selectedOrg = orgs.find(o => o.id === selectedOrgId);
   const base = ddBaseUrl(selectedOrg?.site ?? 'datadoghq.com');
+  const [severityFilter, setSeverityFilter] = useState<FindingSeverity | 'all'>('all');
 
   const { data: findings = [], isLoading } = useQuery({
     queryKey: ['findings', selectedScanId, 'synthetics_health'],
@@ -33,7 +40,7 @@ export default function SyntheticsHealth() {
     enabled: Boolean(selectedScanId),
   });
 
-  const { data: analytics } = useQuery({
+  const { data: analytics, isLoading: analyticsLoading } = useQuery({
     queryKey: ['analytics', selectedOrgId, selectedScanId],
     queryFn: () => analyticsApi.get(selectedOrgId, selectedScanId),
     enabled: Boolean(selectedOrgId && selectedScanId),
@@ -53,19 +60,28 @@ export default function SyntheticsHealth() {
   const testsByType: Record<string, number> = {};
   details.forEach(t => { testsByType[t.type] = (testsByType[t.type] ?? 0) + 1; });
 
-  if (isLoading) return <LoadingState />;
+  const severityCounts = useMemo(() => {
+    const counts: Record<FindingSeverity, number> = { critical: 0, high: 0, medium: 0, low: 0, info: 0 };
+    findings.forEach((f) => { counts[f.severity] = (counts[f.severity] ?? 0) + 1; });
+    return counts;
+  }, [findings]);
+
+  const filteredFindings = severityFilter === 'all' ? findings : findings.filter((f) => f.severity === severityFilter);
 
   return (
     <div className="max-w-5xl space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Synthetics Health</h1>
-          <p className="text-gray-500 text-sm mt-1">Synthetic test coverage, run volume, alert status, and location distribution</p>
-        </div>
-        <DDLink href={ddUrl.syntheticsTests(base)} label="All Tests" />
-      </div>
+      <PageHeader
+        title="Synthetics Health"
+        subtitle="Synthetic test coverage, run volume, alert status, and location distribution"
+        actions={<DDLink href={ddUrl.syntheticsTests(base)} label="All Tests" />}
+      />
 
-      {!selectedScanId ? <EmptyState message="Run a scan to see synthetics health" /> : (
+      {!selectedScanId ? <EmptyState message="Run a scan to see synthetics health" /> : (isLoading || analyticsLoading) ? (
+        <div className="space-y-6">
+          <SkeletonCards count={5} />
+          <SkeletonTable rows={8} cols={5} />
+        </div>
+      ) : (
         <>
           {/* Top metrics */}
           <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
@@ -85,7 +101,7 @@ export default function SyntheticsHealth() {
           {/* Risk signals */}
           {(pausedTests.length > 0 || alertTests.length > 0 || singleLocationTests.length > 0) && (
             <div className="space-y-2">
-              <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">Active Signals</h2>
+              <h2 className="text-sm font-semibold text-ink-muted uppercase tracking-wide">Active Signals</h2>
               {alertTests.length > 0 && (
                 <div className="flex items-start gap-3 p-3 rounded-lg border bg-red-50 border-red-200">
                   <span className="text-lg">🚨</span>
@@ -128,17 +144,17 @@ export default function SyntheticsHealth() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {/* Test type breakdown */}
               <div className="card">
-                <h2 className="text-base font-semibold text-gray-900 mb-3">Test Type Breakdown</h2>
+                <h2 className="text-base font-semibold text-ink mb-3">Test Type Breakdown</h2>
                 <div className="space-y-2">
                   {Object.entries(testsByType).sort((a, b) => b[1] - a[1]).map(([type, count]) => {
                     const pct = totalTests > 0 ? Math.round((count / totalTests) * 100) : 0;
                     return (
                       <div key={type} className="flex items-center gap-3">
-                        <span className="w-28 text-xs text-gray-600 capitalize">{type}</span>
-                        <div className="flex-1 bg-gray-100 rounded-full h-2">
+                        <span className="w-28 text-xs text-ink-muted capitalize">{type}</span>
+                        <div className="flex-1 bg-surface-sunken rounded-full h-2">
                           <div className="h-2 bg-violet-400 rounded-full" style={{ width: `${pct}%` }} />
                         </div>
-                        <span className="w-16 text-right text-xs text-gray-500 font-mono">{count} ({pct}%)</span>
+                        <span className="w-16 text-right text-xs text-ink-muted font-mono">{count} ({pct}%)</span>
                       </div>
                     );
                   })}
@@ -147,7 +163,7 @@ export default function SyntheticsHealth() {
 
               {/* Location distribution */}
               <div className="card">
-                <h2 className="text-base font-semibold text-gray-900 mb-3">Location Coverage</h2>
+                <h2 className="text-base font-semibold text-ink mb-3">Location Coverage</h2>
                 <div className="space-y-2">
                   {[
                     { label: '1 location', count: details.filter(t => t.locations === 1).length, risk: true },
@@ -156,16 +172,16 @@ export default function SyntheticsHealth() {
                     { label: '6+ locations', count: details.filter(t => t.locations >= 6).length, risk: false },
                   ].filter(r => r.count > 0).map(row => (
                     <div key={row.label} className="flex items-center gap-3">
-                      <span className={`w-24 text-xs ${row.risk ? 'text-amber-600 font-medium' : 'text-gray-600'}`}>{row.label}</span>
-                      <div className="flex-1 bg-gray-100 rounded-full h-2">
+                      <span className={`w-24 text-xs ${row.risk ? 'text-amber-600 font-medium' : 'text-ink-muted'}`}>{row.label}</span>
+                      <div className="flex-1 bg-surface-sunken rounded-full h-2">
                         <div className={`h-2 rounded-full ${row.risk ? 'bg-amber-400' : 'bg-green-400'}`}
                           style={{ width: `${totalTests > 0 ? (row.count / totalTests) * 100 : 0}%` }} />
                       </div>
-                      <span className="w-8 text-right text-xs text-gray-500 font-mono">{row.count}</span>
+                      <span className="w-8 text-right text-xs text-ink-muted font-mono">{row.count}</span>
                     </div>
                   ))}
                 </div>
-                <p className="text-xs text-gray-400 mt-3 border-t border-gray-100 pt-2">
+                <p className="text-xs text-ink-faint mt-3 border-t border-border pt-2">
                   Best practice: use 3+ geographic locations for production-critical tests
                 </p>
               </div>
@@ -175,68 +191,77 @@ export default function SyntheticsHealth() {
           {/* Test table */}
           {details.length > 0 && (
             <div className="card p-0 overflow-hidden">
-              <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
-                <h2 className="text-base font-semibold text-gray-900">Test Inventory ({details.length})</h2>
+              <div className="px-4 py-3 border-b border-border flex items-center justify-between">
+                <h2 className="text-base font-semibold text-ink">Test Inventory ({details.length})</h2>
                 <DDLink href={ddUrl.syntheticsTests(base)} label="View all" />
               </div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="bg-gray-50 text-xs text-gray-500 uppercase tracking-wide">
-                      <th className="text-left px-4 py-2">Test Name</th>
-                      <th className="text-center px-3 py-2">Type</th>
-                      <th className="text-center px-3 py-2">Status</th>
-                      <th className="text-right px-3 py-2">Locations</th>
-                      <th className="text-right px-3 py-2">Est. Runs/mo</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100">
-                    {details.slice(0, 30).map((t, i) => (
-                      <tr key={i} className={`hover:bg-violet-50/20 ${t.status === 'alert' ? 'bg-red-50/30' : t.status === 'paused' ? 'bg-gray-50/60' : 'bg-white'}`}>
-                        <td className="px-4 py-2 text-sm text-gray-900 max-w-[220px] truncate" title={t.name}>{t.name}</td>
-                        <td className="px-3 py-2 text-center">
-                          <span className="text-xs px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded capitalize">{t.type}</span>
-                        </td>
-                        <td className="px-3 py-2 text-center">
-                          <span className={`text-xs px-1.5 py-0.5 rounded font-medium capitalize ${
-                            t.status === 'alert' ? 'bg-red-100 text-red-700'
-                            : t.status === 'paused' ? 'bg-gray-200 text-gray-600'
-                            : t.status === 'ok' ? 'bg-green-100 text-green-700'
-                            : 'bg-gray-100 text-gray-500'}`}>
-                            {t.status}
-                          </span>
-                        </td>
-                        <td className="px-3 py-2 text-right">
-                          <span className={`text-xs font-mono ${t.locations <= 1 ? 'text-amber-600 font-semibold' : 'text-gray-700'}`}>
-                            {t.locations}
-                          </span>
-                        </td>
-                        <td className="px-3 py-2 text-right text-xs text-gray-500 font-mono">{fmtNum(t.estimatedMonthlyRuns)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                {details.length > 30 && (
-                  <div className="px-4 py-2 text-xs text-gray-400 border-t border-gray-100 bg-gray-50 flex items-center justify-between">
-                    <span>Showing 30 of {details.length} tests</span>
-                    <DDLink href={ddUrl.syntheticsTests(base)} label="View all in Datadog" />
-                  </div>
-                )}
-              </div>
+              <DataTable
+                tableId="synthetics-tests"
+                columns={[
+                  { key: 'name', header: 'Test Name', sortable: true, render: (t) => (
+                    <span className="text-sm text-ink max-w-[220px] truncate inline-block" title={t.name}>{t.name}</span>
+                  ) },
+                  { key: 'type', header: 'Type', sortable: true, render: (t) => (
+                    <span className="text-xs px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded capitalize">{t.type}</span>
+                  ) },
+                  { key: 'status', header: 'Status', sortable: true, render: (t) => (
+                    <span className={`text-xs px-1.5 py-0.5 rounded font-medium capitalize ${
+                      t.status === 'alert' ? 'bg-red-100 text-red-700'
+                      : t.status === 'paused' ? 'bg-gray-200 text-gray-600'
+                      : t.status === 'ok' ? 'bg-green-100 text-green-700'
+                      : 'bg-gray-100 text-gray-500'}`}>
+                      {t.status}
+                    </span>
+                  ) },
+                  { key: 'locations', header: 'Locations', sortable: true, render: (t) => (
+                    <span className={`text-xs font-mono ${t.locations <= 1 ? 'text-amber-600 font-semibold' : 'text-ink'}`}>{t.locations}</span>
+                  ) },
+                  { key: 'estimatedMonthlyRuns', header: 'Est. Runs/mo', sortable: true, render: (t) => (
+                    <span className="text-xs text-ink-muted font-mono">{fmtNum(t.estimatedMonthlyRuns)}</span>
+                  ) },
+                ]}
+                data={details.slice(0, 30)}
+                rowKey={(t) => t.name}
+                emptyMessage="No synthetic tests found"
+              />
+              {details.length > 30 && (
+                <div className="px-4 py-2 text-xs text-ink-faint border-t border-border bg-surface-subtle flex items-center justify-between">
+                  <span>Showing 30 of {details.length} tests</span>
+                  <DDLink href={ddUrl.syntheticsTests(base)} label="View all in Datadog" />
+                </div>
+              )}
             </div>
           )}
 
           {/* Findings */}
           {findings.length > 0 && (
             <div className="card">
-              <h2 className="text-lg font-semibold mb-3">Synthetics Findings ({findings.length})</h2>
-              <EvidenceTable findings={findings} />
+              <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+                <h2 className="text-lg font-semibold text-ink">
+                  Synthetics Findings ({filteredFindings.length}{filteredFindings.length !== findings.length ? ` of ${findings.length}` : ''})
+                </h2>
+                <FilterChipRow>
+                  <FilterChip label="All" active={severityFilter === 'all'} count={findings.length} onClick={() => setSeverityFilter('all')} />
+                  {(['critical', 'high', 'medium', 'low', 'info'] as FindingSeverity[])
+                    .filter((s) => severityCounts[s] > 0)
+                    .map((s) => (
+                      <FilterChip
+                        key={s}
+                        label={s[0].toUpperCase() + s.slice(1)}
+                        active={severityFilter === s}
+                        count={severityCounts[s]}
+                        onClick={() => setSeverityFilter(s)}
+                      />
+                    ))}
+                </FilterChipRow>
+              </div>
+              <EvidenceTable findings={filteredFindings} />
             </div>
           )}
 
           {/* Investigation links */}
           <div className="card">
-            <h2 className="text-sm font-semibold text-gray-700 mb-3">Investigate in Datadog</h2>
+            <h2 className="text-sm font-semibold text-ink-muted mb-3">Investigate in Datadog</h2>
             <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
               {[
                 { label: 'All synthetic tests', href: ddUrl.syntheticsTests(base) },
@@ -247,9 +272,9 @@ export default function SyntheticsHealth() {
                 { label: 'Private locations', href: `${base}/synthetics/settings/private-locations` },
               ].map(({ label, href }) => (
                 <a key={label} href={href} target="_blank" rel="noopener noreferrer"
-                  className="flex items-center justify-between px-3 py-2.5 rounded-lg border border-gray-200 hover:border-violet-300 hover:bg-violet-50/30 transition-colors group">
-                  <span className="text-sm text-gray-700 group-hover:text-violet-700">{label}</span>
-                  <span className="text-gray-300 group-hover:text-violet-500">↗</span>
+                  className="flex items-center justify-between px-3 py-2.5 rounded-lg border border-border hover:border-violet-300 hover:bg-violet-50/30 transition-colors group">
+                  <span className="text-sm text-ink-muted group-hover:text-violet-700">{label}</span>
+                  <span className="text-ink-faint group-hover:text-violet-500">↗</span>
                 </a>
               ))}
             </div>

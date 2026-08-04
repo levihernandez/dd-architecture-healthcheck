@@ -1,11 +1,17 @@
+import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import { scansApi, inventoryApi, analyticsApi } from '../services/api';
 import { useOrgAndScanFilters } from '../hooks/useFilters';
 import { ddBaseUrl, ddUrl } from '../utils/ddUrl';
 import EvidenceTable from '../components/common/EvidenceTable';
 import MetricCard from '../components/common/MetricCard';
 import DataTable from '../components/common/DataTable';
-import LoadingState, { EmptyState } from '../components/common/LoadingState';
+import { EmptyState } from '../components/common/LoadingState';
+import PageHeader from '../components/ui/PageHeader';
+import FilterChip, { FilterChipRow } from '../components/ui/FilterChip';
+import { SkeletonCards, SkeletonTable } from '../components/ui/Skeleton';
+import type { FindingSeverity } from '../types';
 
 function DDLink({ href, label = 'Open in Datadog' }: { href: string; label?: string }) {
   return (
@@ -39,10 +45,25 @@ function RiskRow({ icon, label, count, total, threshold, href, hrefLabel }: {
   );
 }
 
+function downloadCsv(filename: string, rows: Array<Record<string, unknown>>) {
+  if (rows.length === 0) return;
+  const headers = Object.keys(rows[0]);
+  const escape = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const csv = [headers.join(','), ...rows.map((r) => headers.map((h) => escape(r[h])).join(','))].join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 export default function MonitorsHealth() {
   const { orgs, selectedOrgId, selectedScanId } = useOrgAndScanFilters();
   const selectedOrg = orgs.find(o => o.id === selectedOrgId);
   const base = ddBaseUrl(selectedOrg?.site ?? 'datadoghq.com');
+  const [severityFilter, setSeverityFilter] = useState<FindingSeverity | 'all'>('all');
 
   const { data: findings = [], isLoading: findingsLoading } = useQuery({
     queryKey: ['findings', selectedScanId, 'monitors_health'],
@@ -50,7 +71,7 @@ export default function MonitorsHealth() {
     enabled: Boolean(selectedScanId),
   });
 
-  const { data: monitors } = useQuery({
+  const { data: monitors, isLoading: monitorsLoading } = useQuery({
     queryKey: ['monitors', selectedOrgId, selectedScanId, 1],
     queryFn: () => inventoryApi.monitors(selectedOrgId, selectedScanId, { pageSize: 200 }),
     enabled: Boolean(selectedOrgId && selectedScanId),
@@ -73,26 +94,34 @@ export default function MonitorsHealth() {
   const noDataCount = mb?.byState?.['No Data'] ?? 0;
   const withoutEnv = mb?.withoutEnvTag ?? 0;
   const withoutService = mb?.withoutServiceTag ?? 0;
-  const withoutTeam = mb?.withoutTeamTag ?? 0;
 
   const byType = mb?.byType ?? {};
   const byTypeEntries = Object.entries(byType).sort((a, b) => b[1] - a[1]);
 
   const sloData = analytics?.sloBreakdown;
 
-  if (findingsLoading) return <LoadingState />;
+  const severityCounts = useMemo(() => {
+    const counts: Record<FindingSeverity, number> = { critical: 0, high: 0, medium: 0, low: 0, info: 0 };
+    findings.forEach((f) => { counts[f.severity] = (counts[f.severity] ?? 0) + 1; });
+    return counts;
+  }, [findings]);
+
+  const filteredFindings = severityFilter === 'all' ? findings : findings.filter((f) => f.severity === severityFilter);
 
   return (
     <div className="max-w-5xl space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Monitors Health</h1>
-          <p className="text-gray-500 text-sm mt-1">Monitor coverage, alerting quality, notification hygiene, and SLO overview</p>
-        </div>
-        <DDLink href={ddUrl.monitorList(base)} label="All Monitors" />
-      </div>
+      <PageHeader
+        title="Monitors Health"
+        subtitle="Monitor coverage, alerting quality, notification hygiene, and SLO overview"
+        actions={<DDLink href={ddUrl.monitorList(base)} label="All Monitors" />}
+      />
 
-      {!selectedScanId ? <EmptyState message="Run a scan to see monitor health data" /> : (
+      {!selectedScanId ? <EmptyState message="Run a scan to see monitor health data" /> : (findingsLoading || monitorsLoading) ? (
+        <div className="space-y-6">
+          <SkeletonCards count={5} />
+          <SkeletonTable rows={8} cols={7} />
+        </div>
+      ) : (
         <>
           {/* Top metrics */}
           <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
@@ -113,7 +142,7 @@ export default function MonitorsHealth() {
 
           {/* Quality risk signals */}
           <div className="space-y-2">
-            <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">Monitor Quality Signals</h2>
+            <h2 className="text-sm font-semibold text-ink-muted uppercase tracking-wide">Monitor Quality Signals</h2>
             <RiskRow icon="🔕" label="Muted monitors" count={mutedCount} total={totalMonitors}
               threshold={10} href={ddUrl.mutedMonitors(base)} hrefLabel="View muted" />
             <RiskRow icon="🔇" label="No notification channel" count={noNotifCount} total={totalMonitors}
@@ -154,7 +183,7 @@ export default function MonitorsHealth() {
           {byTypeEntries.length > 0 && (
             <div className="card">
               <div className="flex items-center justify-between mb-3">
-                <h2 className="text-base font-semibold text-gray-900">Monitor Types</h2>
+                <h2 className="text-base font-semibold text-ink">Monitor Types</h2>
                 <DDLink href={ddUrl.monitorList(base)} label="Browse all" />
               </div>
               <div className="space-y-1.5">
@@ -162,13 +191,13 @@ export default function MonitorsHealth() {
                   const pct = totalMonitors > 0 ? Math.round((count / totalMonitors) * 100) : 0;
                   return (
                     <div key={type} className="flex items-center gap-3">
-                      <span className="w-36 text-xs text-gray-600 truncate capitalize">{type.replace(/_/g, ' ')}</span>
-                      <div className="flex-1 bg-gray-100 rounded-full h-2">
+                      <span className="w-36 text-xs text-ink-muted truncate capitalize">{type.replace(/_/g, ' ')}</span>
+                      <div className="flex-1 bg-surface-sunken rounded-full h-2">
                         <div className="h-2 bg-violet-400 rounded-full" style={{ width: `${pct}%` }} />
                       </div>
-                      <span className="w-20 text-right text-xs text-gray-500 font-mono">{count.toLocaleString()} ({pct}%)</span>
+                      <span className="w-20 text-right text-xs text-ink-muted font-mono">{count.toLocaleString()} ({pct}%)</span>
                       <a href={ddUrl.monitorListFiltered(base, `type:${type}`)} target="_blank" rel="noopener noreferrer"
-                        className="text-gray-300 hover:text-violet-500 text-xs">↗</a>
+                        className="text-ink-faint hover:text-violet-500 text-xs">↗</a>
                     </div>
                   );
                 })}
@@ -179,36 +208,71 @@ export default function MonitorsHealth() {
           {/* Findings */}
           {findings.length > 0 && (
             <div className="card">
-              <h2 className="text-lg font-semibold text-gray-900 mb-3">Monitor Findings ({findings.length})</h2>
-              <EvidenceTable findings={findings} />
+              <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+                <h2 className="text-lg font-semibold text-ink">
+                  Monitor Findings ({filteredFindings.length}{filteredFindings.length !== findings.length ? ` of ${findings.length}` : ''})
+                </h2>
+                <FilterChipRow>
+                  <FilterChip label="All" active={severityFilter === 'all'} count={findings.length} onClick={() => setSeverityFilter('all')} />
+                  {(['critical', 'high', 'medium', 'low', 'info'] as FindingSeverity[])
+                    .filter((s) => severityCounts[s] > 0)
+                    .map((s) => (
+                      <FilterChip
+                        key={s}
+                        label={s[0].toUpperCase() + s.slice(1)}
+                        active={severityFilter === s}
+                        count={severityCounts[s]}
+                        onClick={() => setSeverityFilter(s)}
+                      />
+                    ))}
+                </FilterChipRow>
+              </div>
+              <EvidenceTable findings={filteredFindings} />
             </div>
           )}
 
           {/* Monitor inventory table */}
           {monitorData.length > 0 && (
             <div className="card p-0 overflow-hidden">
-              <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
-                <h2 className="text-base font-semibold text-gray-900">Monitor Inventory ({totalMonitors})</h2>
+              <div className="px-4 py-3 border-b border-border flex items-center justify-between">
+                <h2 className="text-base font-semibold text-ink">Monitor Inventory ({totalMonitors})</h2>
                 <DDLink href={ddUrl.monitorList(base)} label="Open in Datadog" />
               </div>
               <DataTable
+                tableId="monitors-inventory"
+                selectable
+                bulkActions={(selected, clear) => (
+                  <button
+                    className="btn-secondary text-xs px-2.5 py-1"
+                    onClick={() => {
+                      downloadCsv('monitors.csv', selected.map((r) => ({
+                        monitor_name: r.monitor_name, monitor_type: r.monitor_type, overall_state: r.overall_state,
+                        priority: r.priority, has_notification: r.has_notification, is_muted: r.is_muted,
+                      })));
+                      toast.success(`Exported ${selected.length} monitor${selected.length === 1 ? '' : 's'} to CSV`);
+                      clear();
+                    }}
+                  >
+                    Export CSV
+                  </button>
+                )}
                 columns={[
-                  { key: 'monitor_name', header: 'Name', render: (r) => (
+                  { key: 'monitor_name', header: 'Name', sortable: true, render: (r) => (
                     <span className="text-sm">
                       {String(r.monitor_name ?? '')}
                       {Boolean(r.monitor_id) && (
                         <a href={ddUrl.monitor(base, String(r.monitor_id))} target="_blank" rel="noopener noreferrer"
-                          className="text-xs text-gray-400 hover:text-violet-600 ml-1">↗</a>
+                          className="text-xs text-ink-faint hover:text-violet-600 ml-1">↗</a>
                       )}
                     </span>
                   )},
-                  { key: 'monitor_type', header: 'Type', render: (r) => <code className="text-xs bg-gray-100 px-1 rounded">{String(r.monitor_type ?? '')}</code> },
-                  { key: 'overall_state', header: 'State', render: (r) => {
+                  { key: 'monitor_type', header: 'Type', sortable: true, render: (r) => <code className="text-xs bg-surface-sunken px-1 rounded">{String(r.monitor_type ?? '')}</code> },
+                  { key: 'overall_state', header: 'State', sortable: true, render: (r) => {
                     const state = String(r.overall_state ?? '');
                     const cls = state === 'Alert' ? 'bg-red-100 text-red-800' : state === 'Warn' ? 'bg-amber-100 text-amber-800' : state === 'OK' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600';
                     return <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${cls}`}>{state || '—'}</span>;
                   }},
-                  { key: 'priority', header: 'Priority', render: (r) => r.priority
+                  { key: 'priority', header: 'Priority', sortable: true, sortAccessor: (r) => Number(r.priority ?? 99), render: (r) => r.priority
                     ? <span className="text-xs px-1.5 py-0.5 bg-purple-100 text-purple-800 rounded font-medium">P{String(r.priority)}</span>
                     : <span className="text-red-400 text-xs">None</span> },
                   { key: 'notif', header: 'Notif', render: (r) => <span className={r.has_notification ? 'text-green-600' : 'text-red-400 font-bold'}>{r.has_notification ? '✓' : '✗'}</span> },
@@ -225,7 +289,7 @@ export default function MonitorsHealth() {
 
           {/* Investigation quick links */}
           <div className="card">
-            <h2 className="text-sm font-semibold text-gray-700 mb-3">Investigate in Datadog</h2>
+            <h2 className="text-sm font-semibold text-ink-muted mb-3">Investigate in Datadog</h2>
             <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
               {[
                 { label: 'All alerting monitors', href: ddUrl.alertingMonitors(base) },
@@ -236,9 +300,9 @@ export default function MonitorsHealth() {
                 { label: 'Monitor templates', href: `${ddUrl.monitorList(base)}/recommended` },
               ].map(({ label, href }) => (
                 <a key={label} href={href} target="_blank" rel="noopener noreferrer"
-                  className="flex items-center justify-between px-3 py-2.5 rounded-lg border border-gray-200 hover:border-violet-300 hover:bg-violet-50/30 transition-colors group">
-                  <span className="text-sm text-gray-700 group-hover:text-violet-700">{label}</span>
-                  <span className="text-gray-300 group-hover:text-violet-500">↗</span>
+                  className="flex items-center justify-between px-3 py-2.5 rounded-lg border border-border hover:border-violet-300 hover:bg-violet-50/30 transition-colors group">
+                  <span className="text-sm text-ink-muted group-hover:text-violet-700">{label}</span>
+                  <span className="text-ink-faint group-hover:text-violet-500">↗</span>
                 </a>
               ))}
             </div>

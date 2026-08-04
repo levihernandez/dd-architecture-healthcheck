@@ -1,10 +1,15 @@
+import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { scansApi, inventoryApi, analyticsApi } from '../services/api';
 import { useOrgAndScanFilters } from '../hooks/useFilters';
 import { ddBaseUrl, ddUrl } from '../utils/ddUrl';
 import EvidenceTable from '../components/common/EvidenceTable';
 import MetricCard from '../components/common/MetricCard';
-import LoadingState, { EmptyState } from '../components/common/LoadingState';
+import { EmptyState } from '../components/common/LoadingState';
+import PageHeader from '../components/ui/PageHeader';
+import FilterChip, { FilterChipRow } from '../components/ui/FilterChip';
+import { SkeletonCards, SkeletonCard } from '../components/ui/Skeleton';
+import type { FindingSeverity } from '../types';
 
 function DDLink({ href, label = 'Open in Datadog' }: { href: string; label?: string }) {
   return (
@@ -19,6 +24,7 @@ export default function DashboardsHealth() {
   const { orgs, selectedOrgId, selectedScanId } = useOrgAndScanFilters();
   const selectedOrg = orgs.find(o => o.id === selectedOrgId);
   const base = ddBaseUrl(selectedOrg?.site ?? 'datadoghq.com');
+  const [severityFilter, setSeverityFilter] = useState<FindingSeverity | 'all'>('all');
 
   const { data: findings = [], isLoading } = useQuery({
     queryKey: ['findings', selectedScanId, 'dashboards_health'],
@@ -26,7 +32,7 @@ export default function DashboardsHealth() {
     enabled: Boolean(selectedScanId),
   });
 
-  const { data: inventory } = useQuery({
+  const { data: inventory, isLoading: inventoryLoading } = useQuery({
     queryKey: ['inventory-summary', selectedOrgId, selectedScanId],
     queryFn: () => inventoryApi.summary(selectedOrgId, selectedScanId),
     enabled: Boolean(selectedOrgId && selectedScanId),
@@ -49,19 +55,31 @@ export default function DashboardsHealth() {
     ? (totalDashboards / totalServices >= 0.5 ? 'good' : totalDashboards / totalServices >= 0.2 ? 'partial' : 'low')
     : 'unknown';
 
-  if (isLoading) return <LoadingState />;
+  const severityCounts = useMemo(() => {
+    const counts: Record<FindingSeverity, number> = { critical: 0, high: 0, medium: 0, low: 0, info: 0 };
+    findings.forEach((f) => { counts[f.severity] = (counts[f.severity] ?? 0) + 1; });
+    return counts;
+  }, [findings]);
+
+  const filteredFindings = severityFilter === 'all' ? findings : findings.filter((f) => f.severity === severityFilter);
 
   return (
     <div className="max-w-5xl space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Dashboards Health</h1>
-          <p className="text-gray-500 text-sm mt-1">Dashboard coverage, quality, and observability breadth</p>
-        </div>
-        <DDLink href={ddUrl.dashboardList(base)} label="Dashboard List" />
-      </div>
+      <PageHeader
+        title="Dashboards Health"
+        subtitle="Dashboard coverage, quality, and observability breadth"
+        actions={<DDLink href={ddUrl.dashboardList(base)} label="Dashboard List" />}
+      />
 
-      {!selectedScanId ? <EmptyState message="Run a scan to see dashboard health data" /> : (
+      {!selectedScanId ? <EmptyState message="Run a scan to see dashboard health data" /> : (isLoading || inventoryLoading) ? (
+        <div className="space-y-6">
+          <SkeletonCards count={4} />
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <SkeletonCard />
+            <SkeletonCard />
+          </div>
+        </div>
+      ) : (
         <>
           {/* Metrics */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -81,13 +99,13 @@ export default function DashboardsHealth() {
           {/* Coverage analysis */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="card">
-              <h2 className="text-base font-semibold text-gray-900 mb-3">Coverage Analysis</h2>
+              <h2 className="text-base font-semibold text-ink mb-3">Coverage Analysis</h2>
               <div className="space-y-3">
-                <div className="flex items-start gap-3 p-3 bg-gray-50 rounded-lg">
+                <div className="flex items-start gap-3 p-3 bg-surface-subtle rounded-lg">
                   <span className="text-xl">📊</span>
                   <div>
-                    <div className="text-sm font-medium text-gray-800">Dashboard-to-Service Ratio</div>
-                    <div className="text-xs text-gray-500 mt-0.5">
+                    <div className="text-sm font-medium text-ink">Dashboard-to-Service Ratio</div>
+                    <div className="text-xs text-ink-muted mt-0.5">
                       {totalDashboards} dashboards across {totalServices} services ({dashPerService} per service)
                     </div>
                     <div className={`text-xs mt-1 font-medium ${coverageGrade === 'good' ? 'text-green-600' : coverageGrade === 'partial' ? 'text-amber-600' : 'text-red-500'}`}>
@@ -122,7 +140,7 @@ export default function DashboardsHealth() {
             </div>
 
             <div className="card">
-              <h2 className="text-base font-semibold text-gray-900 mb-3">Best Practices</h2>
+              <h2 className="text-base font-semibold text-ink mb-3">Best Practices</h2>
               <ul className="space-y-2">
                 {[
                   { icon: '📋', text: 'Create a service-level dashboard for every production service', done: dashPerService !== '—' && parseFloat(String(dashPerService)) >= 0.5 },
@@ -132,8 +150,8 @@ export default function DashboardsHealth() {
                   { icon: '🔗', text: 'Link related monitors to dashboards for context', done: totalMonitors > 0 },
                 ].map(({ icon, text, done }) => (
                   <li key={text} className="flex items-start gap-2 text-sm">
-                    <span className={done ? 'text-green-500' : 'text-gray-300'}>{done ? '✓' : icon}</span>
-                    <span className={done ? 'text-green-700' : 'text-gray-600'}>{text}</span>
+                    <span className={done ? 'text-green-500' : 'text-ink-faint'}>{done ? '✓' : icon}</span>
+                    <span className={done ? 'text-green-700' : 'text-ink-muted'}>{text}</span>
                   </li>
                 ))}
               </ul>
@@ -143,19 +161,37 @@ export default function DashboardsHealth() {
           {/* Findings */}
           {findings.length > 0 ? (
             <div className="card">
-              <h2 className="text-lg font-semibold text-gray-900 mb-3">Dashboard Findings ({findings.length})</h2>
-              <EvidenceTable findings={findings} />
+              <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+                <h2 className="text-lg font-semibold text-ink">
+                  Dashboard Findings ({filteredFindings.length}{filteredFindings.length !== findings.length ? ` of ${findings.length}` : ''})
+                </h2>
+                <FilterChipRow>
+                  <FilterChip label="All" active={severityFilter === 'all'} count={findings.length} onClick={() => setSeverityFilter('all')} />
+                  {(['critical', 'high', 'medium', 'low', 'info'] as FindingSeverity[])
+                    .filter((s) => severityCounts[s] > 0)
+                    .map((s) => (
+                      <FilterChip
+                        key={s}
+                        label={s[0].toUpperCase() + s.slice(1)}
+                        active={severityFilter === s}
+                        count={severityCounts[s]}
+                        onClick={() => setSeverityFilter(s)}
+                      />
+                    ))}
+                </FilterChipRow>
+              </div>
+              <EvidenceTable findings={filteredFindings} />
             </div>
           ) : (
             <div className="card bg-green-50 border-green-200 text-center py-6">
               <div className="text-green-600 text-2xl mb-2">✓</div>
-              <p className="text-gray-700 font-medium">No dashboard-specific findings detected</p>
+              <p className="text-ink font-medium">No dashboard-specific findings detected</p>
             </div>
           )}
 
           {/* Investigation links */}
           <div className="card">
-            <h2 className="text-sm font-semibold text-gray-700 mb-3">Investigate in Datadog</h2>
+            <h2 className="text-sm font-semibold text-ink-muted mb-3">Investigate in Datadog</h2>
             <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
               {[
                 { label: 'All dashboards', href: ddUrl.dashboardList(base) },
@@ -166,9 +202,9 @@ export default function DashboardsHealth() {
                 { label: 'Create dashboard', href: `${base}/dashboard/new` },
               ].map(({ label, href }) => (
                 <a key={label} href={href} target="_blank" rel="noopener noreferrer"
-                  className="flex items-center justify-between px-3 py-2.5 rounded-lg border border-gray-200 hover:border-violet-300 hover:bg-violet-50/30 transition-colors group">
-                  <span className="text-sm text-gray-700 group-hover:text-violet-700">{label}</span>
-                  <span className="text-gray-300 group-hover:text-violet-500">↗</span>
+                  className="flex items-center justify-between px-3 py-2.5 rounded-lg border border-border hover:border-violet-300 hover:bg-violet-50/30 transition-colors group">
+                  <span className="text-sm text-ink-muted group-hover:text-violet-700">{label}</span>
+                  <span className="text-ink-faint group-hover:text-violet-500">↗</span>
                 </a>
               ))}
             </div>

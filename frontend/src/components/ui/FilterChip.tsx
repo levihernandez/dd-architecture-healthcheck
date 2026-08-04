@@ -8,7 +8,7 @@ interface FilterChipProps {
   onRemove?: () => void;
 }
 
-export default function FilterChip({ label, active, count, onClick, onRemove }: FilterChipProps) {
+function FilterChip({ label, active, count, onClick, onRemove }: FilterChipProps) {
   return (
     <button
       type="button"
@@ -43,3 +43,6 @@ export default function FilterChip({ label, active, count, onClick, onRemove }: 
 export function FilterChipRow({ children }: { children: React.ReactNode }) {
   return <div className="flex flex-wrap items-center gap-2">{children}</div>;
 }
+
+export default FilterChip;
+export { FilterChip };

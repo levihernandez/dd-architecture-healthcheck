@@ -1,11 +1,16 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import { scansApi } from '../services/api';
-import { useOrgs, useScans } from '../hooks/useOrgs';
+import { useScans } from '../hooks/useOrgs';
 import { useOrgAndScanFilters } from '../hooks/useFilters';
 import { ScanStatusBadge, CollectorStatusBadge } from '../components/common/StatusBadge';
-import LoadingState, { EmptyState } from '../components/common/LoadingState';
+import { EmptyState } from '../components/common/LoadingState';
+import PageHeader from '../components/ui/PageHeader';
+import DataTable, { type Column } from '../components/common/DataTable';
+import { SkeletonTable } from '../components/ui/Skeleton';
 import { formatDistanceToNow, format } from 'date-fns';
+import type { ScanRun } from '../types';
 
 export default function ScanRuns() {
   const qc = useQueryClient();
@@ -15,9 +20,11 @@ export default function ScanRuns() {
   const startScan = useMutation({
     mutationFn: (orgId: string) => scansApi.start(orgId),
     onSuccess: () => {
+      toast.success('Scan started');
       qc.invalidateQueries({ queryKey: ['scans'] });
       qc.invalidateQueries({ queryKey: ['orgs'] });
     },
+    onError: (err: Error) => toast.error(err.message ?? 'Failed to start scan'),
   });
 
   const [expandedScan, setExpandedScan] = useState<string | null>(null);
@@ -32,34 +39,100 @@ export default function ScanRuns() {
     },
   });
 
-  if (isLoading) return <LoadingState />;
+  const columns: Column<ScanRun>[] = [
+    {
+      key: 'startedAt',
+      header: 'Started',
+      sortable: true,
+      sortAccessor: (s) => new Date(s.startedAt).getTime(),
+      render: (s) => (
+        <div>
+          <div className="font-medium text-ink">{format(new Date(s.startedAt), 'MMM d, yyyy HH:mm')}</div>
+          <div className="text-xs text-ink-faint">{formatDistanceToNow(new Date(s.startedAt), { addSuffix: true })}</div>
+        </div>
+      ),
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      sortable: true,
+      render: (s) => (
+        <div className="space-y-1">
+          <ScanStatusBadge status={s.status} />
+          {s.error && <div className="text-xs text-red-600 max-w-xs truncate">Error: {s.error}</div>}
+        </div>
+      ),
+    },
+    {
+      key: 'findingCount',
+      header: 'Findings',
+      sortable: true,
+      render: (s) => s.findingCount ?? '—',
+    },
+    {
+      key: 'duration',
+      header: 'Duration',
+      render: (s) =>
+        s.completedAt ? (
+          <span className="font-mono text-xs text-ink-muted">
+            {Math.round((new Date(s.completedAt).getTime() - new Date(s.startedAt).getTime()) / 1000)}s
+          </span>
+        ) : (
+          '—'
+        ),
+    },
+    {
+      key: 'id',
+      header: 'Scan ID',
+      render: (s) => <code className="text-xs text-ink-faint">{s.id.slice(0, 8)}...</code>,
+    },
+    {
+      key: 'actions',
+      header: '',
+      render: (s) => (
+        <button
+          className="btn-secondary text-xs"
+          onClick={(e) => {
+            e.stopPropagation();
+            setExpandedScan(expandedScan === s.id ? null : s.id);
+          }}
+        >
+          {expandedScan === s.id ? 'Collapse' : 'Details'}
+        </button>
+      ),
+    },
+  ];
+
+  const expandedScanRun = allScans.find((s) => s.id === expandedScan);
 
   return (
     <div className="max-w-5xl space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Scan Runs</h1>
-          <p className="text-gray-500 text-sm mt-1">View and manage collection scan runs</p>
-        </div>
-        <div className="flex gap-3">
-          <select
-            className="input w-auto"
-            value={selectedOrgId}
-            onChange={(e) => setSelectedOrgId(e.target.value)}
-          >
-            {orgs.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
-          </select>
-          <button
-            className="btn-primary"
-            disabled={startScan.isPending}
-            onClick={() => startScan.mutate(selectedOrgId)}
-          >
-            ▶ Start Scan
-          </button>
-        </div>
-      </div>
+      <PageHeader
+        title="Scan Runs"
+        subtitle="View and manage collection scan runs"
+        actions={
+          <>
+            <select
+              className="input w-auto"
+              value={selectedOrgId}
+              onChange={(e) => setSelectedOrgId(e.target.value)}
+            >
+              {orgs.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+            </select>
+            <button
+              className="btn-primary"
+              disabled={startScan.isPending || !selectedOrgId}
+              onClick={() => startScan.mutate(selectedOrgId)}
+            >
+              {startScan.isPending ? '⟳ Starting...' : '▶ Start Scan'}
+            </button>
+          </>
+        }
+      />
 
-      {allScans.length === 0 ? (
+      {isLoading ? (
+        <SkeletonTable rows={6} cols={5} />
+      ) : allScans.length === 0 ? (
         <EmptyState
           message="No scans yet. Start a scan to collect data."
           action={
@@ -69,67 +142,39 @@ export default function ScanRuns() {
           }
         />
       ) : (
-        <div className="space-y-3">
-          {allScans.map((scan) => (
-            <div key={scan.id} className="card">
-              <div className="flex items-start justify-between">
-                <div className="flex-1">
-                  <div className="flex items-center gap-3">
-                    <ScanStatusBadge status={scan.status} />
-                    <span className="text-sm font-medium text-gray-900">
-                      {format(new Date(scan.startedAt), 'MMM d, yyyy HH:mm')}
-                    </span>
-                    <span className="text-xs text-gray-400">
-                      ({formatDistanceToNow(new Date(scan.startedAt), { addSuffix: true })})
-                    </span>
-                  </div>
-                  <div className="mt-1 flex gap-4 text-xs text-gray-500">
-                    <span>ID: <code>{scan.id.slice(0, 8)}...</code></span>
-                    {scan.findingCount !== undefined && (
-                      <span>{scan.findingCount} findings</span>
-                    )}
-                    {scan.completedAt && (
-                      <span>
-                        Duration: {Math.round((new Date(scan.completedAt).getTime() - new Date(scan.startedAt).getTime()) / 1000)}s
-                      </span>
-                    )}
-                    {scan.error && (
-                      <span className="text-red-600">Error: {scan.error}</span>
-                    )}
-                  </div>
-                </div>
-                <button
-                  className="btn-secondary text-xs"
-                  onClick={() => setExpandedScan(expandedScan === scan.id ? null : scan.id)}
-                >
-                  {expandedScan === scan.id ? 'Collapse' : 'Details'}
-                </button>
-              </div>
+        <div className="space-y-4">
+          <DataTable
+            tableId="scan-runs"
+            columns={columns}
+            data={allScans}
+            rowKey={(scan) => scan.id}
+            onRowClick={(scan) => setExpandedScan(expandedScan === scan.id ? null : scan.id)}
+          />
 
-              {expandedScan === scan.id && scanDetail && (
-                <div className="mt-4 pt-4 border-t border-gray-200">
-                  <h4 className="text-sm font-semibold text-gray-700 mb-2">Collector Results</h4>
-                  <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-                    {(scanDetail.collectorResults ?? []).map((r) => (
-                      <div key={r.collector} className="flex items-center gap-2 bg-gray-50 rounded p-2">
-                        <CollectorStatusBadge status={r.status} />
-                        <div>
-                          <div className="text-xs font-medium text-gray-700 capitalize">
-                            {r.collector.replace(/_/g, ' ')}
-                          </div>
-                          <div className="text-xs text-gray-500">
-                            {r.itemCount} items
-                            {r.durationMs && ` · ${r.durationMs}ms`}
-                          </div>
-                          {r.error && <div className="text-xs text-red-600 truncate">{r.error}</div>}
-                        </div>
+          {expandedScanRun && scanDetail && (
+            <div className="card">
+              <h4 className="text-sm font-semibold text-ink mb-3">
+                Collector Results — {format(new Date(expandedScanRun.startedAt), 'MMM d, yyyy HH:mm')}
+              </h4>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                {(scanDetail.collectorResults ?? []).map((r) => (
+                  <div key={r.collector} className="flex items-center gap-2 bg-surface-subtle rounded p-2">
+                    <CollectorStatusBadge status={r.status} />
+                    <div>
+                      <div className="text-xs font-medium text-ink-muted capitalize">
+                        {r.collector.replace(/_/g, ' ')}
                       </div>
-                    ))}
+                      <div className="text-xs text-ink-faint">
+                        {r.itemCount} items
+                        {r.durationMs && ` · ${r.durationMs}ms`}
+                      </div>
+                      {r.error && <div className="text-xs text-red-600 truncate">{r.error}</div>}
+                    </div>
                   </div>
-                </div>
-              )}
+                ))}
+              </div>
             </div>
-          ))}
+          )}
         </div>
       )}
     </div>

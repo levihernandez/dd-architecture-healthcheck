@@ -1,7 +1,9 @@
 import { useQuery } from '@tanstack/react-query';
 import { inventoryApi } from '../services/api';
 import { useOrgAndScanFilters } from '../hooks/useFilters';
-import LoadingState, { EmptyState } from '../components/common/LoadingState';
+import { EmptyState } from '../components/common/LoadingState';
+import PageHeader from '../components/ui/PageHeader';
+import { SkeletonCards } from '../components/ui/Skeleton';
 
 interface ProductSignal { product: string; signal: string; value: string; detected: number; }
 
@@ -36,8 +38,6 @@ export default function ProductUsage() {
     return acc;
   }, {});
 
-  if (isLoading) return <LoadingState />;
-
   const inferredProducts = inventory ? [
     { product: 'infrastructure', count: inventory.hosts, label: 'Hosts' },
     { product: 'apm', count: inventory.services, label: 'APM Services' },
@@ -49,26 +49,22 @@ export default function ProductUsage() {
 
   return (
     <div className="max-w-4xl space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Product Usage</h1>
-          <p className="text-gray-500 text-sm mt-1">Detected Datadog products and feature signals</p>
-        </div>
-      </div>
+      <PageHeader title="Product Usage" subtitle="Detected Datadog products and feature signals" />
 
-      {!selectedScanId ? <EmptyState message="Run a scan to detect product usage" /> : (
+      {!selectedScanId ? <EmptyState message="Run a scan to detect product usage" /> :
+       isLoading ? <SkeletonCards count={6} /> : (
         <>
           {/* Inferred from inventory */}
           <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
             {inferredProducts.map(({ product, count, label }) => {
               const config = PRODUCT_CONFIG[product] ?? { label: product, icon: '⬡', description: '' };
               return (
-                <div key={product} className={`card ${count > 0 ? 'border-green-200' : 'border-gray-100 opacity-60'}`}>
+                <div key={product} className={`card ${count > 0 ? 'border-green-200' : 'border-border opacity-60'}`}>
                   <div className="flex items-center gap-3 mb-2">
                     <span className="text-2xl">{config.icon}</span>
                     <div>
-                      <div className="text-sm font-semibold text-gray-900">{config.label}</div>
-                      <div className={`text-xs font-medium ${count > 0 ? 'text-green-600' : 'text-gray-400'}`}>
+                      <div className="text-sm font-semibold text-ink">{config.label}</div>
+                      <div className={`text-xs font-medium ${count > 0 ? 'text-green-600' : 'text-ink-faint'}`}>
                         {count > 0 ? `✓ ${count} ${label}` : 'Not detected'}
                       </div>
                     </div>
@@ -81,7 +77,7 @@ export default function ProductUsage() {
           {/* Governance signals */}
           {byProduct.governance && (
             <div className="card">
-              <h2 className="text-lg font-semibold text-gray-900 mb-3">Governance Signals</h2>
+              <h2 className="text-lg font-semibold text-ink mb-3">Governance Signals</h2>
               <div className="space-y-2">
                 {byProduct.governance.map((sig) => {
                   let displayValue = sig.value;
@@ -89,24 +85,24 @@ export default function ProductUsage() {
                   try { parsedValue = JSON.parse(sig.value); } catch { /* ignore */ }
 
                   return (
-                    <div key={sig.signal} className="flex items-start gap-4 bg-gray-50 rounded p-3">
+                    <div key={sig.signal} className="flex items-start gap-4 bg-surface-subtle rounded p-3">
                       <div className="flex-1">
-                        <div className="text-sm font-medium text-gray-700 capitalize">
+                        <div className="text-sm font-medium text-ink-muted capitalize">
                           {sig.signal.replace(/_/g, ' ')}
                         </div>
                         {parsedValue ? (
                           <div className="mt-1 flex flex-wrap gap-2">
                             {Object.entries(parsedValue).map(([k, v]) => (
-                              <span key={k} className={`text-xs px-2 py-0.5 rounded ${v ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+                              <span key={k} className={`text-xs px-2 py-0.5 rounded ${v ? 'bg-green-100 text-green-700' : 'bg-surface-sunken text-ink-muted'}`}>
                                 {k}: {String(v)}
                               </span>
                             ))}
                           </div>
                         ) : (
-                          <div className="text-sm text-gray-500 mt-0.5">{displayValue}</div>
+                          <div className="text-sm text-ink-muted mt-0.5">{displayValue}</div>
                         )}
                       </div>
-                      <span className={`badge ${sig.detected ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+                      <span className={`badge ${sig.detected ? 'bg-green-100 text-green-700' : 'bg-surface-sunken text-ink-muted'}`}>
                         {sig.detected ? 'Detected' : 'Not detected'}
                       </span>
                     </div>

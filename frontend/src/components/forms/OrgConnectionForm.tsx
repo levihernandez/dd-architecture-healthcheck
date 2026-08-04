@@ -65,7 +65,7 @@ export default function OrgConnectionForm({ org, onSuccess, onCancel }: OrgConne
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
+    <form onSubmit={handleSubmit} className="space-y-5">
       {isError && (
         <div className="bg-red-50 border border-red-200 text-red-700 rounded-md px-4 py-3 text-sm">
           {(error as Error)?.message ?? 'Failed to connect. Check credentials.'}
@@ -73,86 +73,91 @@ export default function OrgConnectionForm({ org, onSuccess, onCancel }: OrgConne
       )}
 
       {!isEdit && (
-        <div>
-          <label className="label">Organization Display Name</label>
-          <input
-            type="text" className="input" placeholder="Production Org"
-            value={form.name} required
-            onChange={(e) => setForm({ ...form, name: e.target.value })}
-          />
-        </div>
-      )}
-
-      {!isEdit && (
-        <div>
-          <label className="label">Datadog Site</label>
-          <select
-            className="input"
-            value={form.site}
-            onChange={(e) => setForm({ ...form, site: e.target.value })}
-          >
-            {DATADOG_SITES.map((s) => (
-              <option key={s.value} value={s.value}>{s.label}</option>
-            ))}
-            <option value="custom">Custom Site</option>
-          </select>
-          {form.site === 'custom' && (
+        <div className="space-y-4">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-ink-faint">Organization</h3>
+          <div>
+            <label className="label">Organization Display Name</label>
             <input
-              type="text" className="input mt-2" placeholder="your.custom.site.com"
-              value={form.customSite} required
-              onChange={(e) => setForm({ ...form, customSite: e.target.value })}
+              type="text" className="input" placeholder="Production Org"
+              value={form.name} required
+              onChange={(e) => setForm({ ...form, name: e.target.value })}
             />
-          )}
+          </div>
+
+          <div>
+            <label className="label">Datadog Site</label>
+            <select
+              className="input"
+              value={form.site}
+              onChange={(e) => setForm({ ...form, site: e.target.value })}
+            >
+              {DATADOG_SITES.map((s) => (
+                <option key={s.value} value={s.value}>{s.label}</option>
+              ))}
+              <option value="custom">Custom Site</option>
+            </select>
+            {form.site === 'custom' && (
+              <input
+                type="text" className="input mt-2" placeholder="your.custom.site.com"
+                value={form.customSite} required
+                onChange={(e) => setForm({ ...form, customSite: e.target.value })}
+              />
+            )}
+          </div>
         </div>
       )}
 
-      {isEdit && (
-        <p className="text-sm text-gray-500">
-          Leave a field blank to keep its current stored value. Only fill in the keys you want to replace.
-        </p>
-      )}
-
-      <div>
-        <div className="flex items-center justify-between mb-1">
-          <label className="label mb-0">API Key</label>
-          <button type="button" onClick={() => setShowKeys(!showKeys)} className="text-xs text-gray-500 hover:text-gray-700">
+      <div className="space-y-4 pt-1 border-t border-border first:border-t-0 first:pt-0">
+        <div className="flex items-center justify-between">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-ink-faint">Credentials</h3>
+          <button type="button" onClick={() => setShowKeys(!showKeys)} className="text-xs text-ink-faint hover:text-ink-muted">
             {showKeys ? 'Hide' : 'Show'} keys
           </button>
         </div>
-        <input
-          type={showKeys ? 'text' : 'password'}
-          className="input font-mono" placeholder={isEdit ? 'Leave blank to keep current key' : '••••••••••••••••••••••••••••••••'}
-          value={form.apiKey} required={!isEdit} minLength={form.apiKey ? 8 : undefined}
-          onChange={(e) => setForm({ ...form, apiKey: e.target.value })}
-          autoComplete="off"
-        />
-        <p className="text-xs text-gray-500 mt-1">Keys are encrypted before storage. Never logged or exported.</p>
-      </div>
 
-      <div>
-        <label className="label">Application Key</label>
-        <input
-          type={showKeys ? 'text' : 'password'}
-          className="input font-mono" placeholder={isEdit ? 'Leave blank to keep current key' : '••••••••••••••••••••••••••••••••••••••••'}
-          value={form.appKey} required={!isEdit} minLength={form.appKey ? 8 : undefined}
-          onChange={(e) => setForm({ ...form, appKey: e.target.value })}
-          autoComplete="off"
-        />
-      </div>
+        {isEdit && (
+          <p className="text-sm text-ink-muted">
+            Leave a field blank to keep its current stored value. Only fill in the keys you want to replace.
+          </p>
+        )}
 
-      {!isEdit && (
-        <div className="flex items-center gap-2">
+        <div>
+          <label className="label">API Key</label>
           <input
-            type="checkbox" id="sessionOnly"
-            checked={form.sessionOnly}
-            onChange={(e) => setForm({ ...form, sessionOnly: e.target.checked })}
-            className="rounded border-gray-300"
+            type={showKeys ? 'text' : 'password'}
+            className="input font-mono" placeholder={isEdit ? 'Leave blank to keep current key' : '••••••••••••••••••••••••••••••••'}
+            value={form.apiKey} required={!isEdit} minLength={form.apiKey ? 8 : undefined}
+            onChange={(e) => setForm({ ...form, apiKey: e.target.value })}
+            autoComplete="off"
           />
-          <label htmlFor="sessionOnly" className="text-sm text-gray-700">
-            Session only (do not persist credentials)
-          </label>
+          <p className="text-xs text-ink-faint mt-1">Keys are encrypted before storage. Never logged or exported.</p>
         </div>
-      )}
+
+        <div>
+          <label className="label">Application Key</label>
+          <input
+            type={showKeys ? 'text' : 'password'}
+            className="input font-mono" placeholder={isEdit ? 'Leave blank to keep current key' : '••••••••••••••••••••••••••••••••••••••••'}
+            value={form.appKey} required={!isEdit} minLength={form.appKey ? 8 : undefined}
+            onChange={(e) => setForm({ ...form, appKey: e.target.value })}
+            autoComplete="off"
+          />
+        </div>
+
+        {!isEdit && (
+          <div className="flex items-center gap-2">
+            <input
+              type="checkbox" id="sessionOnly"
+              checked={form.sessionOnly}
+              onChange={(e) => setForm({ ...form, sessionOnly: e.target.checked })}
+              className="rounded border-border-strong"
+            />
+            <label htmlFor="sessionOnly" className="text-sm text-ink-muted">
+              Session only (do not persist credentials)
+            </label>
+          </div>
+        )}
+      </div>
 
       <div className="bg-blue-50 border border-blue-200 rounded-md px-4 py-3 text-sm text-blue-700">
         <strong>Read-only access only.</strong> This tool makes only GET requests to the Datadog API.

@@ -1,10 +1,15 @@
+import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { scansApi, inventoryApi, analyticsApi } from '../services/api';
 import { useOrgAndScanFilters } from '../hooks/useFilters';
 import { ddBaseUrl, ddUrl } from '../utils/ddUrl';
 import EvidenceTable from '../components/common/EvidenceTable';
 import MetricCard from '../components/common/MetricCard';
-import LoadingState, { EmptyState } from '../components/common/LoadingState';
+import { EmptyState } from '../components/common/LoadingState';
+import PageHeader from '../components/ui/PageHeader';
+import FilterChip, { FilterChipRow } from '../components/ui/FilterChip';
+import { SkeletonCards, SkeletonCard } from '../components/ui/Skeleton';
+import type { FindingSeverity } from '../types';
 
 function DDLink({ href, label = 'Open in Datadog' }: { href: string; label?: string }) {
   return (
@@ -19,6 +24,7 @@ export default function GovernanceSSOSummary() {
   const { orgs, selectedOrgId, selectedScanId } = useOrgAndScanFilters();
   const selectedOrg = orgs.find(o => o.id === selectedOrgId);
   const base = ddBaseUrl(selectedOrg?.site ?? 'datadoghq.com');
+  const [severityFilter, setSeverityFilter] = useState<FindingSeverity | 'all'>('all');
 
   const { data: findings = [], isLoading } = useQuery({
     queryKey: ['findings', selectedScanId, 'governance'],
@@ -56,22 +62,28 @@ export default function GovernanceSSOSummary() {
   const criticalCount = govFindings.filter(f => f.severity === 'critical').length;
   const highCount = govFindings.filter(f => f.severity === 'high').length;
 
-  if (isLoading) return <LoadingState />;
+  const severityCounts = useMemo(() => {
+    const counts: Record<FindingSeverity, number> = { critical: 0, high: 0, medium: 0, low: 0, info: 0 };
+    findings.forEach((f) => { counts[f.severity] = (counts[f.severity] ?? 0) + 1; });
+    return counts;
+  }, [findings]);
+
+  const filteredFindings = severityFilter === 'all' ? findings : findings.filter((f) => f.severity === severityFilter);
 
   return (
     <div className="max-w-5xl space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Governance & SSO</h1>
-          <p className="text-gray-500 text-sm mt-1">
-            SSO status, RBAC configuration, user management, and access governance
-            <span className="ml-1 text-xs text-gray-400">(No sensitive credentials collected)</span>
-          </p>
-        </div>
-        <DDLink href={ddUrl.userManagement(base)} label="User Management" />
-      </div>
+      <PageHeader
+        title="Governance & SSO"
+        subtitle="SSO status, RBAC configuration, user management, and access governance — no sensitive credentials collected"
+        actions={<DDLink href={ddUrl.userManagement(base)} label="User Management" />}
+      />
 
-      {!selectedScanId ? <EmptyState message="Run a scan to see governance data" /> : (
+      {!selectedScanId ? <EmptyState message="Run a scan to see governance data" /> : isLoading ? (
+        <div className="space-y-6">
+          <SkeletonCards count={4} />
+          <SkeletonCard />
+        </div>
+      ) : (
         <>
           {/* Top metrics */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -90,7 +102,7 @@ export default function GovernanceSSOSummary() {
           {ssoSignal && (
             <div className="card">
               <div className="flex items-center justify-between mb-4">
-                <h2 className="text-base font-semibold text-gray-900">SSO Configuration</h2>
+                <h2 className="text-base font-semibold text-ink">SSO Configuration</h2>
                 <DDLink href={ddUrl.samlConfig(base)} label="SAML Settings" />
               </div>
               <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
@@ -103,10 +115,10 @@ export default function GovernanceSSOSummary() {
                 ].map(({ key, label, good }) => {
                   const val = Boolean(ssoStatus[key]);
                   return (
-                    <div key={key} className={`rounded-lg p-3 border ${val ? 'bg-green-50 border-green-200' : 'bg-gray-50 border-gray-200'}`}>
+                    <div key={key} className={`rounded-lg p-3 border ${val ? 'bg-green-50 border-green-200' : 'bg-surface-subtle border-border'}`}>
                       <div className="flex items-center justify-between">
-                        <span className="text-xs text-gray-600">{label}</span>
-                        <span className={`text-sm font-bold ${val ? 'text-green-700' : 'text-gray-400'}`}>{val ? '✓ On' : '✗ Off'}</span>
+                        <span className="text-xs text-ink-muted">{label}</span>
+                        <span className={`text-sm font-bold ${val ? 'text-green-700' : 'text-ink-faint'}`}>{val ? '✓ On' : '✗ Off'}</span>
                       </div>
                     </div>
                   );
@@ -127,7 +139,7 @@ export default function GovernanceSSOSummary() {
                   <div className="mt-2"><DDLink href={ddUrl.samlConfig(base)} label="Enable Strict Mode" /></div>
                 </div>
               )}
-              <p className="text-xs text-gray-400 mt-3 border-t border-gray-100 pt-2">
+              <p className="text-xs text-ink-faint mt-3 border-t border-border pt-2">
                 Only high-level enablement signals are collected — no IdP metadata, certificates, or sensitive configuration.
               </p>
             </div>
@@ -137,7 +149,7 @@ export default function GovernanceSSOSummary() {
           {govFindings.length > 0 && (
             <div className="card">
               <div className="flex items-center justify-between mb-3">
-                <h2 className="text-base font-semibold text-gray-900">Governance Findings</h2>
+                <h2 className="text-base font-semibold text-ink">Governance Findings</h2>
                 <div className="flex items-center gap-2">
                   {criticalCount > 0 && <span className="text-xs px-2 py-0.5 bg-red-100 text-red-700 rounded font-medium">{criticalCount} critical</span>}
                   {highCount > 0 && <span className="text-xs px-2 py-0.5 bg-orange-100 text-orange-700 rounded font-medium">{highCount} high</span>}
@@ -151,10 +163,10 @@ export default function GovernanceSSOSummary() {
                         {f.severity}
                       </span>
                       <div className="flex-1">
-                        <div className="text-sm font-medium text-gray-900">{f.title}</div>
-                        <div className="text-xs text-gray-600 mt-0.5">{f.description}</div>
+                        <div className="text-sm font-medium text-ink">{f.title}</div>
+                        <div className="text-xs text-ink-muted mt-0.5">{f.description}</div>
                         {f.affectedCount > 0 && (
-                          <div className="text-xs text-gray-500 mt-1">{f.affectedCount} of {f.totalCount} affected</div>
+                          <div className="text-xs text-ink-muted mt-1">{f.affectedCount} of {f.totalCount} affected</div>
                         )}
                         {f.recommendation && (
                           <div className="text-xs text-blue-700 mt-1.5 font-medium">→ {f.recommendation}</div>
@@ -170,14 +182,32 @@ export default function GovernanceSSOSummary() {
           {/* Scan findings */}
           {findings.length > 0 && (
             <div className="card">
-              <h2 className="text-lg font-semibold mb-3">Governance Findings ({findings.length})</h2>
-              <EvidenceTable findings={findings} />
+              <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+                <h2 className="text-lg font-semibold text-ink">
+                  Governance Findings ({filteredFindings.length}{filteredFindings.length !== findings.length ? ` of ${findings.length}` : ''})
+                </h2>
+                <FilterChipRow>
+                  <FilterChip label="All" active={severityFilter === 'all'} count={findings.length} onClick={() => setSeverityFilter('all')} />
+                  {(['critical', 'high', 'medium', 'low', 'info'] as FindingSeverity[])
+                    .filter((s) => severityCounts[s] > 0)
+                    .map((s) => (
+                      <FilterChip
+                        key={s}
+                        label={s[0].toUpperCase() + s.slice(1)}
+                        active={severityFilter === s}
+                        count={severityCounts[s]}
+                        onClick={() => setSeverityFilter(s)}
+                      />
+                    ))}
+                </FilterChipRow>
+              </div>
+              <EvidenceTable findings={filteredFindings} />
             </div>
           )}
 
           {/* Access management links */}
           <div className="card">
-            <h2 className="text-sm font-semibold text-gray-700 mb-3">Manage Access in Datadog</h2>
+            <h2 className="text-sm font-semibold text-ink-muted mb-3">Manage Access in Datadog</h2>
             <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
               {[
                 { label: 'User Management', href: ddUrl.userManagement(base) },
@@ -188,9 +218,9 @@ export default function GovernanceSSOSummary() {
                 { label: 'Organization Settings', href: `${base}/organization-settings` },
               ].map(({ label, href }) => (
                 <a key={label} href={href} target="_blank" rel="noopener noreferrer"
-                  className="flex items-center justify-between px-3 py-2.5 rounded-lg border border-gray-200 hover:border-violet-300 hover:bg-violet-50/30 transition-colors group">
-                  <span className="text-sm text-gray-700 group-hover:text-violet-700">{label}</span>
-                  <span className="text-gray-300 group-hover:text-violet-500">↗</span>
+                  className="flex items-center justify-between px-3 py-2.5 rounded-lg border border-border hover:border-violet-300 hover:bg-violet-50/30 transition-colors group">
+                  <span className="text-sm text-ink-muted group-hover:text-violet-700">{label}</span>
+                  <span className="text-ink-faint group-hover:text-violet-500">↗</span>
                 </a>
               ))}
             </div>

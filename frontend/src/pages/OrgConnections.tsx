@@ -1,10 +1,12 @@
 import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import { orgsApi } from '../services/api';
 import { useOrgs } from '../hooks/useOrgs';
 import OrgConnectionForm from '../components/forms/OrgConnectionForm';
 import { ScanStatusBadge } from '../components/common/StatusBadge';
-import LoadingState from '../components/common/LoadingState';
+import PageHeader from '../components/ui/PageHeader';
+import { SkeletonCard } from '../components/ui/Skeleton';
 import { formatDistanceToNow } from 'date-fns';
 import type { Org } from '../types';
 
@@ -14,11 +16,18 @@ export default function OrgConnections() {
   const [editingOrg, setEditingOrg] = useState<Org | null>(null);
   const [validatingId, setValidatingId] = useState<string | null>(null);
   const [validateResult, setValidateResult] = useState<Record<string, { valid: boolean; message: string }>>({});
+  const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
   const qc = useQueryClient();
 
   const deleteOrg = useMutation({
     mutationFn: orgsApi.delete,
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['orgs'] }),
+    onSuccess: (_data, orgId) => {
+      const org = orgs.find((o) => o.id === orgId);
+      toast.success(`Removed "${org?.name ?? 'organization'}"`);
+      qc.invalidateQueries({ queryKey: ['orgs'] });
+    },
+    onError: (err: Error) => toast.error(err.message ?? 'Failed to remove organization'),
+    onSettled: () => setConfirmingDeleteId(null),
   });
 
   const validate = async (org: Org) => {
@@ -32,36 +41,52 @@ export default function OrgConnections() {
           message: result.valid ? `Connected — org: ${result.orgName}` : result.error ?? 'Invalid',
         },
       }));
+      if (!result.valid) toast.error(result.error ?? `Validation failed for "${org.name}"`);
+    } catch (err) {
+      toast.error((err as Error)?.message ?? `Failed to validate "${org.name}"`);
     } finally {
       setValidatingId(null);
     }
   };
 
-  if (isLoading) return <LoadingState />;
+  if (isLoading) {
+    return (
+      <div className="max-w-4xl space-y-6">
+        <PageHeader title="Org Connections" subtitle="Manage Datadog organization credentials" />
+        <div className="space-y-3">
+          <SkeletonCard />
+          <SkeletonCard />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-4xl space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Org Connections</h1>
-          <p className="text-gray-500 text-sm mt-1">Manage Datadog organization credentials</p>
-        </div>
-        <button
-          className="btn-primary"
-          onClick={() => {
-            setShowForm(!showForm);
-            setEditingOrg(null);
-          }}
-        >
-          {showForm ? '✕ Cancel' : '+ Add Organization'}
-        </button>
-      </div>
+      <PageHeader
+        title="Org Connections"
+        subtitle="Manage Datadog organization credentials"
+        actions={
+          <button
+            className="btn-primary"
+            onClick={() => {
+              setShowForm(!showForm);
+              setEditingOrg(null);
+            }}
+          >
+            {showForm ? '✕ Cancel' : '+ Add Organization'}
+          </button>
+        }
+      />
 
       {showForm && (
         <div className="card">
-          <h2 className="text-lg font-semibold text-gray-900 mb-4">Connect New Organization</h2>
+          <h2 className="text-lg font-semibold text-ink mb-4">Connect New Organization</h2>
           <OrgConnectionForm
-            onSuccess={() => setShowForm(false)}
+            onSuccess={() => {
+              setShowForm(false);
+              toast.success('Organization connected');
+            }}
             onCancel={() => setShowForm(false)}
           />
         </div>
@@ -69,10 +94,13 @@ export default function OrgConnections() {
 
       {editingOrg && (
         <div className="card">
-          <h2 className="text-lg font-semibold text-gray-900 mb-4">Edit Keys — {editingOrg.name}</h2>
+          <h2 className="text-lg font-semibold text-ink mb-4">Edit Keys — {editingOrg.name}</h2>
           <OrgConnectionForm
             org={editingOrg}
-            onSuccess={() => setEditingOrg(null)}
+            onSuccess={() => {
+              setEditingOrg(null);
+              toast.success('Keys updated');
+            }}
             onCancel={() => setEditingOrg(null)}
           />
         </div>
@@ -81,8 +109,8 @@ export default function OrgConnections() {
       {orgs.length === 0 && !showForm ? (
         <div className="card text-center py-12">
           <div className="text-4xl mb-4">🔗</div>
-          <h3 className="text-lg font-semibold text-gray-900 mb-2">No organizations connected</h3>
-          <p className="text-gray-500 mb-4">Add your first Datadog organization to start a health check</p>
+          <h3 className="text-lg font-semibold text-ink mb-2">No organizations connected</h3>
+          <p className="text-ink-muted mb-4">Add your first Datadog organization to start a health check</p>
           <button className="btn-primary" onClick={() => setShowForm(true)}>
             Connect Organization
           </button>
@@ -91,25 +119,25 @@ export default function OrgConnections() {
         <div className="space-y-3">
           {orgs.map((org) => (
             <div key={org.id} className="card">
-              <div className="flex items-start justify-between">
-                <div className="flex-1">
-                  <div className="flex items-center gap-3">
-                    <h3 className="text-base font-semibold text-gray-900">{org.name}</h3>
+              <div className="flex items-start justify-between gap-4 flex-wrap">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <h3 className="text-base font-semibold text-ink">{org.name}</h3>
                     {org.ddOrgName && org.ddOrgName !== org.name && (
-                      <span className="text-xs text-gray-500">({org.ddOrgName})</span>
+                      <span className="text-xs text-ink-faint">({org.ddOrgName})</span>
                     )}
                     <ScanStatusBadge status={org.lastScanStatus ?? 'pending'} />
                     {org.sessionOnly && (
                       <span className="badge bg-amber-100 text-amber-700">Session Only</span>
                     )}
                   </div>
-                  <div className="mt-1 flex gap-4 text-sm text-gray-500">
-                    <span>Site: <code className="text-xs bg-gray-100 px-1 rounded">{org.site}</code></span>
+                  <div className="mt-1.5 flex gap-4 text-sm text-ink-muted flex-wrap">
+                    <span>Site: <code className="text-xs bg-surface-sunken px-1 rounded">{org.site}</code></span>
                     {org.lastScanAt && (
                       <span>Last scan: {formatDistanceToNow(new Date(org.lastScanAt), { addSuffix: true })}</span>
                     )}
                     {org.ddOrgId && (
-                      <span>DD Org ID: <code className="text-xs bg-gray-100 px-1 rounded">{org.ddOrgId}</code></span>
+                      <span>DD Org ID: <code className="text-xs bg-surface-sunken px-1 rounded">{org.ddOrgId}</code></span>
                     )}
                   </div>
 
@@ -124,33 +152,51 @@ export default function OrgConnections() {
                   )}
                 </div>
 
-                <div className="flex gap-2 ml-4">
-                  <button
-                    className="btn-secondary text-xs"
-                    disabled={validatingId === org.id}
-                    onClick={() => validate(org)}
-                  >
-                    {validatingId === org.id ? 'Validating...' : 'Validate'}
-                  </button>
-                  <button
-                    className="btn-secondary text-xs"
-                    onClick={() => {
-                      setEditingOrg(org);
-                      setShowForm(false);
-                    }}
-                  >
-                    Edit Keys
-                  </button>
-                  <button
-                    className="btn-danger text-xs"
-                    onClick={() => {
-                      if (confirm(`Delete "${org.name}"? This will remove all scan data.`)) {
-                        deleteOrg.mutate(org.id);
-                      }
-                    }}
-                  >
-                    Remove
-                  </button>
+                <div className="flex items-center gap-2">
+                  {confirmingDeleteId === org.id ? (
+                    <div className="flex items-center gap-2 bg-red-50 border border-red-200 rounded-md px-3 py-1.5 animate-fade-in">
+                      <span className="text-xs text-red-700">Delete "{org.name}" and all scan data?</span>
+                      <button
+                        className="btn-danger text-xs"
+                        disabled={deleteOrg.isPending}
+                        onClick={() => deleteOrg.mutate(org.id)}
+                      >
+                        {deleteOrg.isPending ? 'Removing...' : 'Confirm'}
+                      </button>
+                      <button
+                        className="btn-ghost text-xs"
+                        disabled={deleteOrg.isPending}
+                        onClick={() => setConfirmingDeleteId(null)}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <button
+                        className="btn-secondary text-xs"
+                        disabled={validatingId === org.id}
+                        onClick={() => validate(org)}
+                      >
+                        {validatingId === org.id ? 'Validating...' : 'Validate'}
+                      </button>
+                      <button
+                        className="btn-secondary text-xs"
+                        onClick={() => {
+                          setEditingOrg(org);
+                          setShowForm(false);
+                        }}
+                      >
+                        Edit Keys
+                      </button>
+                      <button
+                        className="btn-danger text-xs"
+                        onClick={() => setConfirmingDeleteId(org.id)}
+                      >
+                        Remove
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
             </div>

@@ -20,7 +20,7 @@ function SliderInput({
   return (
     <div className="space-y-1">
       <div className="flex items-center justify-between gap-3">
-        <label className="text-sm font-medium text-gray-700 leading-tight">{label}</label>
+        <label className="text-sm font-medium text-ink-muted leading-tight">{label}</label>
         <div className="flex items-center gap-1.5 shrink-0">
           <input
             type="number"
@@ -34,7 +34,7 @@ function SliderInput({
             }}
             className="w-24 text-right text-sm font-bold text-violet-700 border border-violet-200 rounded px-2 py-0.5 focus:outline-none focus:ring-1 focus:ring-violet-400"
           />
-          {unit && <span className="text-xs text-gray-400 w-16 leading-tight">{unit}</span>}
+          {unit && <span className="text-xs text-ink-faint w-16 leading-tight">{unit}</span>}
         </div>
       </div>
       <input
@@ -46,7 +46,7 @@ function SliderInput({
         onChange={(e) => onChange(Math.max(min, Math.min(max, fromSlider(Number(e.target.value)))))}
         className="w-full accent-violet-600 h-1.5 cursor-pointer"
       />
-      {hint && <p className="text-xs text-gray-400 leading-tight">{hint}</p>}
+      {hint && <p className="text-xs text-ink-faint leading-tight">{hint}</p>}
     </div>
   );
 }
@@ -60,15 +60,15 @@ function SelectInput({
 }) {
   return (
     <div className="space-y-1">
-      <label className="text-sm font-medium text-gray-700">{label}</label>
+      <label className="text-sm font-medium text-ink-muted">{label}</label>
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="w-full text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-violet-400 bg-white"
+        className="w-full text-sm border border-border rounded-lg px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-violet-400 bg-white"
       >
         {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
       </select>
-      {hint && <p className="text-xs text-gray-400">{hint}</p>}
+      {hint && <p className="text-xs text-ink-faint">{hint}</p>}
     </div>
   );
 }
@@ -80,7 +80,7 @@ function ResultCard({
   color?: 'gray' | 'violet' | 'amber' | 'green' | 'red' | 'blue';
 }) {
   const colors = {
-    gray: 'bg-gray-50 border-gray-200 text-gray-800',
+    gray: 'bg-surface-subtle border-border text-ink',
     violet: 'bg-violet-50 border-violet-200 text-violet-800',
     amber: 'bg-amber-50 border-amber-200 text-amber-800',
     green: 'bg-green-50 border-green-200 text-green-800',
@@ -89,9 +89,9 @@ function ResultCard({
   };
   return (
     <div className={`rounded-xl border p-4 ${colors[color]}`}>
-      <div className="text-xs text-gray-500 mb-1 font-medium uppercase tracking-wide">{label}</div>
+      <div className="text-xs text-ink-muted mb-1 font-medium uppercase tracking-wide">{label}</div>
       <div className="text-2xl font-bold tabular-nums">{value}</div>
-      {sub && <div className="text-xs text-gray-500 mt-0.5 leading-tight">{sub}</div>}
+      {sub && <div className="text-xs text-ink-muted mt-0.5 leading-tight">{sub}</div>}
     </div>
   );
 }
@@ -100,18 +100,18 @@ function SizingBlock({ title, icon, rows }: {
   title: string; icon: string; rows: Array<{ label: string; value: string; note?: string }>;
 }) {
   return (
-    <div className="rounded-xl border border-gray-200 overflow-hidden">
+    <div className="rounded-xl border border-border overflow-hidden">
       <div className="px-4 py-2.5 bg-gray-800 text-white flex items-center gap-2">
         <span>{icon}</span>
         <span className="text-sm font-semibold">{title}</span>
       </div>
-      <div className="divide-y divide-gray-100">
+      <div className="divide-y divide-border">
         {rows.map((r, i) => (
-          <div key={i} className="flex items-center justify-between px-4 py-2.5 bg-white even:bg-gray-50/50">
-            <span className="text-sm text-gray-600">{r.label}</span>
+          <div key={i} className="flex items-center justify-between px-4 py-2.5 bg-white even:bg-surface-subtle/50">
+            <span className="text-sm text-ink-muted">{r.label}</span>
             <div className="text-right">
-              <span className="text-sm font-mono font-bold text-gray-900">{r.value}</span>
-              {r.note && <div className="text-xs text-gray-400">{r.note}</div>}
+              <span className="text-sm font-mono font-bold text-ink">{r.value}</span>
+              {r.note && <div className="text-xs text-ink-faint">{r.note}</div>}
             </div>
           </div>
         ))}
@@ -134,14 +134,14 @@ function GrowthTable({ rows, growthRate }: {
     return Math.round(n).toLocaleString();
   };
   return (
-    <div className="rounded-xl border border-gray-200 overflow-hidden">
+    <div className="rounded-xl border border-border overflow-hidden">
       <div className="bg-gray-800 text-white px-4 py-2.5 flex items-center gap-2">
         <span>📈</span>
         <span className="text-sm font-semibold">Growth Projection ({growthRate}% YoY)</span>
       </div>
       <table className="w-full text-sm">
         <thead>
-          <tr className="bg-gray-50 text-gray-500 text-xs uppercase tracking-wide">
+          <tr className="bg-surface-subtle text-ink-muted text-xs uppercase tracking-wide">
             <th className="text-left px-4 py-2">Metric</th>
             <th className="text-right px-4 py-2">Now</th>
             <th className="text-right px-4 py-2 bg-violet-50 text-violet-700">+1 Year</th>
@@ -149,21 +149,21 @@ function GrowthTable({ rows, growthRate }: {
             <th className="text-right px-4 py-2">+3 Years</th>
           </tr>
         </thead>
-        <tbody className="divide-y divide-gray-100">
+        <tbody className="divide-y divide-border">
           {rows.map((r, i) => (
-            <tr key={i} className="bg-white even:bg-gray-50/40">
-              <td className="px-4 py-2.5 text-gray-700">{r.label}</td>
-              <td className="px-4 py-2.5 text-right font-mono font-semibold text-gray-900">
-                {fmt(r.baseline, r.formatter)} <span className="text-xs font-normal text-gray-400">{r.unit}</span>
+            <tr key={i} className="bg-white even:bg-surface-subtle/40">
+              <td className="px-4 py-2.5 text-ink-muted">{r.label}</td>
+              <td className="px-4 py-2.5 text-right font-mono font-semibold text-ink">
+                {fmt(r.baseline, r.formatter)} <span className="text-xs font-normal text-ink-faint">{r.unit}</span>
               </td>
               <td className="px-4 py-2.5 text-right font-mono font-bold text-violet-700 bg-violet-50/40">
                 {fmt(project(r.baseline, 1), r.formatter)} <span className="text-xs font-normal">{r.unit}</span>
               </td>
-              <td className="px-4 py-2.5 text-right font-mono text-gray-700">
-                {fmt(project(r.baseline, 2), r.formatter)} <span className="text-xs font-normal text-gray-400">{r.unit}</span>
+              <td className="px-4 py-2.5 text-right font-mono text-ink-muted">
+                {fmt(project(r.baseline, 2), r.formatter)} <span className="text-xs font-normal text-ink-faint">{r.unit}</span>
               </td>
-              <td className="px-4 py-2.5 text-right font-mono text-gray-700">
-                {fmt(project(r.baseline, 3), r.formatter)} <span className="text-xs font-normal text-gray-400">{r.unit}</span>
+              <td className="px-4 py-2.5 text-right font-mono text-ink-muted">
+                {fmt(project(r.baseline, 3), r.formatter)} <span className="text-xs font-normal text-ink-faint">{r.unit}</span>
               </td>
             </tr>
           ))}
@@ -179,8 +179,8 @@ function CalcHeader({ icon, title, description }: { icon: string; title: string;
       <div className="flex items-center gap-3">
         <span className="text-3xl">{icon}</span>
         <div>
-          <h1 className="text-xl font-bold text-gray-900">{title}</h1>
-          <p className="text-sm text-gray-500 mt-0.5">{description}</p>
+          <h1 className="text-xl font-bold text-ink">{title}</h1>
+          <p className="text-sm text-ink-muted mt-0.5">{description}</p>
         </div>
       </div>
     </div>
@@ -312,23 +312,23 @@ function PricingEstimate({ lines, note }: { lines: PriceLine[]; note?: string })
           <div className="text-xs text-emerald-300">per month (list price)</div>
         </div>
       </div>
-      <div className="divide-y divide-gray-100 bg-white">
+      <div className="divide-y divide-border bg-white">
         {active.map((l, i) => (
-          <div key={i} className="flex items-center justify-between px-4 py-2.5 even:bg-gray-50/40 hover:bg-violet-50/20">
-            <span className="text-sm text-gray-700">{l.label}</span>
+          <div key={i} className="flex items-center justify-between px-4 py-2.5 even:bg-surface-subtle/40 hover:bg-violet-50/20">
+            <span className="text-sm text-ink-muted">{l.label}</span>
             <div className="text-right">
-              <div className="text-xs text-gray-400 font-mono">{l.qty.toLocaleString()} {l.unit} @ {l.rate}</div>
-              <div className="text-sm font-bold font-mono text-gray-900">${Math.round(l.monthly).toLocaleString()}</div>
+              <div className="text-xs text-ink-faint font-mono">{l.qty.toLocaleString()} {l.unit} @ {l.rate}</div>
+              <div className="text-sm font-bold font-mono text-ink">${Math.round(l.monthly).toLocaleString()}</div>
             </div>
           </div>
         ))}
         <div className="flex items-center justify-between px-4 py-3 bg-emerald-50">
-          <span className="font-bold text-gray-900">Total Estimated</span>
+          <span className="font-bold text-ink">Total Estimated</span>
           <span className="text-xl font-bold font-mono text-emerald-800">${Math.round(total).toLocaleString()}/mo</span>
         </div>
       </div>
       {note && <div className="px-4 py-2.5 bg-amber-50 text-xs text-amber-700 border-t border-amber-100">ⓘ {note}</div>}
-      <div className="px-4 py-2 text-xs text-gray-400 bg-gray-50 border-t border-gray-100">
+      <div className="px-4 py-2 text-xs text-ink-faint bg-surface-subtle border-t border-border">
         List pricing only — enterprise/committed rates typically 20–50% lower. Contact Datadog sales for quotes.
       </div>
     </div>
@@ -342,11 +342,11 @@ function BaselineCard({ tier, ranges, currentValues }: {
 }) {
   if (!ranges.length) return null;
   return (
-    <div className="rounded-xl border border-gray-200 overflow-hidden">
+    <div className="rounded-xl border border-border overflow-hidden">
       <div className="bg-gray-700 text-white px-4 py-2.5 flex items-center gap-2">
         <span>📊</span>
         <span className="text-sm font-semibold">Industry Baselines — {tier}</span>
-        <span className="text-xs text-gray-300 ml-auto">Typical ranges for your org size</span>
+        <span className="text-xs text-ink-faint ml-auto">Typical ranges for your org size</span>
       </div>
       <div className="p-4 space-y-4 bg-white">
         {ranges.map((r, i) => {
@@ -360,17 +360,17 @@ function BaselineCard({ tier, ranges, currentValues }: {
           return (
             <div key={i}>
               <div className="flex justify-between text-xs mb-1.5">
-                <span className="font-medium text-gray-700">{r.label}</span>
-                <span className={`font-semibold px-2 py-0.5 rounded-full text-[10px] ${inRange ? 'bg-green-100 text-green-700' : below ? 'bg-blue-100 text-blue-700' : current > 0 ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-500'}`}>
+                <span className="font-medium text-ink-muted">{r.label}</span>
+                <span className={`font-semibold px-2 py-0.5 rounded-full text-[10px] ${inRange ? 'bg-green-100 text-green-700' : below ? 'bg-blue-100 text-blue-700' : current > 0 ? 'bg-amber-100 text-amber-700' : 'bg-surface-sunken text-ink-muted'}`}>
                   {current > 0 ? (inRange ? '✓ Typical' : below ? '↓ Below typical' : '↑ Above typical') : 'No scan data'}
                   {current > 0 ? ` · ${fmtNum(current)}${r.unit ? ` ${r.unit}` : ''}` : ''}
                 </span>
               </div>
-              <div className="relative h-4 bg-gray-100 rounded-full overflow-hidden">
+              <div className="relative h-4 bg-surface-sunken rounded-full overflow-hidden">
                 <div className="absolute top-0 h-full bg-green-200" style={{ left: `${lowPct}%`, width: `${Math.max(0, highPct - lowPct)}%` }} />
                 {current > 0 && <div className="absolute top-0 h-full w-1 bg-violet-600" style={{ left: `${currPct}%` }} />}
               </div>
-              <div className="flex justify-between text-[10px] text-gray-400 mt-0.5">
+              <div className="flex justify-between text-[10px] text-ink-faint mt-0.5">
                 <span>{fmtNum(r.low)}</span>
                 <span className="text-green-600 text-center flex-1">typical range</span>
                 <span>{fmtNum(r.high)}</span>
@@ -378,7 +378,7 @@ function BaselineCard({ tier, ranges, currentValues }: {
             </div>
           );
         })}
-        <div className="flex items-center gap-4 pt-1 border-t border-gray-100 text-[10px] text-gray-400">
+        <div className="flex items-center gap-4 pt-1 border-t border-border text-[10px] text-ink-faint">
           <span className="flex items-center gap-1"><span className="w-4 h-2 bg-green-200 rounded inline-block border border-green-300" /> Typical range</span>
           <span className="flex items-center gap-1"><span className="w-1 h-3 bg-violet-600 rounded inline-block" /> Your value</span>
           <span className="ml-auto">Based on Datadog deployment patterns by org size</span>
@@ -456,8 +456,8 @@ function NDMCalculator({ scanData }: { scanData?: AnalyticsData }) {
 
       <div className="grid grid-cols-2 gap-6">
         {/* Inputs */}
-        <div className="space-y-5 bg-white rounded-2xl border border-gray-200 p-5">
-          <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">Fleet Configuration</h3>
+        <div className="space-y-5 bg-white rounded-2xl border border-border p-5">
+          <h3 className="text-sm font-semibold text-ink-muted uppercase tracking-wide">Fleet Configuration</h3>
           <SliderInput label="Network Devices" value={devices} min={10} max={100000} step={100} unit="devices" onChange={setDevices} log />
           <SliderInput label="Interfaces per Device" value={interfaces} min={1} max={200} unit="interfaces" hint="Average across fleet. Core switches: 48+, routers: 4-24, firewalls: 4-16" onChange={setInterfaces} />
           <SelectInput
@@ -592,8 +592,8 @@ function LogsCalculator({ scanData }: { scanData?: AnalyticsData }) {
       )}
 
       <div className="grid grid-cols-2 gap-6">
-        <div className="space-y-5 bg-white rounded-2xl border border-gray-200 p-5">
-          <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">Pipeline Configuration</h3>
+        <div className="space-y-5 bg-white rounded-2xl border border-border p-5">
+          <h3 className="text-sm font-semibold text-ink-muted uppercase tracking-wide">Pipeline Configuration</h3>
           <SliderInput label="Daily Log Ingestion" value={ingestGbDay} min={1} max={10000} unit="GB / day" onChange={setIngestGbDay} log hint={`~${fmtNum(ingestGbDay * 500000)} events/day at 2KB avg`} />
           <SliderInput label="Online Index Rate" value={indexRate} min={0} max={100} unit="%" hint="Events sent to searchable online indexes" onChange={setIndexRate} />
           <SliderInput label="Flex Logs Rate" value={flexRate} min={0} max={Math.max(0, 100 - indexRate)} unit="%" hint="Events archived to Flex (cheap storage, on-demand rehydration)" onChange={setFlexRate} />
@@ -683,8 +683,8 @@ function APMCalculator({ scanData }: { scanData?: AnalyticsData }) {
         />
       )}
       <div className="grid grid-cols-2 gap-6">
-        <div className="space-y-5 bg-white rounded-2xl border border-gray-200 p-5">
-          <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">APM Configuration</h3>
+        <div className="space-y-5 bg-white rounded-2xl border border-border p-5">
+          <h3 className="text-sm font-semibold text-ink-muted uppercase tracking-wide">APM Configuration</h3>
           <SliderInput label="Services Instrumented" value={services} min={1} max={5000} unit="services" onChange={setServices} log />
           <SliderInput label="Requests per Second (avg per service)" value={rps} min={1} max={100000} unit="req/s" onChange={setRps} log hint="Across all environments (prod + staging)" />
           <SliderInput label="Spans per Trace" value={spansPerTrace} min={1} max={200} unit="spans" hint="Avg spans per distributed trace (entry → downstream calls)" onChange={setSpansPerTrace} />
@@ -790,8 +790,8 @@ function InfraCalculator({ scanData }: { scanData?: AnalyticsData }) {
       )}
 
       <div className="grid grid-cols-2 gap-6">
-        <div className="space-y-5 bg-white rounded-2xl border border-gray-200 p-5">
-          <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">Fleet Composition</h3>
+        <div className="space-y-5 bg-white rounded-2xl border border-border p-5">
+          <h3 className="text-sm font-semibold text-ink-muted uppercase tracking-wide">Fleet Composition</h3>
           <SliderInput label="Traditional Hosts (VMs/bare-metal)" value={hosts} min={0} max={50000} step={10} unit="hosts" onChange={setHosts} log />
           <SliderInput label="Containers per VM Host" value={containersPerHost} min={0} max={500} unit="containers" hint="Docker/ECS containers running on traditional hosts" onChange={setContainersPerHost} />
           <SliderInput label="Kubernetes Nodes" value={k8sNodes} min={0} max={10000} step={5} unit="nodes" onChange={setK8sNodes} log />
@@ -895,8 +895,8 @@ function RUMCalculator({ scanData }: { scanData?: AnalyticsData }) {
       )}
 
       <div className="grid grid-cols-2 gap-6">
-        <div className="space-y-5 bg-white rounded-2xl border border-gray-200 p-5">
-          <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">User Traffic</h3>
+        <div className="space-y-5 bg-white rounded-2xl border border-border p-5">
+          <h3 className="text-sm font-semibold text-ink-muted uppercase tracking-wide">User Traffic</h3>
           <SliderInput label="Monthly Active Users (MAU)" value={mau} min={1000} max={50000000} unit="users/mo" onChange={setMau} log />
           <SliderInput label="Sessions per User / Month" value={sessionsPerUser} min={1} max={100} unit="sessions" hint="A session = 15 min of continuous activity" onChange={setSessionsPerUser} />
           <SliderInput label="Page Views per Session" value={pageviewsPerSession} min={1} max={100} unit="pageviews" onChange={setPageviewsPerSession} />
@@ -988,17 +988,17 @@ function SyntheticsCalculator({ scanData }: { scanData?: AnalyticsData }) {
       )}
 
       <div className="grid grid-cols-2 gap-6">
-        <div className="space-y-5 bg-white rounded-2xl border border-gray-200 p-5">
-          <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">Test Configuration</h3>
-          <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide pt-1">API Tests</div>
+        <div className="space-y-5 bg-white rounded-2xl border border-border p-5">
+          <h3 className="text-sm font-semibold text-ink-muted uppercase tracking-wide">Test Configuration</h3>
+          <div className="text-xs font-semibold text-ink-muted uppercase tracking-wide pt-1">API Tests</div>
           <SliderInput label="API Tests" value={apiTests} min={0} max={10000} unit="tests" onChange={setApiTests} />
           <SliderInput label="Locations per API Test" value={apiLocations} min={1} max={30} unit="locations" onChange={setApiLocations} />
           <SliderInput label="API Test Frequency" value={apiFreqMin} min={1} max={1440} unit="min interval" hint="1min = highest frequency; 60min = hourly" onChange={setApiFreqMin} />
-          <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide pt-1 border-t border-gray-100">Browser Tests</div>
+          <div className="text-xs font-semibold text-ink-muted uppercase tracking-wide pt-1 border-t border-border">Browser Tests</div>
           <SliderInput label="Browser Tests" value={browserTests} min={0} max={5000} unit="tests" onChange={setBrowserTests} />
           <SliderInput label="Locations per Browser Test" value={browserLocations} min={1} max={20} unit="locations" onChange={setBrowserLocations} />
           <SliderInput label="Browser Test Frequency" value={browserFreqMin} min={5} max={1440} unit="min interval" hint="60min typical; browser tests are expensive, run less frequently" onChange={setBrowserFreqMin} />
-          <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide pt-1 border-t border-gray-100">Multi-Step API</div>
+          <div className="text-xs font-semibold text-ink-muted uppercase tracking-wide pt-1 border-t border-border">Multi-Step API</div>
           <SliderInput label="Multi-Step API Tests" value={multiStepTests} min={0} max={2000} unit="tests" onChange={setMultiStepTests} />
           <SliderInput label="Steps per Multi-Step Test" value={stepsPerTest} min={2} max={50} unit="steps" hint="Billed per step, not per run" onChange={setStepsPerTest} />
           <SliderInput label="Annual Growth Rate" value={growthRate} min={0} max={200} unit="% / year" onChange={setGrowthRate} />
@@ -1087,13 +1087,13 @@ function MetricsCalculator({ scanData }: { scanData?: AnalyticsData }) {
       )}
 
       <div className="grid grid-cols-2 gap-6">
-        <div className="space-y-5 bg-white rounded-2xl border border-gray-200 p-5">
-          <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">Metric Sources</h3>
+        <div className="space-y-5 bg-white rounded-2xl border border-border p-5">
+          <h3 className="text-sm font-semibold text-ink-muted uppercase tracking-wide">Metric Sources</h3>
           <SliderInput label="Application Services" value={services} min={1} max={5000} unit="services" onChange={setServices} />
           <SliderInput label="Custom Metrics per Service" value={metricsPerService} min={1} max={1000} unit="metrics" hint="Business + technical metrics emitted per service" onChange={setMetricsPerService} />
           <SliderInput label="Tags per Metric (avg)" value={avgTags} min={1} max={15} unit="tags" hint="Tags multiply cardinality exponentially" onChange={setAvgTags} />
           <SliderInput label="Cardinality per Tag (avg)" value={avgCardinalityPerTag} min={2} max={10000} unit="values" hint="env:3, service:50, region:5, version:10..." onChange={setAvgCardinalityPerTag} log />
-          <div className="border-t border-gray-100 pt-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Allotment</div>
+          <div className="border-t border-border pt-3 text-xs font-semibold text-ink-muted uppercase tracking-wide">Allotment</div>
           <SliderInput label="Infrastructure Hosts" value={hosts} min={0} max={50000} unit="hosts" onChange={setHosts} />
           <SelectInput
             label="Allotment per Host"
@@ -1105,7 +1105,7 @@ function MetricsCalculator({ scanData }: { scanData?: AnalyticsData }) {
               { value: 500, label: '500 / host (Enterprise+)' },
             ]}
           />
-          <div className="border-t border-gray-100 pt-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Integrations</div>
+          <div className="border-t border-border pt-3 text-xs font-semibold text-ink-muted uppercase tracking-wide">Integrations</div>
           <SliderInput label="3rd-Party Integrations" value={thirdPartyIntegrations} min={0} max={500} unit="integrations" onChange={setThirdPartyIntegrations} />
           <SliderInput label="Metrics per Integration (avg)" value={metricsPerIntegration} min={10} max={5000} unit="metrics" onChange={setMetricsPerIntegration} />
           <SliderInput label="Annual Growth Rate" value={growthRate} min={0} max={200} unit="% / year" onChange={setGrowthRate} />
@@ -1189,15 +1189,15 @@ function NPMCalculator({ scanData }: { scanData?: AnalyticsData }) {
       )}
 
       <div className="grid grid-cols-2 gap-6">
-        <div className="space-y-5 bg-white rounded-2xl border border-gray-200 p-5">
-          <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">NPM Configuration</h3>
+        <div className="space-y-5 bg-white rounded-2xl border border-border p-5">
+          <h3 className="text-sm font-semibold text-ink-muted uppercase tracking-wide">NPM Configuration</h3>
           <SliderInput label="Hosts with NPM Agent" value={hostsMonitored} min={1} max={50000} unit="hosts" onChange={setHostsMonitored} log />
           <SliderInput label="Active Connections per Host" value={avgConnectionsPerHost} min={10} max={50000} unit="connections" hint="Active TCP/UDP connections tracked simultaneously" onChange={setAvgConnectionsPerHost} log />
           <SliderInput label="Network Flows per Second" value={flowsPerSec} min={100} max={10000000} unit="flows/sec" hint="Total across all monitored hosts" onChange={setFlowsPerSec} log />
           <SliderInput label="Data Retention" value={retentionDays} min={1} max={90} unit="days" onChange={setRetentionDays} />
           <div className="flex items-center gap-3">
             <input type="checkbox" id="ebpf" checked={ebpfEnabled} onChange={(e) => setEbpfEnabled(e.target.checked)} className="accent-violet-600" />
-            <label htmlFor="ebpf" className="text-sm text-gray-700">eBPF kernel-level tracing (higher fidelity, more overhead)</label>
+            <label htmlFor="ebpf" className="text-sm text-ink-muted">eBPF kernel-level tracing (higher fidelity, more overhead)</label>
           </div>
           <SliderInput label="Annual Growth Rate" value={growthRate} min={0} max={200} unit="% / year" onChange={setGrowthRate} />
         </div>
@@ -1301,17 +1301,17 @@ function CloudCalculator({ scanData }: { scanData?: AnalyticsData }) {
       )}
 
       <div className="grid grid-cols-2 gap-6">
-        <div className="space-y-5 bg-white rounded-2xl border border-gray-200 p-5">
-          <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">Cloud Resources</h3>
-          <div className="text-xs font-semibold text-gray-500 uppercase pt-1">AWS</div>
+        <div className="space-y-5 bg-white rounded-2xl border border-border p-5">
+          <h3 className="text-sm font-semibold text-ink-muted uppercase tracking-wide">Cloud Resources</h3>
+          <div className="text-xs font-semibold text-ink-muted uppercase pt-1">AWS</div>
           <SliderInput label="AWS Accounts" value={awsAccounts} min={0} max={500} unit="accounts" onChange={setAwsAccounts} />
           <SliderInput label="EC2 Instances (per account)" value={ec2Instances} min={0} max={10000} unit="instances" onChange={setEc2Instances} log />
           <SliderInput label="RDS Instances (per account)" value={rdsInstances} min={0} max={1000} unit="instances" onChange={setRdsInstances} />
           <SliderInput label="Lambda Functions (per account)" value={lambdaFunctions} min={0} max={10000} unit="functions" onChange={setLambdaFunctions} log />
-          <div className="text-xs font-semibold text-gray-500 uppercase pt-1 border-t border-gray-100">GCP</div>
+          <div className="text-xs font-semibold text-ink-muted uppercase pt-1 border-t border-border">GCP</div>
           <SliderInput label="GCP Projects" value={gcpProjects} min={0} max={200} unit="projects" onChange={setGcpProjects} />
           <SliderInput label="GCE Instances (per project)" value={gceInstances} min={0} max={5000} unit="instances" onChange={setGceInstances} log />
-          <div className="text-xs font-semibold text-gray-500 uppercase pt-1 border-t border-gray-100">Azure</div>
+          <div className="text-xs font-semibold text-ink-muted uppercase pt-1 border-t border-border">Azure</div>
           <SliderInput label="Azure Subscriptions" value={azureSubscriptions} min={0} max={100} unit="subscriptions" onChange={setAzureSubscriptions} />
           <SliderInput label="Azure VMs (per subscription)" value={azureVms} min={0} max={5000} unit="VMs" onChange={setAzureVms} log />
           <SliderInput label="Annual Growth Rate" value={growthRate} min={0} max={200} unit="% / year" onChange={setGrowthRate} />
@@ -1396,8 +1396,8 @@ function CSPMCalculator({ scanData }: { scanData?: AnalyticsData }) {
       )}
 
       <div className="grid grid-cols-2 gap-6">
-        <div className="space-y-5 bg-white rounded-2xl border border-gray-200 p-5">
-          <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">Scan Scope</h3>
+        <div className="space-y-5 bg-white rounded-2xl border border-border p-5">
+          <h3 className="text-sm font-semibold text-ink-muted uppercase tracking-wide">Scan Scope</h3>
           <SliderInput label="Cloud Resources Scanned" value={cloudResources} min={10} max={500000} unit="resources" hint="S3, EC2, IAM, RDS, GCS, etc." onChange={setCloudResources} log />
           <SliderInput label="Kubernetes Clusters" value={k8sClusters} min={0} max={500} unit="clusters" onChange={setK8sClusters} />
           <SliderInput label="Nodes per Cluster (avg)" value={nodesPerCluster} min={1} max={1000} unit="nodes" onChange={setNodesPerCluster} />
@@ -1487,8 +1487,8 @@ function DBMCalculator({ scanData }: { scanData?: AnalyticsData }) {
       })()}
 
       <div className="grid grid-cols-2 gap-6">
-        <div className="space-y-5 bg-white rounded-2xl border border-gray-200 p-5">
-          <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">Database Fleet</h3>
+        <div className="space-y-5 bg-white rounded-2xl border border-border p-5">
+          <h3 className="text-sm font-semibold text-ink-muted uppercase tracking-wide">Database Fleet</h3>
           <SliderInput label="PostgreSQL Instances" value={postgresInstances} min={0} max={5000} unit="instances" onChange={setPostgresInstances} />
           <SliderInput label="MySQL / MariaDB Instances" value={mysqlInstances} min={0} max={5000} unit="instances" onChange={setMysqlInstances} />
           <SliderInput label="SQL Server Instances" value={sqlServerInstances} min={0} max={2000} unit="instances" onChange={setSqlServerInstances} />
@@ -1567,8 +1567,8 @@ function CIVisibilityCalculator({ scanData }: { scanData?: AnalyticsData }) {
         />
       )}
       <div className="grid grid-cols-2 gap-6">
-        <div className="space-y-5 bg-white rounded-2xl border border-gray-200 p-5">
-          <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">CI Configuration</h3>
+        <div className="space-y-5 bg-white rounded-2xl border border-border p-5">
+          <h3 className="text-sm font-semibold text-ink-muted uppercase tracking-wide">CI Configuration</h3>
           <SliderInput label="Active Committers" value={committers} min={1} max={10000} unit="developers" hint="Datadog CI Visibility is billed per committer per month" onChange={setCommitters} log />
           <SliderInput label="Pipeline Runs per Day" value={pipelinesPerDay} min={1} max={100000} unit="runs/day" hint="Across all repos and branches (CI + CD pipelines)" onChange={setPipelinesPerDay} log />
           <SliderInput label="Tests per Pipeline Run" value={testsPerPipeline} min={1} max={100000} unit="tests" hint="Unit + integration tests executed per run" onChange={setTestsPerPipeline} log />
@@ -1640,8 +1640,8 @@ function ProfilerCalculator({ scanData }: { scanData?: AnalyticsData }) {
         />
       )}
       <div className="grid grid-cols-2 gap-6">
-        <div className="space-y-5 bg-white rounded-2xl border border-gray-200 p-5">
-          <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">Profiler Configuration</h3>
+        <div className="space-y-5 bg-white rounded-2xl border border-border p-5">
+          <h3 className="text-sm font-semibold text-ink-muted uppercase tracking-wide">Profiler Configuration</h3>
           <SliderInput label="Profiled Hosts / Containers" value={profiledHosts} min={1} max={50000} unit="hosts" hint="Continuous Profiler billed per profiled host/container per hour" onChange={setProfiledHosts} log />
           <SliderInput label="Profiles per Host per Hour" value={profilesPerHostPerHour} min={1} max={60} unit="profiles/hr" hint="Default: 1 profile/min per language (6/hr). CPU + memory = 2×." onChange={setProfilesPerHostPerHour} />
           <SliderInput label="Avg Profile Size" value={avgProfileSizeMb} min={0.1} max={10} step={0.1} unit="MB" hint="Flame graph data. JVM heaps are larger (~2-5MB)." onChange={setAvgProfileSizeMb} />
@@ -1715,8 +1715,8 @@ function OPWCalculator({ scanData }: { scanData?: AnalyticsData }) {
         />
       )}
       <div className="grid grid-cols-2 gap-6">
-        <div className="space-y-5 bg-white rounded-2xl border border-gray-200 p-5">
-          <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">Pipeline Configuration</h3>
+        <div className="space-y-5 bg-white rounded-2xl border border-border p-5">
+          <h3 className="text-sm font-semibold text-ink-muted uppercase tracking-wide">Pipeline Configuration</h3>
           <SliderInput label="Daily Inbound Volume" value={dailyIngestGb} min={1} max={50000} unit="GB / day" hint="Total log/metric/trace data entering OPW" onChange={setDailyIngestGb} log />
           <SliderInput label="Filter / Drop Rate" value={filterDropPct} min={0} max={90} unit="% dropped" hint="Events dropped by OPW filters before forwarding" onChange={setFilterDropPct} />
           <SliderInput label="Fan-out Destinations" value={routeToMultipleDest} min={1} max={10} unit="destinations" hint="Same data routed to multiple sinks (SIEM, S3, Datadog)" onChange={setRouteToMultipleDest} />
@@ -1800,20 +1800,20 @@ function ASMCalculator({ scanData }: { scanData?: AnalyticsData }) {
         />
       )}
       <div className="grid grid-cols-2 gap-6">
-        <div className="space-y-5 bg-white rounded-2xl border border-gray-200 p-5">
-          <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">ASM Configuration</h3>
+        <div className="space-y-5 bg-white rounded-2xl border border-border p-5">
+          <h3 className="text-sm font-semibold text-ink-muted uppercase tracking-wide">ASM Configuration</h3>
           <SliderInput label="Protected Services" value={protectedServices} min={1} max={10000} unit="services" hint="ASM is billed per host/container running ASM-enabled services" onChange={setProtectedServices} log />
           <SliderInput label="Requests per Second (total)" value={requestsPerSec} min={1} max={1000000} unit="req/s" hint="Total HTTP/gRPC requests across all protected services" onChange={setRequestsPerSec} log />
           <SliderInput label="Threat Event Rate" value={threatEventPct} min={0.001} max={10} step={0.001} unit="% of requests" hint="Requests flagged as attacks (SQL injection, XSS, SSRF…). Typical: 0.01–1%." onChange={setThreatEventPct} />
-          <div className="space-y-3 border-t border-gray-100 pt-3">
-            <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Add-ons</div>
+          <div className="space-y-3 border-t border-border pt-3">
+            <div className="text-xs font-semibold text-ink-muted uppercase tracking-wide">Add-ons</div>
             <div className="flex items-center gap-3">
               <input type="checkbox" id="apisec" checked={apiSecurityEnabled} onChange={(e) => setApiSecurityEnabled(e.target.checked)} className="accent-violet-600" />
-              <label htmlFor="apisec" className="text-sm text-gray-700">API Security (schema discovery + endpoint inventory)</label>
+              <label htmlFor="apisec" className="text-sm text-ink-muted">API Security (schema discovery + endpoint inventory)</label>
             </div>
             <div className="flex items-center gap-3">
               <input type="checkbox" id="sca" checked={scaEnabled} onChange={(e) => setScaEnabled(e.target.checked)} className="accent-violet-600" />
-              <label htmlFor="sca" className="text-sm text-gray-700">Software Composition Analysis (SCA / OSS vulnerabilities)</label>
+              <label htmlFor="sca" className="text-sm text-ink-muted">Software Composition Analysis (SCA / OSS vulnerabilities)</label>
             </div>
           </div>
           <SliderInput label="Annual Growth Rate" value={growthRate} min={0} max={200} unit="% / year" onChange={setGrowthRate} />
@@ -1891,10 +1891,10 @@ export default function Calculators() {
   return (
     <div className="flex h-[calc(100vh-64px)] -mx-6 -my-6 overflow-hidden">
       {/* Sidebar */}
-      <div className="w-56 shrink-0 border-r border-gray-200 bg-gray-50 flex flex-col overflow-hidden">
-        <div className="px-4 pt-4 pb-2 border-b border-gray-100">
-          <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wider">Sizing Calculators</h2>
-          <p className="text-xs text-gray-400 mt-0.5">
+      <div className="w-56 shrink-0 border-r border-border bg-surface-subtle flex flex-col overflow-hidden">
+        <div className="px-4 pt-4 pb-2 border-b border-border">
+          <h2 className="text-xs font-bold text-ink-muted uppercase tracking-wider">Sizing Calculators</h2>
+          <p className="text-xs text-ink-faint mt-0.5">
             {scanData ? <span className="text-blue-600 font-medium">📡 Scan data loaded</span> : 'Select a scan for current usage'}
           </p>
         </div>
@@ -1903,20 +1903,20 @@ export default function Calculators() {
             const items = CALCULATORS.filter(c => c.group === group);
             return (
               <div key={group}>
-                <div className="px-3 py-1 text-[10px] font-bold text-gray-400 uppercase tracking-widest">{group}</div>
+                <div className="px-3 py-1 text-[10px] font-bold text-ink-faint uppercase tracking-widest">{group}</div>
                 <div className="space-y-0.5">
                   {items.map(item => (
                     <button
                       key={item.id}
                       onClick={() => setActiveId(item.id)}
                       className={`w-full text-left flex items-start gap-2.5 px-3 py-2.5 rounded-lg transition-colors ${
-                        activeId === item.id ? 'bg-violet-600 text-white' : 'text-gray-700 hover:bg-gray-100'
+                        activeId === item.id ? 'bg-violet-600 text-white' : 'text-ink-muted hover:bg-surface-sunken'
                       }`}
                     >
                       <span className="text-base mt-0.5 shrink-0">{item.icon}</span>
                       <div className="min-w-0">
-                        <div className={`text-sm font-medium leading-tight ${activeId === item.id ? 'text-white' : 'text-gray-800'}`}>{item.label}</div>
-                        <div className={`text-xs leading-tight mt-0.5 ${activeId === item.id ? 'text-violet-200' : 'text-gray-400'}`}>{item.description}</div>
+                        <div className={`text-sm font-medium leading-tight ${activeId === item.id ? 'text-white' : 'text-ink'}`}>{item.label}</div>
+                        <div className={`text-xs leading-tight mt-0.5 ${activeId === item.id ? 'text-violet-200' : 'text-ink-faint'}`}>{item.description}</div>
                       </div>
                     </button>
                   ))}

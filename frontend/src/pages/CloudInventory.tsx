@@ -2,7 +2,9 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { inventoryApi } from '../services/api';
 import { useOrgAndScanFilters } from '../hooks/useFilters';
-import LoadingState, { EmptyState } from '../components/common/LoadingState';
+import { EmptyState } from '../components/common/LoadingState';
+import PageHeader from '../components/ui/PageHeader';
+import { SkeletonCards, SkeletonCard } from '../components/ui/Skeleton';
 
 const PROVIDER_META: Record<string, { label: string; color: string; bg: string; border: string; icon: string }> = {
   aws:        { label: 'Amazon Web Services', color: 'text-amber-700',  bg: 'bg-amber-50',  border: 'border-amber-200', icon: '☁' },
@@ -12,7 +14,7 @@ const PROVIDER_META: Record<string, { label: string; color: string; bg: string; 
   docker:     { label: 'Docker',               color: 'text-sky-700',   bg: 'bg-sky-50',    border: 'border-sky-200',   icon: '🐳' },
 };
 
-const fallback = { label: 'Unknown', color: 'text-gray-700', bg: 'bg-gray-50', border: 'border-gray-200', icon: '☁' };
+const fallback = { label: 'Unknown', color: 'text-ink-muted', bg: 'bg-surface-subtle', border: 'border-border', icon: '☁' };
 
 function ProviderBadge({ provider }: { provider: string }) {
   const m = PROVIDER_META[provider] ?? fallback;
@@ -27,7 +29,7 @@ function StatCard({ label, value, sub, color = 'gray' }: {
   label: string; value: string | number; sub?: string; color?: 'gray' | 'green' | 'amber' | 'red' | 'violet';
 }) {
   const colors = {
-    gray:   'bg-gray-50 border-gray-200 text-gray-800',
+    gray:   'bg-surface-subtle border-border text-ink',
     green:  'bg-green-50 border-green-200 text-green-800',
     amber:  'bg-amber-50 border-amber-200 text-amber-800',
     red:    'bg-red-50 border-red-200 text-red-800',
@@ -35,9 +37,9 @@ function StatCard({ label, value, sub, color = 'gray' }: {
   };
   return (
     <div className={`rounded-xl border p-4 ${colors[color]}`}>
-      <div className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1">{label}</div>
+      <div className="text-xs font-semibold uppercase tracking-wide text-ink-muted mb-1">{label}</div>
       <div className="text-2xl font-bold">{value}</div>
-      {sub && <div className="text-xs text-gray-500 mt-0.5">{sub}</div>}
+      {sub && <div className="text-xs text-ink-muted mt-0.5">{sub}</div>}
     </div>
   );
 }
@@ -57,20 +59,18 @@ export default function CloudInventory() {
 
   return (
     <div className="max-w-6xl space-y-8">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Cloud Inventory</h1>
-          <p className="text-sm text-gray-500 mt-1">
-            Cloud account connections, provider-sourced tags on hosts, and alignment with Datadog standard keys
-          </p>
-        </div>
-      </div>
+      <PageHeader
+        title="Cloud Inventory"
+        subtitle="Cloud account connections, provider-sourced tags on hosts, and alignment with Datadog standard keys"
+      />
 
       {!selectedScanId ? (
         <EmptyState message="Run a scan to view cloud inventory" />
       ) : isLoading ? (
-        <LoadingState />
+        <div className="space-y-6">
+          <SkeletonCards count={4} />
+          <SkeletonCard />
+        </div>
       ) : error || !data ? (
         <EmptyState message="No cloud data found for this scan" />
       ) : (
@@ -111,9 +111,9 @@ export default function CloudInventory() {
 
           {/* ── Cloud Accounts ─────────────────────────────────────────────── */}
           <section>
-            <h2 className="text-lg font-bold text-gray-900 mb-3">Cloud Account Connections</h2>
+            <h2 className="text-lg font-bold text-ink mb-3">Cloud Account Connections</h2>
             {data.accounts.length === 0 ? (
-              <div className="card text-center py-8 text-gray-400">
+              <div className="card text-center py-8 text-ink-faint">
                 <div className="text-3xl mb-2">☁</div>
                 <div className="text-sm">No cloud integrations configured</div>
                 <div className="text-xs mt-1">Configure AWS, GCP, or Azure integrations in Datadog to see account details here.</div>
@@ -133,7 +133,7 @@ export default function CloudInventory() {
                               <ProviderBadge provider={acc.provider} />
                             </div>
                             {acc.accountId && acc.accountId !== acc.accountName && (
-                              <div className="text-xs text-gray-500 font-mono mt-0.5">{acc.accountId}</div>
+                              <div className="text-xs text-ink-muted font-mono mt-0.5">{acc.accountId}</div>
                             )}
                           </div>
                         </div>
@@ -144,12 +144,12 @@ export default function CloudInventory() {
                             {acc.hasErrors ? '⚠ Errors' : '✓ OK'}
                           </span>
                           <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${
-                            acc.metricsEnabled ? 'bg-green-50 border-green-200 text-green-700' : 'bg-gray-100 border-gray-200 text-gray-500'
+                            acc.metricsEnabled ? 'bg-green-50 border-green-200 text-green-700' : 'bg-surface-sunken border-border text-ink-muted'
                           }`}>
                             {acc.metricsEnabled ? 'Metrics ✓' : 'Metrics ✗'}
                           </span>
                           <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${
-                            acc.resourceCollectionEnabled ? 'bg-green-50 border-green-200 text-green-700' : 'bg-gray-100 border-gray-200 text-gray-500'
+                            acc.resourceCollectionEnabled ? 'bg-green-50 border-green-200 text-green-700' : 'bg-surface-sunken border-border text-ink-muted'
                           }`}>
                             {acc.resourceCollectionEnabled ? 'Resource Coll. ✓' : 'Resource Coll. ✗'}
                           </span>
@@ -165,8 +165,8 @@ export default function CloudInventory() {
           {/* ── DD Key Alignment ───────────────────────────────────────────── */}
           {data.mappingGaps.length > 0 && (
             <section>
-              <h2 className="text-lg font-bold text-gray-900 mb-1">Cloud Tag → Datadog Key Alignment</h2>
-              <p className="text-sm text-gray-500 mb-3">
+              <h2 className="text-lg font-bold text-ink mb-1">Cloud Tag → Datadog Key Alignment</h2>
+              <p className="text-sm text-ink-muted mb-3">
                 Whether standard Datadog tag keys are present as cloud provider tag keys on your hosts.
                 Missing keys mean cloud metadata isn't propagating to DD observability surfaces.
               </p>
@@ -185,9 +185,9 @@ export default function CloudInventory() {
                         {gap.found ? '✓ Found' : '✗ Missing'}
                       </span>
                     </div>
-                    <div className="text-xs text-gray-500">
+                    <div className="text-xs text-ink-muted">
                       Cloud variants: {gap.cloudVariants.slice(0, 4).map(v => (
-                        <code key={v} className="bg-white border border-gray-200 px-1 rounded mr-1">{v}</code>
+                        <code key={v} className="bg-white border border-border px-1 rounded mr-1">{v}</code>
                       ))}
                     </div>
                   </div>
@@ -201,8 +201,8 @@ export default function CloudInventory() {
             <section>
               <div className="flex items-center justify-between mb-3">
                 <div>
-                  <h2 className="text-lg font-bold text-gray-900">Cloud-Sourced Tag Inventory</h2>
-                  <p className="text-sm text-gray-500 mt-0.5">
+                  <h2 className="text-lg font-bold text-ink">Cloud-Sourced Tag Inventory</h2>
+                  <p className="text-sm text-ink-muted mt-0.5">
                     Tags discovered on hosts grouped by the cloud provider that applied them
                   </p>
                 </div>
@@ -216,11 +216,11 @@ export default function CloudInventory() {
               </div>
 
               {/* Provider tabs */}
-              <div className="flex gap-1 mb-4 border-b border-gray-200">
+              <div className="flex gap-1 mb-4 border-b border-border">
                 <button
                   onClick={() => setActiveProvider(null)}
                   className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
-                    activeProvider === null ? 'border-violet-600 text-violet-700' : 'border-transparent text-gray-500 hover:text-gray-700'
+                    activeProvider === null ? 'border-violet-600 text-violet-700' : 'border-transparent text-ink-muted hover:text-ink-muted'
                   }`}
                 >
                   All providers
@@ -232,11 +232,11 @@ export default function CloudInventory() {
                       key={p}
                       onClick={() => setActiveProvider(p === activeProvider ? null : p)}
                       className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors flex items-center gap-1.5 ${
-                        activeProvider === p ? 'border-violet-600 text-violet-700' : 'border-transparent text-gray-500 hover:text-gray-700'
+                        activeProvider === p ? 'border-violet-600 text-violet-700' : 'border-transparent text-ink-muted hover:text-ink-muted'
                       }`}
                     >
                       {m.icon} {p.toUpperCase()}
-                      <span className="text-xs bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded-full">
+                      <span className="text-xs bg-surface-sunken text-ink-muted px-1.5 py-0.5 rounded-full">
                         {(data.keysBySource[p] ?? []).length}
                       </span>
                     </button>
@@ -269,29 +269,29 @@ export default function CloudInventory() {
                             {keys.length} tag keys · {rows.length} values
                           </span>
                         </div>
-                        <div className="text-xs text-gray-500">
+                        <div className="text-xs text-ink-muted">
                           {data.hostsWithCloudTags} hosts tagged
                         </div>
                       </div>
 
                       {keys.length === 0 ? (
-                        <div className="px-4 py-6 text-center text-sm text-gray-400">
+                        <div className="px-4 py-6 text-center text-sm text-ink-faint">
                           {tagSearch ? 'No tags match the filter' : 'No tags detected from this provider'}
                         </div>
                       ) : (
                         <table className="w-full text-sm">
                           <thead>
-                            <tr className="bg-gray-50 text-xs text-gray-500 uppercase tracking-wide">
+                            <tr className="bg-surface-subtle text-xs text-ink-muted uppercase tracking-wide">
                               <th className="text-left px-4 py-2 w-1/3">Tag Key</th>
                               <th className="text-left px-4 py-2">Values (top per key)</th>
                               <th className="text-right px-4 py-2 w-24">Unique Values</th>
                             </tr>
                           </thead>
-                          <tbody className="divide-y divide-gray-100">
+                          <tbody className="divide-y divide-border">
                             {keys.map(key => {
                               const vals = byKey[key].sort((a, b) => b.hostCount - a.hostCount);
                               return (
-                                <tr key={key} className="hover:bg-gray-50/50 transition-colors">
+                                <tr key={key} className="hover:bg-surface-subtle/50 transition-colors">
                                   <td className="px-4 py-2.5">
                                     <code className={`text-xs font-mono font-semibold px-1.5 py-0.5 rounded border ${m.bg} ${m.border} ${m.color}`}>
                                       {key}
@@ -300,17 +300,17 @@ export default function CloudInventory() {
                                   <td className="px-4 py-2.5">
                                     <div className="flex flex-wrap gap-1">
                                       {vals.slice(0, 6).map(({ value, hostCount }) => (
-                                        <span key={value} className="inline-flex items-center gap-1 text-xs bg-gray-100 text-gray-700 border border-gray-200 px-1.5 py-0.5 rounded">
+                                        <span key={value} className="inline-flex items-center gap-1 text-xs bg-surface-sunken text-ink-muted border border-border px-1.5 py-0.5 rounded">
                                           {value}
-                                          <span className="text-gray-400 text-[10px]">{hostCount}</span>
+                                          <span className="text-ink-faint text-[10px]">{hostCount}</span>
                                         </span>
                                       ))}
                                       {vals.length > 6 && (
-                                        <span className="text-xs text-gray-400">+{vals.length - 6} more</span>
+                                        <span className="text-xs text-ink-faint">+{vals.length - 6} more</span>
                                       )}
                                     </div>
                                   </td>
-                                  <td className="px-4 py-2.5 text-right tabular-nums text-gray-600">{vals.length}</td>
+                                  <td className="px-4 py-2.5 text-right tabular-nums text-ink-muted">{vals.length}</td>
                                 </tr>
                               );
                             })}
@@ -328,14 +328,14 @@ export default function CloudInventory() {
           {data.detectedProviders.length === 0 && (
             <section className="card text-center py-10 space-y-3">
               <div className="text-4xl">☁</div>
-              <div className="text-base font-semibold text-gray-700">No cloud provider tags detected on hosts</div>
-              <div className="text-sm text-gray-500 max-w-lg mx-auto">
+              <div className="text-base font-semibold text-ink-muted">No cloud provider tags detected on hosts</div>
+              <div className="text-sm text-ink-muted max-w-lg mx-auto">
                 Cloud provider tags are applied to hosts when the Datadog Agent runs on cloud instances and the
                 cloud integration is configured. Check that your AWS/GCP/Azure integration is enabled in Datadog
                 and that the Agent has permission to read instance metadata.
               </div>
-              <div className="text-xs text-gray-400 bg-gray-50 border border-gray-200 rounded-lg p-4 max-w-lg mx-auto text-left space-y-1">
-                <div className="font-semibold text-gray-600 mb-2">What to check:</div>
+              <div className="text-xs text-ink-faint bg-surface-subtle border border-border rounded-lg p-4 max-w-lg mx-auto text-left space-y-1">
+                <div className="font-semibold text-ink-muted mb-2">What to check:</div>
                 <div>• AWS: Enable "Collect tags" in the AWS integration tile</div>
                 <div>• GCP: Grant the Agent's service account <code>compute.instanceAdmin.v1</code> read access</div>
                 <div>• Azure: Enable "Resource group level" tag collection in Azure integration</div>

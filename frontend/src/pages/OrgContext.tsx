@@ -1,7 +1,10 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import { useOrgAndScanFilters } from '../hooks/useFilters';
 import { orgContextApi } from '../services/api';
+import PageHeader from '../components/ui/PageHeader';
+import { SkeletonText } from '../components/ui/Skeleton';
 import type { OrgContextData } from '../types';
 
 // ── Chip selector ──────────────────────────────────────────────────────────────
@@ -29,8 +32,8 @@ function ChipGroup({ options, selected, onChange, allowCustom = false }: {
           onClick={() => toggle(opt)}
           className={`text-xs px-3 py-1.5 rounded-full border transition-all font-medium ${
             selected.includes(opt)
-              ? 'bg-violet-600 text-white border-violet-600'
-              : 'bg-white text-gray-600 border-gray-300 hover:border-violet-400 hover:text-violet-600'
+              ? 'bg-dd-purple text-white border-dd-purple'
+              : 'bg-white text-ink-muted border-border-strong hover:border-dd-purple/50 hover:text-dd-purple'
           }`}
         >
           {opt}
@@ -41,14 +44,14 @@ function ChipGroup({ options, selected, onChange, allowCustom = false }: {
           key={s}
           type="button"
           onClick={() => toggle(s)}
-          className="text-xs px-3 py-1.5 rounded-full border bg-violet-100 text-violet-700 border-violet-300 font-medium"
+          className="text-xs px-3 py-1.5 rounded-full border bg-dd-purple/10 text-dd-purple-dark border-dd-purple/30 font-medium"
         >
           {s} ×
         </button>
       ))}
       {allowCustom && (
         <input
-          className="text-xs border border-dashed border-gray-300 rounded-full px-3 py-1.5 w-32 focus:outline-none focus:border-violet-400 placeholder:text-gray-400"
+          className="text-xs border border-dashed border-border-strong rounded-full px-3 py-1.5 w-32 focus:outline-none focus:border-dd-purple/50 placeholder:text-ink-faint"
           placeholder="+ add other"
           value={custom}
           onChange={e => setCustom(e.target.value)}
@@ -65,8 +68,8 @@ function ChipGroup({ options, selected, onChange, allowCustom = false }: {
 function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
     <div className="space-y-1">
-      <label className="block text-sm font-semibold text-gray-800">{label}</label>
-      {hint && <p className="text-xs text-gray-400">{hint}</p>}
+      <label className="block text-sm font-semibold text-ink">{label}</label>
+      {hint && <p className="text-xs text-ink-faint">{hint}</p>}
       {children}
     </div>
   );
@@ -108,8 +111,8 @@ function Section({ icon, title, subtitle, children }: {
       <div className="flex items-start gap-3">
         <span className="text-2xl mt-0.5">{icon}</span>
         <div>
-          <h2 className="text-base font-bold text-gray-900">{title}</h2>
-          <p className="text-xs text-gray-500 mt-0.5">{subtitle}</p>
+          <h2 className="text-base font-bold text-ink">{title}</h2>
+          <p className="text-xs text-ink-faint mt-0.5">{subtitle}</p>
         </div>
       </div>
       <div className="space-y-5 pl-9">
@@ -175,7 +178,11 @@ export default function OrgContext() {
       setSaveStatus('saved');
       setTimeout(() => setSaveStatus('idle'), 2500);
     },
-    onError: () => { setSaveStatus('error'); setTimeout(() => setSaveStatus('idle'), 3000); },
+    onError: (err) => {
+      setSaveStatus('error');
+      toast.error(err instanceof Error ? err.message : 'Failed to save org profile');
+      setTimeout(() => setSaveStatus('idle'), 3000);
+    },
   });
 
   const update = useCallback(<K extends keyof OrgContextData>(key: K, value: OrgContextData[K]) => {
@@ -191,40 +198,41 @@ export default function OrgContext() {
   if (!selectedOrgId) {
     return (
       <div className="max-w-3xl mx-auto">
-        <div className="card text-center py-16 text-gray-400">
+        <div className="card text-center py-16 text-ink-faint">
           <div className="text-4xl mb-3">🔍</div>
-          <div className="font-semibold text-gray-600">Select an organization from the header to get started</div>
+          <div className="font-semibold text-ink-muted">Select an organization from the header to get started</div>
         </div>
       </div>
     );
   }
 
+  const saveStatusBadge = (
+    <div className={`text-xs px-3 py-1.5 rounded-full font-medium transition-all whitespace-nowrap ${
+      saveStatus === 'saved' ? 'bg-green-100 text-green-700'
+      : saveStatus === 'saving' ? 'bg-amber-50 text-amber-600'
+      : saveStatus === 'error' ? 'bg-red-100 text-red-700'
+      : 'bg-surface-sunken text-ink-faint'
+    }`}>
+      {saveStatus === 'saved' ? '✓ Saved' : saveStatus === 'saving' ? 'Saving…' : saveStatus === 'error' ? 'Save failed' : 'Auto-saves as you type'}
+    </div>
+  );
+
   return (
     <div className="max-w-3xl mx-auto space-y-6">
-      {/* Header */}
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Getting to Know You</h1>
-          <p className="text-sm text-gray-500 mt-1">
-            Help our AI understand your business so every recommendation is relevant to <span className="font-medium text-gray-700">{selectedOrg?.name}</span> — not a generic org.
-          </p>
-        </div>
-        <div className={`text-xs px-3 py-1.5 rounded-full font-medium transition-all ${
-          saveStatus === 'saved' ? 'bg-green-100 text-green-700'
-          : saveStatus === 'saving' ? 'bg-amber-50 text-amber-600'
-          : saveStatus === 'error' ? 'bg-red-100 text-red-700'
-          : 'bg-gray-100 text-gray-400'
-        }`}>
-          {saveStatus === 'saved' ? '✓ Saved' : saveStatus === 'saving' ? 'Saving…' : saveStatus === 'error' ? 'Save failed' : 'Auto-saves as you type'}
-        </div>
-      </div>
+      <PageHeader
+        title="Getting to Know You"
+        subtitle={`Help our AI understand your business so every recommendation is relevant to ${selectedOrg?.name ?? 'your org'} — not a generic org.`}
+        actions={saveStatusBadge}
+      />
 
-      <div className="bg-violet-50 border border-violet-200 rounded-xl px-4 py-3 text-sm text-violet-800">
+      <div className="bg-dd-purple/5 border border-dd-purple/20 rounded-xl px-4 py-3 text-sm text-dd-purple-dark">
         <strong>Why this matters:</strong> Every AI insight in this app — from log cost optimization to Synthetics coverage gaps — will be tailored to your industry, tech stack, service tiers, and goals. The more context you provide, the more precise the recommendations.
       </div>
 
       {isLoading ? (
-        <div className="card text-center py-12 text-gray-400">Loading your profile…</div>
+        <div className="card space-y-4">
+          <SkeletonText lines={5} />
+        </div>
       ) : (
         <div className="space-y-5">
 
@@ -277,20 +285,20 @@ export default function OrgContext() {
                 { tier: '2', label: 'Tier 2 — Supporting Services', placeholder: 'e.g. Admin tools, Internal dashboards, Batch jobs — limited user impact, longer acceptable downtime', uptimeKey: null, descKey: 'tier2Description' as const },
               ] as const).map(({ tier, label, placeholder, uptimeKey, descKey }) => (
                 <div key={tier} className={`rounded-xl p-4 border space-y-3 ${
-                  tier === '0' ? 'bg-red-50 border-red-200' : tier === '1' ? 'bg-amber-50 border-amber-200' : 'bg-gray-50 border-gray-200'
+                  tier === '0' ? 'bg-red-50 border-red-200' : tier === '1' ? 'bg-amber-50 border-amber-200' : 'bg-surface-subtle border-border'
                 }`}>
-                  <div className="font-semibold text-sm text-gray-800">{label}</div>
+                  <div className="font-semibold text-sm text-ink">{label}</div>
                   <input className="input text-sm w-full" placeholder={placeholder}
                     value={(form[descKey] as string) ?? ''}
                     onChange={e => update(descKey, e.target.value)} />
                   {uptimeKey && (
                     <div className="flex items-center gap-3">
-                      <span className="text-xs text-gray-500 shrink-0">Uptime target:</span>
+                      <span className="text-xs text-ink-faint shrink-0">Uptime target:</span>
                       <div className="flex gap-1.5 flex-wrap">
                         {UPTIME_TARGETS.map(t => (
                           <button key={t} type="button" onClick={() => update(uptimeKey, t)}
                             className={`text-xs px-2.5 py-1 rounded-full border font-medium transition-all ${
-                              form[uptimeKey] === t ? 'bg-violet-600 text-white border-violet-600' : 'bg-white text-gray-600 border-gray-300 hover:border-violet-400'
+                              form[uptimeKey] === t ? 'bg-dd-purple text-white border-dd-purple' : 'bg-white text-ink-muted border-border-strong hover:border-dd-purple/50'
                             }`}>{t}</button>
                         ))}
                       </div>
@@ -308,7 +316,7 @@ export default function OrgContext() {
                 {REVENUE_IMPACT.map(r => (
                   <button key={r} type="button" onClick={() => update('revenueImpactPerHour', r)}
                     className={`text-xs px-3 py-1.5 rounded-full border font-medium transition-all ${
-                      form.revenueImpactPerHour === r ? 'bg-violet-600 text-white border-violet-600' : 'bg-white text-gray-600 border-gray-300 hover:border-violet-400'
+                      form.revenueImpactPerHour === r ? 'bg-dd-purple text-white border-dd-purple' : 'bg-white text-ink-muted border-border-strong hover:border-dd-purple/50'
                     }`}>{r}</button>
                 ))}
               </div>
@@ -341,7 +349,7 @@ export default function OrgContext() {
                   {['Yes', 'No'].map(v => (
                     <button key={v} type="button" onClick={() => update('hasDedicatedSRE', v === 'Yes')}
                       className={`flex-1 text-sm px-3 py-2 rounded-lg border font-medium transition-all ${
-                        (form.hasDedicatedSRE ? 'Yes' : 'No') === v ? 'bg-violet-600 text-white border-violet-600' : 'bg-white text-gray-600 border-gray-300 hover:border-violet-400'
+                        (form.hasDedicatedSRE ? 'Yes' : 'No') === v ? 'bg-dd-purple text-white border-dd-purple' : 'bg-white text-ink-muted border-border-strong hover:border-dd-purple/50'
                       }`}>{v}</button>
                   ))}
                 </div>
@@ -368,7 +376,7 @@ export default function OrgContext() {
           </Section>
 
           {saved?.updatedAt && (
-            <p className="text-xs text-center text-gray-400">
+            <p className="text-xs text-center text-ink-faint">
               Profile last saved {new Date(saved.updatedAt).toLocaleString()}
             </p>
           )}

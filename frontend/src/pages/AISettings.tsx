@@ -1,7 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import { aiSettingsApi } from '../services/api';
-import type { AIProviderSettings } from '../types';
+import PageHeader from '../components/ui/PageHeader';
+import { SkeletonText } from '../components/ui/Skeleton';
 
 type Provider = 'openai' | 'anthropic' | 'ollama' | 'none';
 
@@ -107,6 +109,10 @@ export default function AISettings() {
       setDirty(false);
       setApiKey('');
       setTestResult(null);
+      toast.success('AI provider settings saved');
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : 'Failed to save settings');
     },
   });
 
@@ -121,29 +127,45 @@ export default function AISettings() {
 
   const handleTest = async () => {
     setTestResult(null);
-    // Save first if dirty
-    if (dirty) await saveMutation.mutateAsync({ provider, model, ...(apiKey ? { apiKey } : {}), ...(provider === 'ollama' ? { baseUrl } : {}) });
-    const result = await aiSettingsApi.test();
-    setTestResult(result);
+    // Save first if dirty (failure is already toasted by the save mutation itself)
+    if (dirty) {
+      try {
+        await saveMutation.mutateAsync({ provider, model, ...(apiKey ? { apiKey } : {}), ...(provider === 'ollama' ? { baseUrl } : {}) });
+      } catch {
+        return;
+      }
+    }
+    try {
+      const result = await aiSettingsApi.test();
+      setTestResult(result);
+      if (!result.ok) toast.error(result.message);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Connection test failed');
+    }
   };
 
   const mark = () => setDirty(true);
 
-  if (isLoading) {
-    return <div className="flex items-center justify-center h-64 text-gray-400 text-sm">Loading settings…</div>;
-  }
-
   const activeEnvProvider = saved?.envProvider as string | undefined;
   const hasEnvFallback = !saved?.provider || saved.provider === 'none';
 
+  if (isLoading) {
+    return (
+      <div className="max-w-2xl space-y-8">
+        <PageHeader title="AI Provider Settings" subtitle="Configure the AI model used for chat, assessments, and recommendations." />
+        <div className="card space-y-4">
+          <SkeletonText lines={4} />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="max-w-2xl space-y-8">
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900">AI Provider Settings</h1>
-        <p className="text-sm text-gray-500 mt-1">
-          Configure the AI model used for chat, assessments, and recommendations. Settings are stored encrypted in the local database and override any <code className="text-xs bg-gray-100 px-1 rounded">.env</code> values.
-        </p>
-      </div>
+      <PageHeader
+        title="AI Provider Settings"
+        subtitle="Configure the AI model used for chat, assessments, and recommendations. Settings are stored encrypted in the local database and override any .env values."
+      />
 
       {hasEnvFallback && activeEnvProvider && activeEnvProvider !== 'none' && (
         <div className="card bg-amber-50 border-amber-200 text-sm text-amber-800 flex items-start gap-2 p-3">
@@ -154,7 +176,7 @@ export default function AISettings() {
 
       {/* Provider selector */}
       <section>
-        <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-3">Provider</h2>
+        <h2 className="text-sm font-semibold text-ink-muted uppercase tracking-wide mb-3">Provider</h2>
         <div className="grid grid-cols-3 gap-3">
           {PROVIDERS.map((p) => (
             <button
@@ -162,13 +184,13 @@ export default function AISettings() {
               onClick={() => { setProvider(p.id); mark(); setTestResult(null); }}
               className={`text-left p-4 rounded-xl border-2 transition-all ${
                 provider === p.id
-                  ? 'border-violet-500 bg-violet-50'
-                  : 'border-gray-200 bg-white hover:border-gray-300'
+                  ? 'border-dd-purple bg-dd-purple/5'
+                  : 'border-border bg-white hover:border-border-strong'
               }`}
             >
               <div className="text-2xl mb-2">{p.icon}</div>
-              <div className={`font-semibold text-sm ${provider === p.id ? 'text-violet-800' : 'text-gray-800'}`}>{p.label}</div>
-              <div className="text-xs text-gray-500 mt-1 leading-relaxed">{p.description}</div>
+              <div className={`font-semibold text-sm ${provider === p.id ? 'text-dd-purple-dark' : 'text-ink'}`}>{p.label}</div>
+              <div className="text-xs text-ink-faint mt-1 leading-relaxed">{p.description}</div>
             </button>
           ))}
         </div>
@@ -179,7 +201,7 @@ export default function AISettings() {
           {/* API Key */}
           {PROVIDERS.find(p => p.id === provider)?.needsKey && (
             <section>
-              <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-3">API Key</h2>
+              <h2 className="text-sm font-semibold text-ink-muted uppercase tracking-wide mb-3">API Key</h2>
               <div className="space-y-2">
                 <input
                   type="password"
@@ -193,7 +215,7 @@ export default function AISettings() {
                 {saved?.hasKey && saved.provider === provider && !apiKey && (
                   <div className="flex items-center gap-2">
                     <span className="text-xs text-green-600">✓ Key saved</span>
-                    <span className="text-xs text-gray-400">{saved.keyHint}</span>
+                    <span className="text-xs text-ink-faint">{saved.keyHint}</span>
                     <button
                       onClick={() => { saveMutation.mutate({ provider, model, clearKey: true }); }}
                       className="text-xs text-red-500 hover:text-red-700 ml-auto"
@@ -209,7 +231,7 @@ export default function AISettings() {
           {/* Base URL (Ollama only) */}
           {provider === 'ollama' && (
             <section>
-              <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-3">Ollama Base URL</h2>
+              <h2 className="text-sm font-semibold text-ink-muted uppercase tracking-wide mb-3">Ollama Base URL</h2>
               <input
                 type="text"
                 value={baseUrl}
@@ -217,7 +239,7 @@ export default function AISettings() {
                 placeholder="http://localhost:11434"
                 className="input w-full font-mono text-sm"
               />
-              <p className="text-xs text-gray-400 mt-1">
+              <p className="text-xs text-ink-faint mt-1">
                 The root URL of your Ollama instance — not the <code>/v1</code> endpoint. The app adds <code>/v1</code> for OpenAI-compatible calls and <code>/api/tags</code> for model discovery automatically.
               </p>
             </section>
@@ -226,12 +248,12 @@ export default function AISettings() {
           {/* Model selector */}
           <section>
             <div className="flex items-center justify-between mb-3">
-              <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">Model</h2>
+              <h2 className="text-sm font-semibold text-ink-muted uppercase tracking-wide">Model</h2>
               {provider !== 'anthropic' && (
                 <button
                   onClick={discoverModels}
                   disabled={discovering}
-                  className="text-xs text-violet-600 hover:text-violet-800 disabled:opacity-50 flex items-center gap-1"
+                  className="text-xs text-dd-purple hover:text-dd-purple-dark disabled:opacity-50 flex items-center gap-1"
                 >
                   {discovering ? (
                     <span className="animate-spin">↻</span>
@@ -255,12 +277,12 @@ export default function AISettings() {
                     onClick={() => { setModel(m); mark(); }}
                     className={`w-full text-left px-3 py-2 rounded-lg text-sm border transition-colors ${
                       model === m
-                        ? 'border-violet-400 bg-violet-50 text-violet-800 font-medium'
-                        : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
+                        ? 'border-dd-purple bg-dd-purple/5 text-dd-purple-dark font-medium'
+                        : 'border-border bg-white text-ink-muted hover:bg-surface-subtle'
                     }`}
                   >
                     <span className="font-mono">{m}</span>
-                    {model === m && <span className="ml-2 text-xs text-violet-500">selected</span>}
+                    {model === m && <span className="ml-2 text-xs text-dd-purple">selected</span>}
                   </button>
                 ))}
               </div>
@@ -273,7 +295,7 @@ export default function AISettings() {
                   placeholder={provider === 'openai' ? 'gpt-4o' : provider === 'ollama' ? 'llama3.2' : 'model name'}
                   className="input flex-1 font-mono text-sm"
                 />
-                {discovering && <span className="text-xs text-gray-400 animate-pulse">Discovering…</span>}
+                {discovering && <span className="text-xs text-ink-faint animate-pulse">Discovering…</span>}
               </div>
             )}
           </section>
@@ -283,14 +305,14 @@ export default function AISettings() {
             <button
               onClick={handleSave}
               disabled={saveMutation.isPending || !model}
-              className="px-5 py-2 bg-violet-600 text-white text-sm font-medium rounded-lg hover:bg-violet-700 disabled:opacity-50 transition-colors"
+              className="btn-primary disabled:opacity-50"
             >
               {saveMutation.isPending ? 'Saving…' : 'Save Settings'}
             </button>
             <button
               onClick={handleTest}
               disabled={saveMutation.isPending}
-              className="px-5 py-2 bg-white border border-gray-200 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors"
+              className="btn-secondary"
             >
               Test Connection
             </button>
@@ -319,26 +341,26 @@ export default function AISettings() {
 
       {/* Current status card */}
       {saved && saved.provider !== 'none' && (
-        <div className="card bg-gray-50 border-gray-200">
-          <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Active Configuration</div>
+        <div className="card bg-surface-subtle border-border">
+          <div className="text-xs font-semibold text-ink-faint uppercase tracking-wide mb-2">Active Configuration</div>
           <div className="flex flex-wrap gap-3 text-sm">
             <span className="flex items-center gap-1.5">
-              <span className="text-gray-400">Provider</span>
-              <code className="bg-violet-100 text-violet-700 px-1.5 py-0.5 rounded text-xs font-mono">{saved.provider}</code>
+              <span className="text-ink-faint">Provider</span>
+              <code className="bg-dd-purple/10 text-dd-purple-dark px-1.5 py-0.5 rounded text-xs font-mono">{saved.provider}</code>
             </span>
             <span className="flex items-center gap-1.5">
-              <span className="text-gray-400">Model</span>
-              <code className="bg-gray-100 text-gray-700 px-1.5 py-0.5 rounded text-xs font-mono">{saved.model || '—'}</code>
+              <span className="text-ink-faint">Model</span>
+              <code className="bg-surface-sunken text-ink-muted px-1.5 py-0.5 rounded text-xs font-mono">{saved.model || '—'}</code>
             </span>
             {saved.provider === 'ollama' && saved.baseUrl && (
               <span className="flex items-center gap-1.5">
-                <span className="text-gray-400">URL</span>
-                <code className="bg-gray-100 text-gray-700 px-1.5 py-0.5 rounded text-xs font-mono">{saved.baseUrl}</code>
+                <span className="text-ink-faint">URL</span>
+                <code className="bg-surface-sunken text-ink-muted px-1.5 py-0.5 rounded text-xs font-mono">{saved.baseUrl}</code>
               </span>
             )}
             {saved.hasKey && <span className="text-green-600 text-xs">✓ API key saved</span>}
             {saved.updatedAt && (
-              <span className="text-gray-400 text-xs ml-auto">
+              <span className="text-ink-faint text-xs ml-auto">
                 Updated {new Date(saved.updatedAt).toLocaleString()}
               </span>
             )}

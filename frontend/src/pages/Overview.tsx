@@ -1,13 +1,17 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
+import { toast } from 'sonner';
 import { orgsApi, scansApi, inventoryApi } from '../services/api';
 import { OrgScorecardCard } from '../components/common/ScoreCard';
 import MetricCard from '../components/common/MetricCard';
-import LoadingState, { EmptyState } from '../components/common/LoadingState';
+import { EmptyState } from '../components/common/LoadingState';
 import { ScanStatusBadge } from '../components/common/StatusBadge';
+import PageHeader from '../components/ui/PageHeader';
+import DataTable, { type Column } from '../components/common/DataTable';
+import { SkeletonCards } from '../components/ui/Skeleton';
 import { useOrgs, useScans } from '../hooks/useOrgs';
 import { formatDistanceToNow } from 'date-fns';
-import type { Org } from '../types';
+import type { Org, ScanRun } from '../types';
 
 export default function Overview() {
   const navigate = useNavigate();
@@ -18,7 +22,7 @@ export default function Overview() {
   const { data: scans = [] } = useScans(primaryOrg?.id);
   const latestScan = scans.find((s) => s.status === 'completed');
 
-  const { data: inventory } = useQuery({
+  const { data: inventory, isLoading: inventoryLoading } = useQuery({
     queryKey: ['inventory-summary', primaryOrg?.id, latestScan?.id],
     queryFn: () => inventoryApi.summary(primaryOrg!.id, latestScan!.id),
     enabled: Boolean(primaryOrg?.id && latestScan?.id),
@@ -32,13 +36,57 @@ export default function Overview() {
 
   const startScan = useMutation({
     mutationFn: (orgId: string) => scansApi.start(orgId),
-    onSuccess: () => {
+    onSuccess: (_data, orgId) => {
+      const org = orgs.find((o) => o.id === orgId);
+      toast.success(`Scan started${org ? ` for ${org.name}` : ''}`);
       qc.invalidateQueries({ queryKey: ['scans'] });
       qc.invalidateQueries({ queryKey: ['orgs'] });
     },
+    onError: (err: Error) => toast.error(err.message ?? 'Failed to start scan'),
   });
 
-  if (orgsLoading) return <LoadingState message="Loading organizations..." />;
+  const scanColumns: Column<ScanRun>[] = [
+    {
+      key: 'startedAt',
+      header: 'Started',
+      sortable: true,
+      sortAccessor: (s) => new Date(s.startedAt).getTime(),
+      render: (s) => formatDistanceToNow(new Date(s.startedAt), { addSuffix: true }),
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      sortable: true,
+      render: (s) => <ScanStatusBadge status={s.status} />,
+    },
+    {
+      key: 'findingCount',
+      header: 'Findings',
+      sortable: true,
+      render: (s) => s.findingCount ?? '—',
+    },
+    {
+      key: 'duration',
+      header: 'Duration',
+      render: (s) =>
+        s.completedAt ? (
+          <span className="font-mono text-xs">
+            {Math.round((new Date(s.completedAt).getTime() - new Date(s.startedAt).getTime()) / 1000)}s
+          </span>
+        ) : (
+          '—'
+        ),
+    },
+  ];
+
+  if (orgsLoading) {
+    return (
+      <div className="space-y-6 max-w-6xl">
+        <PageHeader title="Overview" subtitle="Loading organizations..." />
+        <SkeletonCards count={4} />
+      </div>
+    );
+  }
 
   if (orgs.length === 0) {
     return (
@@ -57,23 +105,21 @@ export default function Overview() {
 
   return (
     <div className="space-y-6 max-w-6xl">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Overview</h1>
-          <p className="text-gray-500 text-sm mt-1">
-            Architecture health status across {orgs.length} org{orgs.length !== 1 ? 's' : ''}
-          </p>
-        </div>
-        {primaryOrg && (
-          <button
-            className="btn-primary"
-            disabled={startScan.isPending || primaryOrg.lastScanStatus === 'running'}
-            onClick={() => startScan.mutate(primaryOrg.id)}
-          >
-            {primaryOrg.lastScanStatus === 'running' ? '⟳ Scanning...' : '▶ Run Scan'}
-          </button>
-        )}
-      </div>
+      <PageHeader
+        title="Overview"
+        subtitle={`Architecture health status across ${orgs.length} org${orgs.length !== 1 ? 's' : ''}`}
+        actions={
+          primaryOrg && (
+            <button
+              className="btn-primary"
+              disabled={startScan.isPending || primaryOrg.lastScanStatus === 'running'}
+              onClick={() => startScan.mutate(primaryOrg.id)}
+            >
+              {primaryOrg.lastScanStatus === 'running' ? '⟳ Scanning...' : '▶ Run Scan'}
+            </button>
+          )
+        }
+      />
 
       {/* Org pills */}
       <div className="flex flex-wrap gap-3">
@@ -99,9 +145,15 @@ export default function Overview() {
       )}
 
       {/* Inventory summary */}
+      {inventoryLoading && Boolean(primaryOrg?.id && latestScan?.id) && (
+        <div>
+          <h2 className="text-lg font-semibold text-ink mb-3">Inventory</h2>
+          <SkeletonCards count={8} />
+        </div>
+      )}
       {inventory && (
         <div>
-          <h2 className="text-lg font-semibold text-gray-900 mb-3">Inventory</h2>
+          <h2 className="text-lg font-semibold text-ink mb-3">Inventory</h2>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <MetricCard label="Hosts" value={inventory.hosts} icon="🖥" onClick={() => navigate('/inventory')} />
             <MetricCard label="APM Services" value={inventory.services} icon="⚡" onClick={() => navigate('/services')} />
@@ -124,37 +176,18 @@ export default function Overview() {
       {/* Recent scans */}
       {scans.length > 0 && (
         <div>
-          <h2 className="text-lg font-semibold text-gray-900 mb-3">Recent Scans</h2>
-          <div className="card p-0 overflow-hidden">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Started</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Status</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Findings</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Duration</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {scans.slice(0, 5).map((scan) => (
-                  <tr key={scan.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => navigate('/scans')}>
-                    <td className="px-4 py-3 text-gray-700">
-                      {formatDistanceToNow(new Date(scan.startedAt), { addSuffix: true })}
-                    </td>
-                    <td className="px-4 py-3">
-                      <ScanStatusBadge status={scan.status} />
-                    </td>
-                    <td className="px-4 py-3 text-gray-700">{scan.findingCount ?? '—'}</td>
-                    <td className="px-4 py-3 text-gray-500 font-mono text-xs">
-                      {scan.completedAt
-                        ? `${Math.round((new Date(scan.completedAt).getTime() - new Date(scan.startedAt).getTime()) / 1000)}s`
-                        : '—'}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-lg font-semibold text-ink">Recent Scans</h2>
+            <button className="text-xs text-dd-purple hover:text-dd-purple-dark" onClick={() => navigate('/scans')}>
+              View all →
+            </button>
           </div>
+          <DataTable
+            columns={scanColumns}
+            data={scans.slice(0, 5)}
+            rowKey={(scan) => scan.id}
+            onRowClick={() => navigate('/scans')}
+          />
         </div>
       )}
     </div>
@@ -163,10 +196,10 @@ export default function Overview() {
 
 function OrgStatusPill({ org, onScan }: { org: Org; onScan: () => void }) {
   return (
-    <div className="flex items-center gap-3 bg-white border border-gray-200 rounded-lg px-4 py-2.5 shadow-sm">
+    <div className="flex items-center gap-3 bg-white border border-border rounded-lg px-4 py-2.5 shadow-sm">
       <div>
-        <div className="text-sm font-medium text-gray-900">{org.name}</div>
-        <div className="text-xs text-gray-500">{org.site}</div>
+        <div className="text-sm font-medium text-ink">{org.name}</div>
+        <div className="text-xs text-ink-faint">{org.site}</div>
       </div>
       <ScanStatusBadge status={org.lastScanStatus ?? 'pending'} />
       {org.lastScanStatus !== 'running' && (

@@ -1,21 +1,23 @@
-import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { analyticsApi } from '../services/api';
 import { useOrgAndScanFilters } from '../hooks/useFilters';
-import LoadingState, { EmptyState } from '../components/common/LoadingState';
+import { EmptyState } from '../components/common/LoadingState';
 import { AISectionInsight } from '../components/analytics/AISectionInsight';
+import PageHeader from '../components/ui/PageHeader';
+import { SkeletonCards } from '../components/ui/Skeleton';
+import DataTable, { type Column } from '../components/common/DataTable';
 import type { AnalyticsData } from '../types';
 
 // ── Mini components ────────────────────────────────────────────────────────────
 
-function StatCard({ label, value, sub, color = 'text-gray-900' }: {
+function StatCard({ label, value, sub, color = 'text-ink' }: {
   label: string; value: string | number; sub?: string; color?: string;
 }) {
   return (
     <div className="card text-center py-4">
       <div className={`text-3xl font-bold ${color}`}>{value}</div>
-      <div className="text-xs font-semibold text-gray-500 mt-1">{label}</div>
-      {sub && <div className="text-xs text-gray-400 mt-0.5">{sub}</div>}
+      <div className="text-xs font-semibold text-ink-muted mt-1">{label}</div>
+      {sub && <div className="text-xs text-ink-faint mt-0.5">{sub}</div>}
     </div>
   );
 }
@@ -25,11 +27,11 @@ function Gauge({ pct, label, risk }: { pct: number; label: string; risk: 'low' |
   const clamp = Math.min(pct, 100);
   return (
     <div>
-      <div className="flex justify-between text-xs text-gray-500 mb-1">
+      <div className="flex justify-between text-xs text-ink-muted mb-1">
         <span>{label}</span>
         <span className="font-semibold" style={{ color }}>{pct}%</span>
       </div>
-      <div className="h-2.5 bg-gray-100 rounded-full overflow-hidden">
+      <div className="h-2.5 bg-surface-sunken rounded-full overflow-hidden">
         <div
           className="h-full rounded-full transition-all"
           style={{ width: `${clamp}%`, backgroundColor: color }}
@@ -47,7 +49,7 @@ function CoveragePill({ pct }: { pct: number }) {
 function RetentionBar({ dist }: { dist: Record<string, number> }) {
   const entries = Object.entries(dist).sort((a, b) => parseInt(a[0]) - parseInt(b[0]));
   const total = entries.reduce((s, [, n]) => s + n, 0);
-  if (total === 0) return <div className="text-xs text-gray-400">No retention data</div>;
+  if (total === 0) return <div className="text-xs text-ink-faint">No retention data</div>;
   return (
     <div className="flex h-5 rounded-full overflow-hidden gap-px">
       {entries.map(([label, count]) => {
@@ -69,11 +71,86 @@ function RetentionBar({ dist }: { dist: Record<string, number> }) {
   );
 }
 
+// ── Table column defs ───────────────────────────────────────────────────────────
+
+type IndexDetail = AnalyticsData['logs']['indexDetails'][number];
+type SyntheticDetail = AnalyticsData['synthetics']['details'][number];
+type IntegrationRow = AnalyticsData['integrations']['list'][number];
+type RumApp = AnalyticsData['rum']['apps'][number];
+
+const indexColumns: Column<IndexDetail>[] = [
+  { key: 'name', header: 'Index', sortable: true, render: (idx) => (
+    <div className="flex items-center gap-2">
+      <code className="text-xs font-mono text-ink">{idx.name}</code>
+      {idx.isFlex && <span className="text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-medium">Flex</span>}
+    </div>
+  ) },
+  { key: 'retentionDays', header: 'Retention', sortable: true, sortAccessor: (idx) => idx.retentionDays ?? 0, render: (idx) => (
+    <span className={`text-xs font-semibold ${
+      (idx.retentionDays ?? 0) > 90 ? 'text-red-600' :
+      (idx.retentionDays ?? 0) > 30 ? 'text-amber-700' : 'text-ink-muted'
+    }`}>
+      {idx.retentionDays != null ? `${idx.retentionDays}d` : '—'}
+    </span>
+  ) },
+  { key: 'dailyLimitEvents', header: 'Daily Limit', sortable: true, sortAccessor: (idx) => idx.dailyLimitEvents ?? Infinity, render: (idx) => (
+    <span className="text-xs text-ink-muted">
+      {idx.dailyLimitEvents != null
+        ? idx.dailyLimitEvents >= 1e6
+          ? `${(idx.dailyLimitEvents / 1e6).toFixed(0)}M`
+          : `${(idx.dailyLimitEvents / 1e3).toFixed(0)}K`
+        : <span className="text-red-500 font-semibold">∞ no limit</span>}
+    </span>
+  ) },
+  { key: 'exclusionFilters', header: 'Excl. Filters', sortable: true, render: (idx) => (
+    <span className={`text-xs font-semibold ${idx.exclusionFilters === 0 ? 'text-red-500' : 'text-green-700'}`}>{idx.exclusionFilters}</span>
+  ) },
+  { key: 'filterQuery', header: 'Filter Query', render: (idx) => (
+    <code className="text-xs text-ink-muted max-w-xs truncate block">{idx.filterQuery || '*'}</code>
+  ) },
+  { key: 'isRateLimited', header: 'Status', sortable: true, sortAccessor: (idx) => (idx.isRateLimited ? 1 : 0), render: (idx) => (
+    idx.isRateLimited ? <span className="text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded-full font-medium">Rate limited</span> : null
+  ) },
+];
+
+const syntheticsColumns: Column<SyntheticDetail>[] = [
+  { key: 'name', header: 'Test', sortable: true, render: (t) => <span className="text-xs text-ink max-w-xs truncate block">{t.name}</span> },
+  { key: 'type', header: 'Type', sortable: true, render: (t) => (
+    <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${t.type === 'browser' ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'}`}>{t.type}</span>
+  ) },
+  { key: 'status', header: 'Status', sortable: true, render: (t) => <span className="text-xs text-ink-muted">{t.status}</span> },
+  { key: 'locations', header: 'Locations', sortable: true, render: (t) => <span className="text-xs text-ink-muted">{t.locations}</span> },
+  { key: 'estimatedMonthlyRuns', header: 'Est. Runs/mo', sortable: true, render: (t) => <span className="text-xs font-semibold text-ink-muted">{t.estimatedMonthlyRuns.toLocaleString()}</span> },
+];
+
+const integrationColumns: Column<IntegrationRow>[] = [
+  { key: 'name', header: 'Integration', sortable: true, render: (i) => <span className="text-xs font-medium text-ink">{i.name}</span> },
+  { key: 'type', header: 'Type', sortable: true, render: (i) => <span className="text-xs text-ink-muted">{i.type ?? '—'}</span> },
+  { key: 'status', header: 'Status', sortable: true, render: (i) => <span className="text-xs text-ink-muted">{i.status ?? '—'}</span> },
+  { key: 'isEnabled', header: 'Enabled', sortable: true, sortAccessor: (i) => (i.isEnabled ? 1 : 0), render: (i) => (
+    <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${i.isEnabled ? 'bg-green-100 text-green-700' : 'bg-surface-sunken text-ink-muted'}`}>{i.isEnabled ? 'Yes' : 'No'}</span>
+  ) },
+];
+
+const rumColumns: Column<RumApp>[] = [
+  { key: 'name', header: 'Application', sortable: true, sortAccessor: (a) => a.name ?? a.id, render: (a) => <span className="text-xs font-medium text-ink">{a.name ?? a.id}</span> },
+  { key: 'type', header: 'Type', sortable: true, render: (a) => (
+    <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${
+      a.type === 'browser' ? 'bg-blue-100 text-blue-700' :
+      a.type === 'ios' ? 'bg-purple-100 text-purple-700' :
+      a.type === 'android' ? 'bg-green-100 text-green-700' : 'bg-surface-sunken text-ink-muted'
+    }`}>{a.type ?? 'unknown'}</span>
+  ) },
+  { key: 'framework', header: 'Framework', sortable: true, render: (a) => <span className="text-xs text-ink-muted">{a.framework ?? '—'}</span> },
+  { key: 'createdAt', header: 'Created', sortable: true, render: (a) => (
+    <span className="text-xs text-ink-faint">{a.createdAt ? new Date(a.createdAt).toLocaleDateString() : '—'}</span>
+  ) },
+];
+
 // ── Main page ──────────────────────────────────────────────────────────────────
 
 export default function Analytics() {
   const { selectedOrgId, selectedScanId } = useOrgAndScanFilters();
-  const [expandedIndex, setExpandedIndex] = useState<string | null>(null);
 
   const { data, isLoading } = useQuery({
     queryKey: ['analytics', selectedOrgId, selectedScanId],
@@ -83,30 +160,21 @@ export default function Analytics() {
 
   return (
     <div className="max-w-6xl space-y-8">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Analytics & Allotments</h1>
-          <p className="text-sm text-gray-500 mt-1">
-            Infrastructure footprint, log pipeline, integrations, and usage estimates across your Datadog account
-          </p>
-        </div>
-      </div>
+      <PageHeader
+        title="Analytics & Allotments"
+        subtitle="Infrastructure footprint, log pipeline, integrations, and usage estimates across your Datadog account"
+      />
 
       {!selectedScanId ? <EmptyState message="Select a scan to view analytics" /> :
-        isLoading ? <LoadingState /> :
+        isLoading ? <SkeletonCards count={8} /> :
         !data ? <EmptyState message="No analytics data available" /> :
-        <AnalyticsBody data={data} expandedIndex={expandedIndex} setExpandedIndex={setExpandedIndex} />
+        <AnalyticsBody data={data} />
       }
     </div>
   );
 }
 
-function AnalyticsBody({ data, expandedIndex, setExpandedIndex }: {
-  data: AnalyticsData;
-  expandedIndex: string | null;
-  setExpandedIndex: (v: string | null) => void;
-}) {
+function AnalyticsBody({ data }: { data: AnalyticsData }) {
   const { infrastructure, customMetrics, logs, integrations, synthetics, apm, observability, monitorBreakdown, sloBreakdown, governance, scorecard, rum, fleet } = data;
 
   return (
@@ -118,7 +186,7 @@ function AnalyticsBody({ data, expandedIndex, setExpandedIndex }: {
         <StatCard label="Log Indexes" value={logs.totalIndexes} sub={`${logs.pipelines} pipelines`} color="text-blue-700" />
         <StatCard label="Integrations" value={integrations.total} sub={`${integrations.configured} configured`} color="text-green-700" />
         <StatCard label="APM Services" value={apm.totalServices} sub={`${apm.svcInCatalog} in catalog`} color="text-amber-700" />
-        <StatCard label="Monitors" value={observability.monitors} sub={monitorBreakdown.mutedCount > 0 ? `${monitorBreakdown.mutedCount} muted` : 'none muted'} color={monitorBreakdown.mutedCount > 0 ? 'text-amber-700' : 'text-gray-900'} />
+        <StatCard label="Monitors" value={observability.monitors} sub={monitorBreakdown.mutedCount > 0 ? `${monitorBreakdown.mutedCount} muted` : 'none muted'} color={monitorBreakdown.mutedCount > 0 ? 'text-amber-700' : 'text-ink'} />
         <StatCard label="SLOs" value={sloBreakdown.total} sub={Object.keys(sloBreakdown.byType).join(' · ') || 'none'} color="text-teal-700" />
         <StatCard label="Dashboards" value={observability.dashboards} color="text-indigo-700" />
         {scorecard && <StatCard label="Health Score" value={`${scorecard.overallScore}%`} sub={scorecard.overallGrade} color={scorecard.overallScore >= 90 ? 'text-green-700' : scorecard.overallScore >= 70 ? 'text-amber-700' : 'text-red-700'} />}
@@ -131,26 +199,26 @@ function AnalyticsBody({ data, expandedIndex, setExpandedIndex }: {
 
           {/* Host footprint */}
           <div className="card col-span-1 space-y-3">
-            <div className="font-semibold text-gray-800 text-sm">Host Footprint</div>
+            <div className="font-semibold text-ink text-sm">Host Footprint</div>
             <div className="text-4xl font-bold text-violet-700">{infrastructure.totalHosts}</div>
-            <div className="text-xs text-gray-500">Tier: {infrastructure.hostTier}</div>
+            <div className="text-xs text-ink-muted">Tier: {infrastructure.hostTier}</div>
             {infrastructure.containers != null && (
-              <div className="text-xs text-gray-500">Containers: {infrastructure.containers.toLocaleString()}</div>
+              <div className="text-xs text-ink-muted">Containers: {infrastructure.containers.toLocaleString()}</div>
             )}
             {infrastructure.cloudAccounts.length > 0 && (
               <div className="flex flex-wrap gap-1 mt-1">
                 {infrastructure.cloudAccounts.map(ca => (
-                  <span key={ca.provider} className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">
+                  <span key={ca.provider} className="text-xs bg-surface-sunken text-ink-muted px-2 py-0.5 rounded-full">
                     {ca.provider}: {ca.n}
                   </span>
                 ))}
               </div>
             )}
-            <div className="space-y-2 pt-2 border-t border-gray-100">
-              <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide">UST Coverage</div>
+            <div className="space-y-2 pt-2 border-t border-border">
+              <div className="text-xs font-semibold text-ink-muted uppercase tracking-wide">UST Coverage</div>
               {(['env', 'service', 'version', 'team'] as const).map(k => (
                 <div key={k} className="flex items-center justify-between text-xs">
-                  <code className="text-gray-600">{k}</code>
+                  <code className="text-ink-muted">{k}</code>
                   <CoveragePill pct={infrastructure.tagCoverage[k]} />
                 </div>
               ))}
@@ -160,7 +228,7 @@ function AnalyticsBody({ data, expandedIndex, setExpandedIndex }: {
           {/* Custom metrics allotment */}
           <div className="card col-span-2 space-y-4">
             <div className="flex items-center justify-between">
-              <div className="font-semibold text-gray-800 text-sm">Custom Metrics Allotment</div>
+              <div className="font-semibold text-ink text-sm">Custom Metrics Allotment</div>
               <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${
                 customMetrics.risk === 'high' ? 'bg-red-100 text-red-700'
                 : customMetrics.risk === 'medium' ? 'bg-amber-100 text-amber-700'
@@ -171,17 +239,17 @@ function AnalyticsBody({ data, expandedIndex, setExpandedIndex }: {
             </div>
 
             <div className="grid grid-cols-3 gap-3 text-center">
-              <div className="bg-gray-50 rounded-lg p-3">
-                <div className="text-xl font-bold text-gray-900">{customMetrics.estimated.toLocaleString()}</div>
-                <div className="text-xs text-gray-500">Estimated volume</div>
+              <div className="bg-surface-subtle rounded-lg p-3">
+                <div className="text-xl font-bold text-ink">{customMetrics.estimated.toLocaleString()}</div>
+                <div className="text-xs text-ink-muted">Estimated volume</div>
               </div>
               <div className="bg-violet-50 rounded-lg p-3">
                 <div className="text-xl font-bold text-violet-700">{customMetrics.allotmentAt100PerHost.toLocaleString()}</div>
-                <div className="text-xs text-gray-500">Allotment @ 100/host</div>
+                <div className="text-xs text-ink-muted">Allotment @ 100/host</div>
               </div>
               <div className="bg-blue-50 rounded-lg p-3">
                 <div className="text-xl font-bold text-blue-700">{customMetrics.allotmentAt200PerHost.toLocaleString()}</div>
-                <div className="text-xs text-gray-500">Allotment @ 200/host</div>
+                <div className="text-xs text-ink-muted">Allotment @ 200/host</div>
               </div>
             </div>
 
@@ -189,18 +257,18 @@ function AnalyticsBody({ data, expandedIndex, setExpandedIndex }: {
 
             {customMetrics.topDrivers.length > 0 && (
               <div>
-                <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Top Cardinality Drivers</div>
+                <div className="text-xs font-semibold text-ink-muted uppercase tracking-wide mb-2">Top Cardinality Drivers</div>
                 <div className="space-y-1.5">
                   {customMetrics.topDrivers.slice(0, 6).map(d => (
                     <div key={d.key} className="flex items-center gap-2">
                       <code className="text-xs text-violet-700 w-40 truncate shrink-0">{d.key}</code>
-                      <div className="flex-1 h-1.5 bg-gray-100 rounded-full">
+                      <div className="flex-1 h-1.5 bg-surface-sunken rounded-full">
                         <div
                           className="h-full bg-violet-400 rounded-full"
                           style={{ width: `${Math.min((d.uniqueValues / (customMetrics.topDrivers[0]?.uniqueValues || 1)) * 100, 100)}%` }}
                         />
                       </div>
-                      <span className="text-xs text-gray-500 w-20 text-right shrink-0">
+                      <span className="text-xs text-ink-muted w-20 text-right shrink-0">
                         {d.uniqueValues} values · ~{d.estimatedMetrics.toLocaleString()} CM
                       </span>
                     </div>
@@ -225,7 +293,7 @@ function AnalyticsBody({ data, expandedIndex, setExpandedIndex }: {
               label="Daily Event Limit"
               value={logs.totalDailyLimitEvents > 0 ? (logs.totalDailyLimitEvents / 1e6).toFixed(0) + 'M' : '∞'}
               sub={logs.totalDailyLimitEvents === 0 ? 'Uncapped — cost risk' : 'events/day total'}
-              color={logs.totalDailyLimitEvents === 0 ? 'text-red-600' : 'text-gray-900'}
+              color={logs.totalDailyLimitEvents === 0 ? 'text-red-600' : 'text-ink'}
             />
             <StatCard
               label="Exclusion Filters"
@@ -237,15 +305,15 @@ function AnalyticsBody({ data, expandedIndex, setExpandedIndex }: {
               label="Rate Limited"
               value={logs.rateLimitedCount}
               sub={logs.rateLimitedCount > 0 ? 'hitting daily cap' : 'none hitting cap'}
-              color={logs.rateLimitedCount > 0 ? 'text-red-600' : 'text-gray-900'}
+              color={logs.rateLimitedCount > 0 ? 'text-red-600' : 'text-ink'}
             />
           </div>
 
           {/* Retention distribution */}
           <div className="card">
             <div className="flex items-center justify-between mb-3">
-              <div className="font-semibold text-gray-800 text-sm">Retention Distribution</div>
-              <div className="flex gap-3 text-xs text-gray-400">
+              <div className="font-semibold text-ink text-sm">Retention Distribution</div>
+              <div className="flex gap-3 text-xs text-ink-faint">
                 <span><span className="inline-block w-3 h-2 bg-green-400 rounded mr-1" />≤7d</span>
                 <span><span className="inline-block w-3 h-2 bg-blue-400 rounded mr-1" />≤15d</span>
                 <span><span className="inline-block w-3 h-2 bg-violet-400 rounded mr-1" />≤30d</span>
@@ -256,7 +324,7 @@ function AnalyticsBody({ data, expandedIndex, setExpandedIndex }: {
             <RetentionBar dist={logs.retentionDistribution} />
             <div className="mt-2 flex flex-wrap gap-2">
               {Object.entries(logs.retentionDistribution).sort((a, b) => parseInt(a[0]) - parseInt(b[0])).map(([label, count]) => (
-                <span key={label} className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded">
+                <span key={label} className="text-xs bg-surface-sunken text-ink-muted px-2 py-0.5 rounded">
                   {label}: {count} index{count > 1 ? 'es' : ''}
                 </span>
               ))}
@@ -274,63 +342,13 @@ function AnalyticsBody({ data, expandedIndex, setExpandedIndex }: {
           </div>
 
           {/* Index table */}
-          <div className="card p-0 overflow-hidden">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50 border-b border-gray-200">
-                <tr>
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Index</th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Retention</th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Daily Limit</th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Excl. Filters</th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Filter Query</th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Status</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {logs.indexDetails.map(idx => (
-                  <tr key={idx.name} className={`hover:bg-gray-50 ${expandedIndex === idx.name ? 'bg-violet-50' : ''}`}>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-2">
-                        <code className="text-xs font-mono text-gray-800">{idx.name}</code>
-                        {idx.isFlex && <span className="text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-medium">Flex</span>}
-                      </div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className={`text-xs font-semibold ${
-                        (idx.retentionDays ?? 0) > 90 ? 'text-red-600' :
-                        (idx.retentionDays ?? 0) > 30 ? 'text-amber-700' : 'text-gray-700'
-                      }`}>
-                        {idx.retentionDays != null ? `${idx.retentionDays}d` : '—'}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-xs text-gray-600">
-                      {idx.dailyLimitEvents != null
-                        ? idx.dailyLimitEvents >= 1e6
-                          ? `${(idx.dailyLimitEvents / 1e6).toFixed(0)}M`
-                          : `${(idx.dailyLimitEvents / 1e3).toFixed(0)}K`
-                        : <span className="text-red-500 font-semibold">∞ no limit</span>}
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className={`text-xs font-semibold ${idx.exclusionFilters === 0 ? 'text-red-500' : 'text-green-700'}`}>
-                        {idx.exclusionFilters}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-xs text-gray-500 max-w-xs truncate">
-                      <code>{idx.filterQuery || '*'}</code>
-                    </td>
-                    <td className="px-4 py-3">
-                      {idx.isRateLimited && (
-                        <span className="text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded-full font-medium">Rate limited</span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-                {logs.indexDetails.length === 0 && (
-                  <tr><td colSpan={6} className="px-4 py-8 text-center text-xs text-gray-400">No log indexes found</td></tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+          <DataTable
+            columns={indexColumns}
+            data={logs.indexDetails}
+            rowKey={(idx) => idx.name}
+            emptyMessage="No log indexes found"
+            tableId="analytics-log-indexes"
+          />
         </div>
       </section>
 
@@ -340,7 +358,7 @@ function AnalyticsBody({ data, expandedIndex, setExpandedIndex }: {
           <SectionHeader title="Synthetics Usage" aiPrompt="Analyze this org's Datadog Synthetics usage. Review the mix of API vs browser tests, estimated monthly run volumes, test status distribution, and location spread. Browser tests cost significantly more than API tests. Identify opportunities to replace or consolidate browser tests with API tests where appropriate, flag tests with unusually high run volumes, and provide the top 3 recommendations to optimize synthetic test coverage while reducing costs." />
           <div className="grid grid-cols-4 gap-3 mb-4">
             <StatCard label="API Tests" value={synthetics.apiTests} />
-            <StatCard label="Browser Tests" value={synthetics.browserTests} color={synthetics.browserTests > 0 ? 'text-amber-700' : 'text-gray-900'} />
+            <StatCard label="Browser Tests" value={synthetics.browserTests} color={synthetics.browserTests > 0 ? 'text-amber-700' : 'text-ink'} />
             <StatCard
               label="Est. Monthly Runs"
               value={synthetics.estimatedMonthlyRuns > 1e6
@@ -354,38 +372,16 @@ function AnalyticsBody({ data, expandedIndex, setExpandedIndex }: {
                 ? `${Math.round(synthetics.browserTests / (synthetics.apiTests + synthetics.browserTests) * 100)}%`
                 : '—'}
               sub="browser (higher cost)"
-              color={synthetics.browserTests / (synthetics.apiTests + synthetics.browserTests || 1) > 0.5 ? 'text-amber-700' : 'text-gray-900'}
+              color={synthetics.browserTests / (synthetics.apiTests + synthetics.browserTests || 1) > 0.5 ? 'text-amber-700' : 'text-ink'}
             />
           </div>
           {synthetics.details.length > 0 && (
-            <div className="card p-0 overflow-hidden">
-              <table className="w-full text-sm">
-                <thead className="bg-gray-50 border-b border-gray-200">
-                  <tr>
-                    <th className="text-left px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Test</th>
-                    <th className="text-left px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Type</th>
-                    <th className="text-left px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Status</th>
-                    <th className="text-right px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Locations</th>
-                    <th className="text-right px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Est. Runs/mo</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {synthetics.details.map((t, i) => (
-                    <tr key={i} className="hover:bg-gray-50">
-                      <td className="px-4 py-2 text-xs text-gray-800 max-w-xs truncate">{t.name}</td>
-                      <td className="px-4 py-2">
-                        <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${
-                          t.type === 'browser' ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'
-                        }`}>{t.type}</span>
-                      </td>
-                      <td className="px-4 py-2 text-xs text-gray-500">{t.status}</td>
-                      <td className="px-4 py-2 text-xs text-right text-gray-600">{t.locations}</td>
-                      <td className="px-4 py-2 text-xs text-right font-semibold text-gray-700">{t.estimatedMonthlyRuns.toLocaleString()}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <DataTable
+              columns={syntheticsColumns}
+              data={synthetics.details}
+              rowKey={(t) => t.name}
+              tableId="analytics-synthetics"
+            />
           )}
         </section>
       )}
@@ -408,25 +404,25 @@ function AnalyticsBody({ data, expandedIndex, setExpandedIndex }: {
         <SectionHeader title="Integrations" aiPrompt="Analyze this org's Datadog integration footprint. Review total integrations detected, how many are configured vs enabled, the breakdown by integration type, and which specific integrations are present. Identify integrations that are configured but not enabled (potential waste or gaps), critical integrations that may be missing based on the infrastructure in use (cloud providers, databases, etc.), and provide the top 3 recommendations to improve integration coverage and data collection." />
         <div className="grid grid-cols-3 gap-4">
           <div className="card space-y-3">
-            <div className="font-semibold text-gray-800 text-sm">Summary</div>
+            <div className="font-semibold text-ink text-sm">Summary</div>
             <div className="space-y-2">
               {[
-                { label: 'Total detected', value: integrations.total, color: 'text-gray-900' },
+                { label: 'Total detected', value: integrations.total, color: 'text-ink' },
                 { label: 'Configured', value: integrations.configured, color: 'text-blue-700' },
                 { label: 'Enabled', value: integrations.enabled, color: 'text-green-700' },
               ].map(r => (
                 <div key={r.label} className="flex justify-between text-sm">
-                  <span className="text-gray-500">{r.label}</span>
+                  <span className="text-ink-muted">{r.label}</span>
                   <span className={`font-semibold ${r.color}`}>{r.value}</span>
                 </div>
               ))}
             </div>
             {integrations.byType.length > 0 && (
-              <div className="pt-2 border-t border-gray-100">
-                <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">By Type</div>
+              <div className="pt-2 border-t border-border">
+                <div className="text-xs font-semibold text-ink-muted uppercase tracking-wide mb-2">By Type</div>
                 <div className="flex flex-wrap gap-1">
                   {integrations.byType.map(t => (
-                    <span key={t.type} className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded">
+                    <span key={t.type} className="text-xs bg-surface-sunken text-ink-muted px-2 py-0.5 rounded">
                       {t.type}: {t.count}
                     </span>
                   ))}
@@ -435,36 +431,14 @@ function AnalyticsBody({ data, expandedIndex, setExpandedIndex }: {
             )}
           </div>
 
-          <div className="card col-span-2 p-0 overflow-hidden">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50 border-b border-gray-200">
-                <tr>
-                  <th className="text-left px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Integration</th>
-                  <th className="text-left px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Type</th>
-                  <th className="text-left px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Status</th>
-                  <th className="text-left px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Enabled</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100 max-h-56 overflow-y-auto">
-                {integrations.list.map(i => (
-                  <tr key={i.name} className="hover:bg-gray-50">
-                    <td className="px-4 py-2 text-xs font-medium text-gray-800">{i.name}</td>
-                    <td className="px-4 py-2 text-xs text-gray-500">{i.type ?? '—'}</td>
-                    <td className="px-4 py-2 text-xs text-gray-500">{i.status ?? '—'}</td>
-                    <td className="px-4 py-2">
-                      <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${
-                        i.isEnabled ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'
-                      }`}>
-                        {i.isEnabled ? 'Yes' : 'No'}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-                {integrations.list.length === 0 && (
-                  <tr><td colSpan={4} className="px-4 py-8 text-center text-xs text-gray-400">No integrations found in this scan</td></tr>
-                )}
-              </tbody>
-            </table>
+          <div className="col-span-2 max-h-96 overflow-y-auto">
+            <DataTable
+              columns={integrationColumns}
+              data={integrations.list}
+              rowKey={(i) => i.name}
+              emptyMessage="No integrations found in this scan"
+              tableId="analytics-integrations"
+            />
           </div>
         </div>
       </section>
@@ -476,19 +450,19 @@ function AnalyticsBody({ data, expandedIndex, setExpandedIndex }: {
 
             {/* State distribution */}
             <div className="card space-y-3">
-              <div className="font-semibold text-gray-800 text-sm">Alert State Distribution</div>
+              <div className="font-semibold text-ink text-sm">Alert State Distribution</div>
               <div className="space-y-2">
                 {Object.entries(monitorBreakdown.byState).sort((a, b) => b[1] - a[1]).map(([state, count]) => {
                   const pct = Math.round((count / monitorBreakdown.total) * 100);
                   const color = state === 'Alert' ? 'bg-red-400' : state === 'Warn' ? 'bg-amber-400' : state === 'No Data' ? 'bg-gray-300' : 'bg-green-400';
-                  const textColor = state === 'Alert' ? 'text-red-700' : state === 'Warn' ? 'text-amber-700' : state === 'No Data' ? 'text-gray-500' : 'text-green-700';
+                  const textColor = state === 'Alert' ? 'text-red-700' : state === 'Warn' ? 'text-amber-700' : state === 'No Data' ? 'text-ink-muted' : 'text-green-700';
                   return (
                     <div key={state}>
                       <div className="flex justify-between text-xs mb-1">
-                        <span className="text-gray-600">{state}</span>
+                        <span className="text-ink-muted">{state}</span>
                         <span className={`font-semibold ${textColor}`}>{count} ({pct}%)</span>
                       </div>
-                      <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                      <div className="h-1.5 bg-surface-sunken rounded-full overflow-hidden">
                         <div className={`h-full rounded-full ${color}`} style={{ width: `${pct}%` }} />
                       </div>
                     </div>
@@ -499,12 +473,12 @@ function AnalyticsBody({ data, expandedIndex, setExpandedIndex }: {
 
             {/* Type breakdown */}
             <div className="card space-y-3">
-              <div className="font-semibold text-gray-800 text-sm">Monitor Types</div>
+              <div className="font-semibold text-ink text-sm">Monitor Types</div>
               <div className="space-y-1.5">
                 {Object.entries(monitorBreakdown.byType).sort((a, b) => b[1] - a[1]).map(([type, count]) => (
                   <div key={type} className="flex items-center justify-between text-xs">
-                    <span className="text-gray-600 capitalize">{type}</span>
-                    <span className="font-semibold text-gray-800 bg-gray-100 px-2 py-0.5 rounded-full">{count}</span>
+                    <span className="text-ink-muted capitalize">{type}</span>
+                    <span className="font-semibold text-ink bg-surface-sunken px-2 py-0.5 rounded-full">{count}</span>
                   </div>
                 ))}
               </div>
@@ -512,7 +486,7 @@ function AnalyticsBody({ data, expandedIndex, setExpandedIndex }: {
 
             {/* Coverage gaps */}
             <div className="card space-y-3">
-              <div className="font-semibold text-gray-800 text-sm">Coverage Gaps</div>
+              <div className="font-semibold text-ink text-sm">Coverage Gaps</div>
               <div className="space-y-2">
                 {[
                   { label: 'Muted', count: monitorBreakdown.mutedCount, risk: monitorBreakdown.mutedCount > 0 },
@@ -522,7 +496,7 @@ function AnalyticsBody({ data, expandedIndex, setExpandedIndex }: {
                   { label: 'Missing team tag', count: monitorBreakdown.withoutTeamTag, risk: monitorBreakdown.withoutTeamTag > monitorBreakdown.total * 0.5 },
                 ].map(({ label, count, risk }) => (
                   <div key={label} className="flex items-center justify-between text-xs">
-                    <span className="text-gray-600">{label}</span>
+                    <span className="text-ink-muted">{label}</span>
                     <span className={`font-semibold px-2 py-0.5 rounded-full ${risk && count > 0 ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>
                       {count}
                     </span>
@@ -556,22 +530,22 @@ function AnalyticsBody({ data, expandedIndex, setExpandedIndex }: {
         {sloBreakdown.total > 0 && (
           <div className="mt-3 grid grid-cols-2 gap-3">
             <div className="card space-y-2">
-              <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide">SLO Tag Coverage</div>
+              <div className="text-xs font-semibold text-ink-muted uppercase tracking-wide">SLO Tag Coverage</div>
               {(['env', 'service'] as const).map(tag => {
                 const count = tag === 'env' ? sloBreakdown.withEnvTag : sloBreakdown.withServiceTag;
                 const pct = sloBreakdown.total > 0 ? Math.round(count / sloBreakdown.total * 100) : 0;
                 return (
                   <div key={tag} className="flex items-center justify-between text-xs">
-                    <code className="text-gray-600">{tag}</code>
+                    <code className="text-ink-muted">{tag}</code>
                     <CoveragePill pct={pct} />
                   </div>
                 );
               })}
             </div>
             <div className="card space-y-2">
-              <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Service Coverage</div>
-              <div className="text-xs text-gray-600">
-                <span className="font-semibold text-gray-900">{apm.svcWithSLO}</span> of <span className="font-semibold text-gray-900">{apm.totalServices}</span> APM services have at least one SLO
+              <div className="text-xs font-semibold text-ink-muted uppercase tracking-wide">Service Coverage</div>
+              <div className="text-xs text-ink-muted">
+                <span className="font-semibold text-ink">{apm.svcWithSLO}</span> of <span className="font-semibold text-ink">{apm.totalServices}</span> APM services have at least one SLO
               </div>
               {apm.totalServices > 0 && apm.svcWithSLO < apm.totalServices && (
                 <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
@@ -590,22 +564,22 @@ function AnalyticsBody({ data, expandedIndex, setExpandedIndex }: {
 
           {/* Users & roles */}
           <div className="card space-y-4">
-            <div className="font-semibold text-gray-800 text-sm">Users & Access</div>
+            <div className="font-semibold text-ink text-sm">Users & Access</div>
             <div className="grid grid-cols-2 gap-3 text-center">
-              <div className="bg-gray-50 rounded-lg p-3">
-                <div className="text-2xl font-bold text-gray-900">{governance.userCount ?? '—'}</div>
-                <div className="text-xs text-gray-500 mt-0.5">Users</div>
+              <div className="bg-surface-subtle rounded-lg p-3">
+                <div className="text-2xl font-bold text-ink">{governance.userCount ?? '—'}</div>
+                <div className="text-xs text-ink-muted mt-0.5">Users</div>
               </div>
               <div className="bg-blue-50 rounded-lg p-3">
                 <div className="text-2xl font-bold text-blue-700">{governance.roleCount ?? '—'}</div>
-                <div className="text-xs text-gray-500 mt-0.5">Roles</div>
+                <div className="text-xs text-ink-muted mt-0.5">Roles</div>
               </div>
             </div>
           </div>
 
           {/* Governance findings */}
           <div className="card col-span-2 space-y-2">
-            <div className="font-semibold text-gray-800 text-sm">Governance & Tagging Findings</div>
+            <div className="font-semibold text-ink text-sm">Governance & Tagging Findings</div>
             {governance.findings.length === 0 ? (
               <div className="text-xs text-green-700 bg-green-50 border border-green-200 rounded px-3 py-2">
                 ✓ No governance or tagging findings — org is in good shape
@@ -617,19 +591,19 @@ function AnalyticsBody({ data, expandedIndex, setExpandedIndex }: {
                     f.severity === 'critical' ? 'bg-red-50 border-red-200 text-red-800' :
                     f.severity === 'high' ? 'bg-orange-50 border-orange-200 text-orange-800' :
                     f.severity === 'medium' ? 'bg-amber-50 border-amber-200 text-amber-800' :
-                    'bg-gray-50 border-gray-200 text-gray-700'
+                    'bg-surface-subtle border-border text-ink-muted'
                   }`}>
                     <div className="flex items-center gap-2 mb-0.5">
                       <span className={`font-semibold uppercase text-[10px] px-1.5 py-0.5 rounded ${
                         f.severity === 'critical' ? 'bg-red-200 text-red-800' :
                         f.severity === 'high' ? 'bg-orange-200 text-orange-800' :
                         f.severity === 'medium' ? 'bg-amber-200 text-amber-800' :
-                        'bg-gray-200 text-gray-700'
+                        'bg-surface-sunken text-ink-muted'
                       }`}>{f.severity}</span>
                       <span className="font-medium">{f.ruleName}</span>
                     </div>
-                    <div className="text-gray-600">{f.description}</div>
-                    {f.recommendation && <div className="mt-1 text-gray-500 italic">{f.recommendation}</div>}
+                    <div className="text-ink-muted">{f.description}</div>
+                    {f.recommendation && <div className="mt-1 text-ink-muted italic">{f.recommendation}</div>}
                   </div>
                 ))}
               </div>
@@ -649,51 +623,28 @@ function AnalyticsBody({ data, expandedIndex, setExpandedIndex }: {
           ) : (
             <div className="grid grid-cols-3 gap-4">
               <div className="card space-y-3">
-                <div className="font-semibold text-gray-800 text-sm">Summary</div>
+                <div className="font-semibold text-ink text-sm">Summary</div>
                 <div className="text-4xl font-bold text-violet-700">{rum.total}</div>
-                <div className="text-xs text-gray-500">RUM applications</div>
+                <div className="text-xs text-ink-muted">RUM applications</div>
                 {Object.keys(rum.byType).length > 0 && (
-                  <div className="pt-2 border-t border-gray-100 space-y-1.5">
-                    <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide">By Type</div>
+                  <div className="pt-2 border-t border-border space-y-1.5">
+                    <div className="text-xs font-semibold text-ink-muted uppercase tracking-wide">By Type</div>
                     {Object.entries(rum.byType).sort((a, b) => b[1] - a[1]).map(([type, count]) => (
                       <div key={type} className="flex items-center justify-between text-xs">
-                        <span className="text-gray-600 capitalize">{type}</span>
-                        <span className="font-semibold text-gray-800 bg-gray-100 px-2 py-0.5 rounded-full">{count}</span>
+                        <span className="text-ink-muted capitalize">{type}</span>
+                        <span className="font-semibold text-ink bg-surface-sunken px-2 py-0.5 rounded-full">{count}</span>
                       </div>
                     ))}
                   </div>
                 )}
               </div>
-              <div className="card col-span-2 p-0 overflow-hidden">
-                <table className="w-full text-sm">
-                  <thead className="bg-gray-50 border-b border-gray-200">
-                    <tr>
-                      <th className="text-left px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Application</th>
-                      <th className="text-left px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Type</th>
-                      <th className="text-left px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Framework</th>
-                      <th className="text-left px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Created</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100">
-                    {rum.apps.map(app => (
-                      <tr key={app.id} className="hover:bg-gray-50">
-                        <td className="px-4 py-2 text-xs font-medium text-gray-800">{app.name ?? app.id}</td>
-                        <td className="px-4 py-2">
-                          <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${
-                            app.type === 'browser' ? 'bg-blue-100 text-blue-700' :
-                            app.type === 'ios' ? 'bg-purple-100 text-purple-700' :
-                            app.type === 'android' ? 'bg-green-100 text-green-700' :
-                            'bg-gray-100 text-gray-600'
-                          }`}>{app.type ?? 'unknown'}</span>
-                        </td>
-                        <td className="px-4 py-2 text-xs text-gray-500">{app.framework ?? '—'}</td>
-                        <td className="px-4 py-2 text-xs text-gray-400">
-                          {app.createdAt ? new Date(app.createdAt).toLocaleDateString() : '—'}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+              <div className="col-span-2">
+                <DataTable
+                  columns={rumColumns}
+                  data={rum.apps}
+                  rowKey={(app) => app.id}
+                  tableId="analytics-rum-apps"
+                />
               </div>
             </div>
           )}
@@ -708,9 +659,9 @@ function AnalyticsBody({ data, expandedIndex, setExpandedIndex }: {
 
             {/* Agent versions */}
             <div className="card space-y-3">
-              <div className="font-semibold text-gray-800 text-sm">Agent Version Distribution</div>
+              <div className="font-semibold text-ink text-sm">Agent Version Distribution</div>
               {Object.keys(fleet.agentVersions).length === 0 ? (
-                <div className="text-xs text-gray-400">No version data</div>
+                <div className="text-xs text-ink-faint">No version data</div>
               ) : (
                 <div className="space-y-2">
                   {Object.entries(fleet.agentVersions).sort((a, b) => b[1] - a[1]).map(([ver, count]) => {
@@ -721,10 +672,10 @@ function AnalyticsBody({ data, expandedIndex, setExpandedIndex }: {
                     return (
                       <div key={ver}>
                         <div className="flex justify-between text-xs mb-1">
-                          <span className={`font-mono ${isOld ? 'text-red-600' : 'text-gray-700'}`}>Agent {ver}</span>
-                          <span className={`font-semibold ${isOld ? 'text-red-600' : 'text-gray-600'}`}>{count} ({pct}%)</span>
+                          <span className={`font-mono ${isOld ? 'text-red-600' : 'text-ink-muted'}`}>Agent {ver}</span>
+                          <span className={`font-semibold ${isOld ? 'text-red-600' : 'text-ink-muted'}`}>{count} ({pct}%)</span>
                         </div>
-                        <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                        <div className="h-1.5 bg-surface-sunken rounded-full overflow-hidden">
                           <div
                             className={`h-full rounded-full ${isOld ? 'bg-red-400' : 'bg-green-400'}`}
                             style={{ width: `${pct}%` }}
@@ -739,15 +690,15 @@ function AnalyticsBody({ data, expandedIndex, setExpandedIndex }: {
 
             {/* Platforms */}
             <div className="card space-y-3">
-              <div className="font-semibold text-gray-800 text-sm">OS Platforms</div>
+              <div className="font-semibold text-ink text-sm">OS Platforms</div>
               {Object.keys(fleet.platforms).length === 0 ? (
-                <div className="text-xs text-gray-400">No platform data</div>
+                <div className="text-xs text-ink-faint">No platform data</div>
               ) : (
                 <div className="space-y-1.5">
                   {Object.entries(fleet.platforms).sort((a, b) => b[1] - a[1]).map(([platform, count]) => (
                     <div key={platform} className="flex items-center justify-between text-xs">
-                      <span className="text-gray-600">{platform}</span>
-                      <span className="font-semibold text-gray-800 bg-gray-100 px-2 py-0.5 rounded-full">{count}</span>
+                      <span className="text-ink-muted">{platform}</span>
+                      <span className="font-semibold text-ink bg-surface-sunken px-2 py-0.5 rounded-full">{count}</span>
                     </div>
                   ))}
                 </div>
@@ -756,15 +707,15 @@ function AnalyticsBody({ data, expandedIndex, setExpandedIndex }: {
 
             {/* Top installed checks */}
             <div className="card space-y-3">
-              <div className="font-semibold text-gray-800 text-sm">Top Installed Checks</div>
+              <div className="font-semibold text-ink text-sm">Top Installed Checks</div>
               {fleet.installedChecks.length === 0 ? (
-                <div className="text-xs text-gray-400">No check data</div>
+                <div className="text-xs text-ink-faint">No check data</div>
               ) : (
                 <div className="space-y-1.5">
                   {fleet.installedChecks.map(({ name, count }) => (
                     <div key={name} className="flex items-center justify-between text-xs">
-                      <code className="text-gray-700">{name}</code>
-                      <span className="font-semibold text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">{count} host{count > 1 ? 's' : ''}</span>
+                      <code className="text-ink-muted">{name}</code>
+                      <span className="font-semibold text-ink-muted bg-surface-sunken px-2 py-0.5 rounded-full">{count} host{count > 1 ? 's' : ''}</span>
                     </div>
                   ))}
                 </div>
@@ -789,7 +740,7 @@ function AnalyticsBody({ data, expandedIndex, setExpandedIndex }: {
                     scorecard.overallScore >= 90 ? 'text-green-600' :
                     scorecard.overallScore >= 70 ? 'text-amber-600' : 'text-red-600'
                   }`}>{scorecard.overallScore}%</div>
-                  <div className="text-xs font-semibold text-gray-500 mt-1 uppercase tracking-wide">{scorecard.overallGrade.replace('_', ' ')}</div>
+                  <div className="text-xs font-semibold text-ink-muted mt-1 uppercase tracking-wide">{scorecard.overallGrade.replace('_', ' ')}</div>
                 </div>
                 <div className="flex-1 grid grid-cols-3 md:grid-cols-5 gap-3">
                   {scorecard.categories.map(cat => (
@@ -798,7 +749,7 @@ function AnalyticsBody({ data, expandedIndex, setExpandedIndex }: {
                         cat.percentage >= 90 ? 'text-green-600' :
                         cat.percentage >= 70 ? 'text-amber-600' : 'text-red-600'
                       }`}>{cat.percentage}%</div>
-                      <div className="text-[10px] text-gray-500 capitalize leading-tight mt-0.5">
+                      <div className="text-[10px] text-ink-muted capitalize leading-tight mt-0.5">
                         {cat.category.replace(/_/g, ' ')}
                       </div>
                     </div>
@@ -810,26 +761,26 @@ function AnalyticsBody({ data, expandedIndex, setExpandedIndex }: {
             {/* Top findings */}
             {scorecard.topFindings.length > 0 && (
               <div className="card p-0 overflow-hidden">
-                <div className="px-4 py-3 bg-gray-50 border-b border-gray-200 text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                <div className="px-4 py-3 bg-surface-subtle border-b border-border text-xs font-semibold text-ink-muted uppercase tracking-wide">
                   Top Findings
                 </div>
-                <div className="divide-y divide-gray-100">
+                <div className="divide-y divide-border">
                   {scorecard.topFindings.filter(f => f.severity !== 'info').map((f, i) => (
                     <div key={i} className="px-4 py-3 flex items-start gap-3">
                       <span className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded shrink-0 mt-0.5 ${
                         f.severity === 'critical' ? 'bg-red-100 text-red-700' :
                         f.severity === 'high' ? 'bg-orange-100 text-orange-700' :
                         f.severity === 'medium' ? 'bg-amber-100 text-amber-700' :
-                        'bg-gray-100 text-gray-600'
+                        'bg-surface-sunken text-ink-muted'
                       }`}>{f.severity}</span>
                       <div className="min-w-0">
-                        <div className="text-xs font-medium text-gray-800">{f.title || f.ruleName}</div>
-                        <div className="text-xs text-gray-500 mt-0.5">{f.description}</div>
+                        <div className="text-xs font-medium text-ink">{f.title || f.ruleName}</div>
+                        <div className="text-xs text-ink-muted mt-0.5">{f.description}</div>
                         {f.recommendation && (
                           <div className="text-xs text-violet-600 mt-1">→ {f.recommendation}</div>
                         )}
                       </div>
-                      <span className="text-[10px] text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded shrink-0 ml-auto capitalize">
+                      <span className="text-[10px] text-ink-faint bg-surface-sunken px-1.5 py-0.5 rounded shrink-0 ml-auto capitalize">
                         {f.category.replace(/_/g, ' ')}
                       </span>
                     </div>
@@ -848,8 +799,8 @@ function AnalyticsBody({ data, expandedIndex, setExpandedIndex }: {
 function SectionHeader({ title, aiPrompt }: { title: string; aiPrompt?: string }) {
   return (
     <div className="flex items-center gap-3 mb-4">
-      <h2 className="text-lg font-bold text-gray-900">{title}</h2>
-      <div className="flex-1 border-t border-gray-200" />
+      <h2 className="text-lg font-bold text-ink">{title}</h2>
+      <div className="flex-1 border-t border-border" />
       {aiPrompt && <AISectionInsight section={title} prompt={aiPrompt} />}
     </div>
   );

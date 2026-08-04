@@ -1,10 +1,16 @@
+import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { scansApi, analyticsApi } from '../services/api';
 import { useOrgAndScanFilters } from '../hooks/useFilters';
 import { ddBaseUrl, ddUrl } from '../utils/ddUrl';
 import EvidenceTable from '../components/common/EvidenceTable';
 import MetricCard from '../components/common/MetricCard';
-import LoadingState, { EmptyState } from '../components/common/LoadingState';
+import DataTable from '../components/common/DataTable';
+import { EmptyState } from '../components/common/LoadingState';
+import PageHeader from '../components/ui/PageHeader';
+import FilterChip, { FilterChipRow } from '../components/ui/FilterChip';
+import { SkeletonCards, SkeletonTable } from '../components/ui/Skeleton';
+import type { FindingSeverity } from '../types';
 
 function DDLink({ href, label = 'Open in Datadog' }: { href: string; label?: string }) {
   return (
@@ -41,6 +47,7 @@ export default function LogsHealth() {
   const { orgs, selectedOrgId, selectedScanId } = useOrgAndScanFilters();
   const selectedOrg = orgs.find(o => o.id === selectedOrgId);
   const base = ddBaseUrl(selectedOrg?.site ?? 'datadoghq.com');
+  const [severityFilter, setSeverityFilter] = useState<FindingSeverity | 'all'>('all');
 
   const { data: findings = [], isLoading } = useQuery({
     queryKey: ['findings', selectedScanId, 'logs_health'],
@@ -48,13 +55,11 @@ export default function LogsHealth() {
     enabled: Boolean(selectedScanId),
   });
 
-  const { data: analytics } = useQuery({
+  const { data: analytics, isLoading: analyticsLoading } = useQuery({
     queryKey: ['analytics', selectedOrgId, selectedScanId],
     queryFn: () => analyticsApi.get(selectedOrgId, selectedScanId),
     enabled: Boolean(selectedOrgId && selectedScanId),
   });
-
-  if (isLoading) return <LoadingState />;
 
   const logs = analytics?.logs;
   const indexDetails = logs?.indexDetails ?? [];
@@ -68,17 +73,28 @@ export default function LogsHealth() {
   const retEntries = Object.entries(retDist).sort((a, b) => parseInt(a[0]) - parseInt(b[0]));
   const totalIndexedByRetention = retEntries.reduce((s, [, n]) => s + n, 0);
 
+  const severityCounts = useMemo(() => {
+    const counts: Record<FindingSeverity, number> = { critical: 0, high: 0, medium: 0, low: 0, info: 0 };
+    findings.forEach((f) => { counts[f.severity] = (counts[f.severity] ?? 0) + 1; });
+    return counts;
+  }, [findings]);
+
+  const filteredFindings = severityFilter === 'all' ? findings : findings.filter((f) => f.severity === severityFilter);
+
   return (
     <div className="max-w-5xl space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Logs Health</h1>
-          <p className="text-gray-500 text-sm mt-1">Index coverage, pipeline hygiene, retention strategy, and cost exposure</p>
-        </div>
-        <DDLink href={ddUrl.logsIndexes(base)} label="Manage Indexes" />
-      </div>
+      <PageHeader
+        title="Logs Health"
+        subtitle="Index coverage, pipeline hygiene, retention strategy, and cost exposure"
+        actions={<DDLink href={ddUrl.logsIndexes(base)} label="Manage Indexes" />}
+      />
 
-      {!selectedScanId ? <EmptyState message="Run a scan to see logs health data" /> : (
+      {!selectedScanId ? <EmptyState message="Run a scan to see logs health data" /> : (isLoading || analyticsLoading) ? (
+        <div className="space-y-6">
+          <SkeletonCards count={5} />
+          <SkeletonTable rows={6} cols={6} />
+        </div>
+      ) : (
         <>
           {/* Top metrics */}
           <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
@@ -111,7 +127,7 @@ export default function LogsHealth() {
           {/* Side-effect banners */}
           {(noExclusionFilters.length > 0 || rateLimited.length > 0 || noDailyLimit.length > 0) && (
             <div className="space-y-2">
-              <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">Active Risk Signals</h2>
+              <h2 className="text-sm font-semibold text-ink-muted uppercase tracking-wide">Active Risk Signals</h2>
               {rateLimited.map(idx => (
                 <SideEffectBanner key={idx.name}
                   severity="critical"
@@ -142,66 +158,71 @@ export default function LogsHealth() {
           {/* Findings */}
           {findings.length > 0 && (
             <div className="card">
-              <h2 className="text-lg font-semibold text-gray-900 mb-3">Logs Findings ({findings.length})</h2>
-              <EvidenceTable findings={findings} />
+              <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+                <h2 className="text-lg font-semibold text-ink">
+                  Logs Findings ({filteredFindings.length}{filteredFindings.length !== findings.length ? ` of ${findings.length}` : ''})
+                </h2>
+                <FilterChipRow>
+                  <FilterChip label="All" active={severityFilter === 'all'} count={findings.length} onClick={() => setSeverityFilter('all')} />
+                  {(['critical', 'high', 'medium', 'low', 'info'] as FindingSeverity[])
+                    .filter((s) => severityCounts[s] > 0)
+                    .map((s) => (
+                      <FilterChip
+                        key={s}
+                        label={s[0].toUpperCase() + s.slice(1)}
+                        active={severityFilter === s}
+                        count={severityCounts[s]}
+                        onClick={() => setSeverityFilter(s)}
+                      />
+                    ))}
+                </FilterChipRow>
+              </div>
+              <EvidenceTable findings={filteredFindings} />
             </div>
           )}
 
           {/* Index breakdown table */}
           {indexDetails.length > 0 && (
             <div className="card p-0 overflow-hidden">
-              <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
-                <h2 className="text-base font-semibold text-gray-900">Index Breakdown ({indexDetails.length})</h2>
+              <div className="px-4 py-3 border-b border-border flex items-center justify-between">
+                <h2 className="text-base font-semibold text-ink">Index Breakdown ({indexDetails.length})</h2>
                 <DDLink href={ddUrl.logsIndexes(base)} label="Manage all" />
               </div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="bg-gray-50 text-xs text-gray-500 uppercase tracking-wide">
-                      <th className="text-left px-4 py-2">Index</th>
-                      <th className="text-center px-3 py-2">Type</th>
-                      <th className="text-right px-3 py-2">Retention</th>
-                      <th className="text-right px-3 py-2">Daily Limit</th>
-                      <th className="text-right px-3 py-2">Excl. Filters</th>
-                      <th className="text-center px-3 py-2">Status</th>
-                      <th className="px-3 py-2"></th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100">
-                    {indexDetails.map((idx) => (
-                      <tr key={idx.name} className={`bg-white hover:bg-violet-50/20 ${idx.isRateLimited ? 'bg-red-50/40' : ''}`}>
-                        <td className="px-4 py-2.5 font-mono text-xs font-medium text-gray-900 max-w-[160px] truncate" title={idx.name}>{idx.name}</td>
-                        <td className="px-3 py-2.5 text-center">
-                          <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${idx.isFlex ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'}`}>
-                            {idx.isFlex ? 'Flex' : 'Online'}
-                          </span>
-                        </td>
-                        <td className="px-3 py-2.5 text-right text-xs">
-                          {idx.retentionDays ? `${idx.retentionDays}d` : '—'}
-                        </td>
-                        <td className="px-3 py-2.5 text-right text-xs">
-                          {idx.dailyLimitEvents
-                            ? (idx.dailyLimitEvents >= 1e9 ? `${(idx.dailyLimitEvents / 1e9).toFixed(1)}B` : idx.dailyLimitEvents >= 1e6 ? `${(idx.dailyLimitEvents / 1e6).toFixed(0)}M` : idx.dailyLimitEvents.toLocaleString())
-                            : <span className="text-amber-500">∞ No limit</span>}
-                        </td>
-                        <td className="px-3 py-2.5 text-right">
-                          <span className={`text-xs font-medium ${idx.exclusionFilters === 0 && !idx.isFlex ? 'text-amber-600' : 'text-green-600'}`}>
-                            {idx.exclusionFilters === 0 && !idx.isFlex ? '⚠ None' : idx.exclusionFilters}
-                          </span>
-                        </td>
-                        <td className="px-3 py-2.5 text-center">
-                          {idx.isRateLimited
-                            ? <span className="text-[10px] px-1.5 py-0.5 bg-red-100 text-red-700 rounded font-bold">RATE LIMITED</span>
-                            : <span className="text-green-600 text-xs">✓</span>}
-                        </td>
-                        <td className="px-3 py-2.5 text-right">
-                          <DDLink href={ddUrl.logIndex(base, idx.name)} label="View" />
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <DataTable
+                tableId="logs-index-breakdown"
+                columns={[
+                  { key: 'name', header: 'Index', sortable: true, render: (idx) => (
+                    <span className="font-mono text-xs font-medium text-ink max-w-[160px] truncate inline-block" title={idx.name}>{idx.name}</span>
+                  ) },
+                  { key: 'isFlex', header: 'Type', sortable: true, sortAccessor: (idx) => (idx.isFlex ? 'Flex' : 'Online'), render: (idx) => (
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${idx.isFlex ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'}`}>
+                      {idx.isFlex ? 'Flex' : 'Online'}
+                    </span>
+                  ) },
+                  { key: 'retentionDays', header: 'Retention', sortable: true, render: (idx) => (
+                    <span className="text-xs">{idx.retentionDays ? `${idx.retentionDays}d` : '—'}</span>
+                  ) },
+                  { key: 'dailyLimitEvents', header: 'Daily Limit', sortable: true, render: (idx) => (
+                    idx.dailyLimitEvents
+                      ? <span className="text-xs">{idx.dailyLimitEvents >= 1e9 ? `${(idx.dailyLimitEvents / 1e9).toFixed(1)}B` : idx.dailyLimitEvents >= 1e6 ? `${(idx.dailyLimitEvents / 1e6).toFixed(0)}M` : idx.dailyLimitEvents.toLocaleString()}</span>
+                      : <span className="text-xs text-amber-500">∞ No limit</span>
+                  ) },
+                  { key: 'exclusionFilters', header: 'Excl. Filters', sortable: true, render: (idx) => (
+                    <span className={`text-xs font-medium ${idx.exclusionFilters === 0 && !idx.isFlex ? 'text-amber-600' : 'text-green-600'}`}>
+                      {idx.exclusionFilters === 0 && !idx.isFlex ? '⚠ None' : idx.exclusionFilters}
+                    </span>
+                  ) },
+                  { key: 'isRateLimited', header: 'Status', sortable: true, render: (idx) => (
+                    idx.isRateLimited
+                      ? <span className="text-[10px] px-1.5 py-0.5 bg-red-100 text-red-700 rounded font-bold">RATE LIMITED</span>
+                      : <span className="text-green-600 text-xs">✓</span>
+                  ) },
+                  { key: 'view', header: '', render: (idx) => <DDLink href={ddUrl.logIndex(base, idx.name)} label="View" /> },
+                ]}
+                data={indexDetails}
+                rowKey={(idx) => idx.name}
+                emptyMessage="No indexes found"
+              />
             </div>
           )}
 
@@ -209,7 +230,7 @@ export default function LogsHealth() {
           {retEntries.length > 0 && (
             <div className="card">
               <div className="flex items-center justify-between mb-3">
-                <h2 className="text-base font-semibold text-gray-900">Retention Distribution</h2>
+                <h2 className="text-base font-semibold text-ink">Retention Distribution</h2>
                 <DDLink href={ddUrl.logsIndexes(base)} label="Edit retentions" />
               </div>
               <div className="space-y-2">
@@ -217,17 +238,17 @@ export default function LogsHealth() {
                   const pct = totalIndexedByRetention > 0 ? Math.round((count / totalIndexedByRetention) * 100) : 0;
                   return (
                     <div key={days} className="flex items-center gap-3">
-                      <span className="w-12 text-right text-xs text-gray-500 font-mono">{days}d</span>
-                      <div className="flex-1 bg-gray-100 rounded-full h-3 overflow-hidden">
+                      <span className="w-12 text-right text-xs text-ink-muted font-mono">{days}d</span>
+                      <div className="flex-1 bg-surface-sunken rounded-full h-3 overflow-hidden">
                         <div className="h-full bg-violet-400 rounded-full" style={{ width: `${pct}%` }} />
                       </div>
-                      <span className="w-16 text-xs text-gray-600 font-medium">{count} index{count > 1 ? 'es' : ''} ({pct}%)</span>
+                      <span className="w-16 text-xs text-ink-muted font-medium">{count} index{count > 1 ? 'es' : ''} ({pct}%)</span>
                     </div>
                   );
                 })}
               </div>
               {retEntries.some(([days]) => parseInt(days) > 30) && (
-                <p className="text-xs text-amber-600 mt-2 pt-2 border-t border-gray-100">
+                <p className="text-xs text-amber-600 mt-2 pt-2 border-t border-border">
                   ⚠ Indexes with &gt;30 day retention have elevated storage costs. Consider Flex Logs for infrequently accessed data.
                 </p>
               )}
@@ -236,7 +257,7 @@ export default function LogsHealth() {
 
           {/* Quick investigation links */}
           <div className="card">
-            <h2 className="text-sm font-semibold text-gray-700 mb-3">Investigate in Datadog</h2>
+            <h2 className="text-sm font-semibold text-ink-muted mb-3">Investigate in Datadog</h2>
             <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
               {[
                 { label: 'All logs (Live Tail)', href: ddUrl.logs(base) },
@@ -247,9 +268,9 @@ export default function LogsHealth() {
                 { label: 'Log archives', href: ddUrl.logsArchives(base) },
               ].map(({ label, href }) => (
                 <a key={label} href={href} target="_blank" rel="noopener noreferrer"
-                  className="flex items-center justify-between px-3 py-2.5 rounded-lg border border-gray-200 hover:border-violet-300 hover:bg-violet-50/30 transition-colors group">
-                  <span className="text-sm text-gray-700 group-hover:text-violet-700">{label}</span>
-                  <span className="text-gray-300 group-hover:text-violet-500">↗</span>
+                  className="flex items-center justify-between px-3 py-2.5 rounded-lg border border-border hover:border-violet-300 hover:bg-violet-50/30 transition-colors group">
+                  <span className="text-sm text-ink-muted group-hover:text-violet-700">{label}</span>
+                  <span className="text-ink-faint group-hover:text-violet-500">↗</span>
                 </a>
               ))}
             </div>

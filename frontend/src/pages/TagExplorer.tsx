@@ -3,7 +3,9 @@ import { useQuery } from '@tanstack/react-query';
 import { inventoryApi } from '../services/api';
 import { useOrgAndScanFilters } from '../hooks/useFilters';
 import DataTable from '../components/common/DataTable';
-import LoadingState, { EmptyState } from '../components/common/LoadingState';
+import { EmptyState } from '../components/common/LoadingState';
+import PageHeader from '../components/ui/PageHeader';
+import { SkeletonCards, SkeletonTable } from '../components/ui/Skeleton';
 
 // ─── Static recommendation definitions ────────────────────────────────────────
 
@@ -228,8 +230,8 @@ function CoverageBar({ pct, label }: { pct: number | null; label: string }) {
   const textColor = pct >= 80 ? 'text-green-700' : pct >= 50 ? 'text-amber-700' : 'text-red-600';
   return (
     <div className="flex items-center gap-1.5 min-w-0">
-      <span className="text-xs text-gray-500 w-14 shrink-0">{label}</span>
-      <div className="flex-1 bg-gray-100 rounded-full h-1.5 min-w-0">
+      <span className="text-xs text-ink-muted w-14 shrink-0">{label}</span>
+      <div className="flex-1 bg-surface-sunken rounded-full h-1.5 min-w-0">
         <div className={`${color} h-1.5 rounded-full`} style={{ width: `${pct}%` }} />
       </div>
       <span className={`text-xs font-medium w-8 text-right shrink-0 ${textColor}`}>{pct}%</span>
@@ -249,7 +251,7 @@ function AppliesTo({ layers }: { layers: string[] }) {
   return (
     <div className="flex flex-wrap gap-1 mt-1">
       {layers.map((l) => (
-        <span key={l} className="text-xs bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">
+        <span key={l} className="text-xs bg-surface-sunken text-ink-muted px-1.5 py-0.5 rounded">
           {l}
         </span>
       ))}
@@ -277,7 +279,7 @@ function HierarchyLayerCard({
       ? <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">Tracked</span>
       : layer.status === 'partial'
       ? <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">Partial</span>
-      : <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">Guidance only</span>;
+      : <span className="text-xs bg-surface-sunken text-ink-muted px-2 py-0.5 rounded-full">Guidance only</span>;
 
   return (
     <div className="flex gap-0">
@@ -291,13 +293,13 @@ function HierarchyLayerCard({
       <div className="flex-1 mb-4">
         <div className="card p-0 overflow-hidden">
           <button
-            className="w-full text-left px-4 py-3 flex items-center gap-3 hover:bg-gray-50"
+            className="w-full text-left px-4 py-3 flex items-center gap-3 hover:bg-surface-subtle"
             onClick={() => setOpen((o) => !o)}
           >
             <span className="text-xl">{layer.icon}</span>
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-sm font-semibold text-gray-900">{layer.label}</span>
+                <span className="text-sm font-semibold text-ink">{layer.label}</span>
                 {statusBadge}
               </div>
               {/* Inline coverage bars when collapsed */}
@@ -309,17 +311,17 @@ function HierarchyLayerCard({
                 </div>
               )}
             </div>
-            <span className="text-gray-400 text-xs">{open ? '▲' : '▼'}</span>
+            <span className="text-ink-faint text-xs">{open ? '▲' : '▼'}</span>
           </button>
 
           {open && (
-            <div className="border-t border-gray-100 px-4 py-3 space-y-3">
-              <p className="text-sm text-gray-600">{layer.description}</p>
+            <div className="border-t border-border px-4 py-3 space-y-3">
+              <p className="text-sm text-ink-muted">{layer.description}</p>
 
               {/* Coverage bars */}
               {coverage && (
                 <div>
-                  <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
+                  <div className="text-xs font-semibold text-ink-muted uppercase tracking-wide mb-2">
                     Tag Coverage
                   </div>
                   <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 max-w-lg">
@@ -332,7 +334,7 @@ function HierarchyLayerCard({
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">
+                  <div className="text-xs font-semibold text-ink-muted uppercase tracking-wide mb-1.5">
                     Required Tags
                   </div>
                   <div className="flex flex-wrap gap-1">
@@ -341,7 +343,7 @@ function HierarchyLayerCard({
                 </div>
                 {layer.inheritedTags && (
                   <div>
-                    <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">
+                    <div className="text-xs font-semibold text-ink-muted uppercase tracking-wide mb-1.5">
                       Auto-injected / Inherited
                     </div>
                     <div className="flex flex-wrap gap-1">
@@ -418,58 +420,56 @@ export default function TagExplorer() {
       : {},
   };
 
-  if (isLoading) return <LoadingState />;
-
   return (
     <div className="max-w-5xl space-y-8">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Tag Explorer</h1>
-          <p className="text-gray-500 text-sm mt-1">
-            Tagging recommendations, hierarchy coverage, and tag key inventory
-          </p>
-        </div>
-      </div>
+      <PageHeader
+        title="Tag Explorer"
+        subtitle="Tagging recommendations, hierarchy coverage, and tag key inventory"
+      />
 
       {!selectedScanId ? (
         <EmptyState message="Run a scan to explore tags" />
+      ) : isLoading ? (
+        <div className="space-y-8">
+          <SkeletonCards count={4} />
+          <SkeletonTable rows={8} cols={5} />
+        </div>
       ) : (
         <>
           {/* Summary stats */}
           <div className="grid grid-cols-4 gap-4">
             <div className="card text-center">
-              <div className="text-3xl font-bold text-gray-900">{tags.length}</div>
-              <div className="text-sm text-gray-500">Unique Tag Keys</div>
+              <div className="text-3xl font-bold text-ink">{tags.length}</div>
+              <div className="text-sm text-ink-muted">Unique Tag Keys</div>
             </div>
             <div className="card text-center">
               <div className="text-3xl font-bold text-green-600">{standardFound}</div>
-              <div className="text-sm text-gray-500">Standard Keys Found</div>
+              <div className="text-sm text-ink-muted">Standard Keys Found</div>
             </div>
             <div className="card text-center">
               <div className="text-3xl font-bold text-blue-600">{customCount}</div>
-              <div className="text-sm text-gray-500">Custom Keys</div>
+              <div className="text-sm text-ink-muted">Custom Keys</div>
             </div>
             <div className="card text-center">
               <div className="text-3xl font-bold text-violet-600">
                 {coverage?.layers.hosts.total ?? '—'}
               </div>
-              <div className="text-sm text-gray-500">Hosts Scanned</div>
+              <div className="text-sm text-ink-muted">Hosts Scanned</div>
             </div>
           </div>
 
           {/* ── Section 1: Unified Tagging Recommendations ────────────────── */}
           <section>
-            <h2 className="text-lg font-bold text-gray-900 mb-1">
+            <h2 className="text-lg font-bold text-ink mb-1">
               Unified Tagging Recommendations
             </h2>
-            <p className="text-sm text-gray-500 mb-4">
+            <p className="text-sm text-ink-muted mb-4">
               A three-tier tagging strategy that enables full-stack observability, cost attribution,
               and cross-product correlation.
             </p>
 
             {/* Tabs */}
-            <div className="flex gap-1 mb-4 border-b border-gray-200">
+            <div className="flex gap-1 mb-4 border-b border-border">
               {(
                 [
                   { id: 'required', label: '🔴 Required (UST)', count: REQUIRED_TAGS.length },
@@ -483,7 +483,7 @@ export default function TagExplorer() {
                   className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
                     activeTab === tab.id
                       ? 'border-violet-600 text-violet-700'
-                      : 'border-transparent text-gray-500 hover:text-gray-700'
+                      : 'border-transparent text-ink-muted hover:text-ink-muted'
                   }`}
                 >
                   {tab.label}
@@ -494,7 +494,7 @@ export default function TagExplorer() {
             {/* Required UST tags */}
             {activeTab === 'required' && (
               <div className="space-y-3">
-                <p className="text-sm text-gray-600 bg-red-50 border border-red-200 rounded px-3 py-2">
+                <p className="text-sm text-ink-muted bg-red-50 border border-red-200 rounded px-3 py-2">
                   These three tags form the <strong>Unified Service Tagging</strong> foundation. They
                   must be applied consistently across every resource type for Service Map, Deployment
                   Tracking, and cross-product correlation to function.
@@ -517,17 +517,17 @@ export default function TagExplorer() {
                               {found ? '✓ Detected' : '✗ Not found'}
                             </span>
                           </div>
-                          <p className="text-sm text-gray-600 mt-1">{tag.description}</p>
-                          <p className="text-xs text-gray-500 mt-1 italic">{tag.why}</p>
+                          <p className="text-sm text-ink-muted mt-1">{tag.description}</p>
+                          <p className="text-xs text-ink-muted mt-1 italic">{tag.why}</p>
                           <div className="mt-2">
-                            <span className="text-xs text-gray-400 mr-1">Applies to:</span>
+                            <span className="text-xs text-ink-faint mr-1">Applies to:</span>
                             <AppliesTo layers={tag.applies} />
                           </div>
                         </div>
                         {/* Per-layer coverage for this tag */}
                         {coverage && (
                           <div className="w-40 shrink-0 space-y-1.5">
-                            <div className="text-xs text-gray-400 font-medium mb-1">Coverage by layer</div>
+                            <div className="text-xs text-ink-faint font-medium mb-1">Coverage by layer</div>
                             {[
                               { label: 'Hosts', val: (coverage.layers.hosts as Record<string, number | null>)[tag.key] },
                               { label: 'Services', val: (coverage.layers.services as Record<string, number | null>)[tag.key] },
@@ -550,7 +550,7 @@ export default function TagExplorer() {
             {/* Sector tags */}
             {activeTab === 'sector' && (
               <div className="space-y-4">
-                <p className="text-sm text-gray-600 bg-blue-50 border border-blue-200 rounded px-3 py-2">
+                <p className="text-sm text-ink-muted bg-blue-50 border border-blue-200 rounded px-3 py-2">
                   Tags to <strong>leverage based on your platform</strong>. Detected means at least
                   one resource in this org already uses a tag from that sector — apply them more broadly
                   for full coverage.
@@ -561,12 +561,12 @@ export default function TagExplorer() {
                     <div key={group.sector} className="card">
                       <div className="flex items-center gap-2 mb-3">
                         <span className="text-lg">{group.icon}</span>
-                        <h3 className="font-semibold text-gray-900">{group.sector}</h3>
+                        <h3 className="font-semibold text-ink">{group.sector}</h3>
                         <span
                           className={`text-xs px-2 py-0.5 rounded-full font-medium ml-auto ${
                             detected
                               ? 'bg-blue-100 text-blue-700'
-                              : 'bg-gray-100 text-gray-500'
+                              : 'bg-surface-sunken text-ink-muted'
                           }`}
                         >
                           {detected ? '✓ Detected in org' : 'Not detected'}
@@ -581,13 +581,13 @@ export default function TagExplorer() {
                               className={`flex items-start gap-2 p-2 rounded border ${
                                 tagDetected
                                   ? 'border-blue-200 bg-blue-50'
-                                  : 'border-gray-200 bg-gray-50'
+                                  : 'border-border bg-surface-subtle'
                               }`}
                             >
                               <div className="mt-0.5">
                                 <TagPill tagKey={tag.key} />
                               </div>
-                              <p className="text-xs text-gray-600 leading-snug">{tag.description}</p>
+                              <p className="text-xs text-ink-muted leading-snug">{tag.description}</p>
                             </div>
                           );
                         })}
@@ -601,7 +601,7 @@ export default function TagExplorer() {
             {/* Cross-product correlation tags */}
             {activeTab === 'crossproduct' && (
               <div className="space-y-3">
-                <p className="text-sm text-gray-600 bg-violet-50 border border-violet-200 rounded px-3 py-2">
+                <p className="text-sm text-ink-muted bg-violet-50 border border-violet-200 rounded px-3 py-2">
                   Tags that <strong>enable correlation across product surfaces</strong> — RUM,
                   APM, Logs, Network, and Infrastructure. Many are auto-injected by the Agent or SDKs;
                   others require configuration in your application code or log pipeline.
@@ -626,7 +626,7 @@ export default function TagExplorer() {
                             </span>
                           ))}
                         </div>
-                        <p className="text-sm text-gray-600">{tag.description}</p>
+                        <p className="text-sm text-ink-muted">{tag.description}</p>
                       </div>
                     </div>
                   ))}
@@ -637,10 +637,10 @@ export default function TagExplorer() {
 
           {/* ── Section 2: Hierarchical tag tree ─────────────────────────── */}
           <section>
-            <h2 className="text-lg font-bold text-gray-900 mb-1">
+            <h2 className="text-lg font-bold text-ink mb-1">
               Tag Hierarchy by Product Layer
             </h2>
-            <p className="text-sm text-gray-500 mb-4">
+            <p className="text-sm text-ink-muted mb-4">
               Where tags need to exist at each observability layer, coverage from the last scan, and
               how tags flow and correlate across the stack.
             </p>
@@ -660,8 +660,8 @@ export default function TagExplorer() {
           {/* ── Section 3: Tag key inventory table ───────────────────────── */}
           <section>
             <div className="card p-0 overflow-hidden">
-              <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
-                <h2 className="text-base font-semibold text-gray-900">
+              <div className="px-4 py-3 border-b border-border flex items-center justify-between">
+                <h2 className="text-base font-semibold text-ink">
                   All Tag Keys ({filtered.length})
                 </h2>
                 <input
@@ -673,10 +673,13 @@ export default function TagExplorer() {
                 />
               </div>
               <DataTable
+                tableId="tag-explorer-inventory"
                 columns={[
                   {
                     key: 'tag_key',
                     header: 'Tag Key',
+                    sortable: true,
+                    sortAccessor: (r) => String(r.tag_key),
                     render: (r) => (
                       <div className="flex items-center gap-2">
                         <code className="text-sm font-mono">{String(r.tag_key)}</code>
@@ -694,16 +697,22 @@ export default function TagExplorer() {
                   {
                     key: 'host_occurrence_count',
                     header: 'Hosts',
+                    sortable: true,
+                    sortAccessor: (r) => Number(r.host_occurrence_count ?? 0),
                     render: (r) => String(r.host_occurrence_count ?? 0),
                   },
                   {
                     key: 'service_occurrence_count',
                     header: 'Services',
+                    sortable: true,
+                    sortAccessor: (r) => Number(r.service_occurrence_count ?? 0),
                     render: (r) => String(r.service_occurrence_count ?? 0),
                   },
                   {
                     key: 'unique_value_count',
                     header: 'Unique Values',
+                    sortable: true,
+                    sortAccessor: (r) => Number(r.unique_value_count ?? 0),
                     render: (r) => String(r.unique_value_count ?? 0),
                   },
                   {
@@ -721,7 +730,7 @@ export default function TagExplorer() {
                           {vals.map((v: string) => (
                             <code
                               key={v}
-                              className="text-xs bg-gray-100 px-1 rounded text-gray-600"
+                              className="text-xs bg-surface-sunken px-1 rounded text-ink-muted"
                             >
                               {v}
                             </code>
