@@ -366,6 +366,10 @@ export interface DDCollectionResult<T> {
   endpoint: string;
   itemCount: number;
   collectedAt: string;
+  requestCount: number;
+  pageCount: number;
+  truncated: boolean;
+  rateLimitRemaining?: number;
 }
 
 export interface DDValidationResult {
@@ -373,4 +377,42 @@ export interface DDValidationResult {
   orgName?: string;
   orgId?: string;
   error?: string;
+}
+
+// Deliberately loose — response shape confidence is moderate, not verified against
+// live docs from this environment. Collectors parse these defensively with `?.`
+// chaining and fallbacks; an unexpected field is a loss of detail, never a throw.
+
+export interface DDSecurityFinding {
+  id?: string;
+  attributes?: {
+    rule?: { category?: string; name?: string };
+    category?: string;
+    severity?: string;
+    evaluation?: string;
+    status?: string;
+    resource_type?: string;
+    resource?: { name?: string; type?: string };
+  };
+}
+
+export interface DDCostConfig {
+  id?: string;
+  type?: string;
+  attributes?: {
+    account_id?: string;
+    account_email?: string;
+  };
+}
+
+export interface DDIncident {
+  id?: string;
+  attributes?: {
+    title?: string;
+    severity?: string;
+    state?: string;
+    fields?: { severity?: { value?: string } };
+    created?: string;
+    resolved?: string;
+  };
 }

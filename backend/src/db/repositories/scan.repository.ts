@@ -78,6 +78,13 @@ export const ScanRepository = {
     const db = getDatabase();
     db.prepare('UPDATE scan_runs SET finding_count = ? WHERE id = ?').run(count, id);
   },
+
+  // Every child table's scan_run_id FK is ON DELETE CASCADE (with foreign_keys=ON
+  // set at connection time), so this single delete cleans up all collected data.
+  delete(id: string): void {
+    const db = getDatabase();
+    db.prepare('DELETE FROM scan_runs WHERE id = ?').run(id);
+  },
 };
 
 function rowToResponse(row: ScanRow): ScanRunResponse {

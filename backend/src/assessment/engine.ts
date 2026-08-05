@@ -10,6 +10,8 @@ import { dashboardsHealthRules } from './rules/dashboards-health.rules';
 import { syntheticsHealthRules } from './rules/synthetics-health.rules';
 import { integrationHygieneRules } from './rules/integration-hygiene.rules';
 import { governanceRules } from './rules/governance.rules';
+import { costOptimizationRules } from './rules/cost-optimization.rules';
+import { securityPostureRules } from './rules/security-posture.rules';
 import { computeScorecard } from './scorer';
 import type { AssessmentRule, AssessmentContext, Finding, FindingCategory } from '../types/assessment.types';
 
@@ -22,6 +24,8 @@ const ALL_RULES: AssessmentRule[] = [
   ...syntheticsHealthRules,
   ...integrationHygieneRules,
   ...governanceRules,
+  ...costOptimizationRules,
+  ...securityPostureRules,
 ];
 
 export async function runAssessment(orgId: string, scanRunId: string): Promise<number> {

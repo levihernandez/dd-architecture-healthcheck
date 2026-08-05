@@ -18,7 +18,10 @@ import chatRouter from './api/routes/chat.routes';
 import aiSettingsRouter from './api/routes/ai-settings.routes';
 import analyticsRouter from './api/routes/analytics.routes';
 import orgContextRouter from './api/routes/org-context.routes';
+import tagTemplateRouter from './api/routes/tag-template.routes';
 import usageRouter from './api/routes/usage.routes';
+import pricingSnapshotsRouter from './api/routes/pricing-snapshots.routes';
+import sizingSnapshotsRouter from './api/routes/sizing-snapshots.routes';
 import { logger } from './utils/logger';
 import { resolveEncryptedEnv } from './utils/secrets';
 import fs from 'fs';
@@ -69,7 +72,10 @@ app.use('/api/chat', chatRouter);
 app.use('/api/ai-settings', aiSettingsRouter);
 app.use('/api/analytics', analyticsRouter);
 app.use('/api/orgs', orgContextRouter);
+app.use('/api/orgs', tagTemplateRouter);
 app.use('/api/usage', usageRouter);
+app.use('/api/pricing-snapshots', pricingSnapshotsRouter);
+app.use('/api/sizing-snapshots', sizingSnapshotsRouter);
 
 // Health check
 app.get('/health', (req, res) => {

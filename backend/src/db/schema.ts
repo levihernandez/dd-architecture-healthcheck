@@ -173,6 +173,7 @@ export function runMigrations(db: Database.Database): void {
       has_template_variables INTEGER NOT NULL DEFAULT 0,
       template_variable_count INTEGER DEFAULT 0,
       author_handle TEXT,
+      is_read_only INTEGER NOT NULL DEFAULT 0,
       tags TEXT,
       created_at_dd TEXT,
       modified_at_dd TEXT,
@@ -429,6 +430,19 @@ export function runMigrations(db: Database.Database): void {
   `);
 
   db.exec(`
+    -- The org's selected tagging template (see backend/src/tagging/templates.ts) —
+    -- once set, this template's tag tiers are used across the app instead of the
+    -- generic baseline (Tag Explorer, Unified Tagging Scorecard, etc.).
+    CREATE TABLE IF NOT EXISTS org_tag_template (
+      id TEXT PRIMARY KEY,
+      org_id TEXT NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
+      template_id TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE(org_id)
+    );
+  `);
+
+  db.exec(`
     CREATE TABLE IF NOT EXISTS usage_summary (
       id TEXT PRIMARY KEY,
       org_id TEXT NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
@@ -459,5 +473,151 @@ export function runMigrations(db: Database.Database): void {
     );
   `);
 
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS pricing_snapshots (
+      id TEXT PRIMARY KEY,
+      captured_at TEXT NOT NULL,
+      source_url TEXT NOT NULL,
+      product TEXT NOT NULL,
+      tier TEXT,
+      unit TEXT NOT NULL,
+      price REAL NOT NULL,
+      raw_text TEXT
+    );
+  `);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_pricing_snapshots_product ON pricing_snapshots(product, captured_at);`);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS sizing_snapshots (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      mode TEXT NOT NULL,
+      org_id TEXT REFERENCES orgs(id) ON DELETE SET NULL,
+      org_name TEXT,
+      total_list_price REAL NOT NULL,
+      total_real_cost REAL,
+      category_count INTEGER NOT NULL,
+      cart_json TEXT NOT NULL,
+      state_json TEXT NOT NULL
+    );
+  `);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_sizing_snapshots_created ON sizing_snapshots(created_at);`);
+
+  db.exec(`
+    -- Security findings (CSPM + Application Security + Cloud SIEM via the unified findings API)
+    CREATE TABLE IF NOT EXISTS security_findings (
+      id TEXT PRIMARY KEY,
+      org_id TEXT NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
+      scan_run_id TEXT NOT NULL REFERENCES scan_runs(id) ON DELETE CASCADE,
+      finding_id TEXT NOT NULL,
+      category TEXT,
+      severity TEXT,
+      status TEXT,
+      resource_type TEXT,
+      resource_name TEXT,
+      rule_name TEXT,
+      raw_json TEXT,
+      first_seen TEXT NOT NULL,
+      last_seen TEXT NOT NULL,
+      UNIQUE(org_id, finding_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_security_findings_org ON security_findings(org_id, scan_run_id);
+  `);
+
+  db.exec(`
+    -- Cloud Cost Management configuration probe, per cloud provider
+    CREATE TABLE IF NOT EXISTS cost_management_config (
+      id TEXT PRIMARY KEY,
+      org_id TEXT NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
+      scan_run_id TEXT NOT NULL REFERENCES scan_runs(id) ON DELETE CASCADE,
+      provider TEXT NOT NULL,
+      configured INTEGER NOT NULL DEFAULT 0,
+      account_count INTEGER NOT NULL DEFAULT 0,
+      raw_json TEXT,
+      first_seen TEXT NOT NULL,
+      last_seen TEXT NOT NULL,
+      UNIQUE(org_id, scan_run_id, provider)
+    );
+  `);
+
+  db.exec(`
+    -- Incident Management
+    CREATE TABLE IF NOT EXISTS incidents (
+      id TEXT PRIMARY KEY,
+      org_id TEXT NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
+      scan_run_id TEXT NOT NULL REFERENCES scan_runs(id) ON DELETE CASCADE,
+      incident_id TEXT NOT NULL,
+      title TEXT,
+      severity TEXT,
+      state TEXT,
+      created_at_dd TEXT,
+      resolved_at_dd TEXT,
+      raw_json TEXT,
+      first_seen TEXT NOT NULL,
+      last_seen TEXT NOT NULL,
+      UNIQUE(org_id, incident_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_incidents_org ON incidents(org_id, scan_run_id);
+  `);
+
+  addColumnIfMissing(db, 'dashboards', 'is_read_only', 'INTEGER NOT NULL DEFAULT 0');
+  migrateOrgIdsToDatadogOrgId(db);
+
   logger.info('Database schema migrations complete');
+}
+
+// Idempotent ALTER TABLE ADD COLUMN, for columns introduced after a table's
+// original CREATE TABLE IF NOT EXISTS — that guard alone is a no-op against
+// databases that already have the table from an earlier app version.
+function addColumnIfMissing(db: Database.Database, table: string, column: string, definition: string): void {
+  const existing = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+  if (existing.some((col) => col.name === column)) return;
+  logger.info(`[migration] Adding column ${table}.${column}`);
+  db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+}
+
+// Tables keyed by org_id, referencing orgs(id). Every one of these must be
+// repointed when an org's primary key is rewritten to its detected Datadog org ID.
+const ORG_SCOPED_TABLES = [
+  'api_credentials_metadata', 'scan_runs', 'resources', 'resource_tags', 'hosts',
+  'services', 'service_catalog', 'monitors', 'dashboards', 'synthetics_tests',
+  'logs_indexes', 'logs_pipelines', 'integrations', 'cloud_accounts', 'slos',
+  'product_usage_signals', 'findings', 'scorecards', 'ai_assessments',
+  'permissions_report', 'tag_analysis', 'org_context', 'usage_summary',
+  'rum_applications', 'org_ai_settings', 'org_tag_template',
+];
+
+// One-time (per org), idempotent: rewrites an org's primary key from its
+// originally-generated UUID to its real Datadog org ID once that ID has been
+// detected via credential validation. No-op once id === dd_org_id.
+function migrateOrgIdsToDatadogOrgId(db: Database.Database): void {
+  const candidates = db.prepare(
+    `SELECT id, dd_org_id, name FROM orgs WHERE dd_org_id IS NOT NULL AND dd_org_id != '' AND dd_org_id != id`
+  ).all() as Array<{ id: string; dd_org_id: string; name: string }>;
+
+  for (const org of candidates) {
+    const collision = db.prepare('SELECT id FROM orgs WHERE id = ?').get(org.dd_org_id);
+    if (collision) {
+      logger.warn(`[migration] Skipping org id migration for "${org.name}" (${org.id}) — target id ${org.dd_org_id} already in use`);
+      continue;
+    }
+
+    logger.info(`[migration] Migrating org "${org.name}" primary key ${org.id} -> ${org.dd_org_id} (detected Datadog org ID)`);
+
+    // Immediate FK enforcement can't tolerate a parent-key rename mid-flight
+    // (child rows would momentarily point at a nonexistent id either order),
+    // so it's disabled for the duration of this single transaction only.
+    db.pragma('foreign_keys = OFF');
+    try {
+      db.transaction(() => {
+        for (const table of ORG_SCOPED_TABLES) {
+          db.prepare(`UPDATE ${table} SET org_id = ? WHERE org_id = ?`).run(org.dd_org_id, org.id);
+        }
+        db.prepare('UPDATE orgs SET id = ? WHERE id = ?').run(org.dd_org_id, org.id);
+      })();
+    } finally {
+      db.pragma('foreign_keys = ON');
+    }
+  }
 }

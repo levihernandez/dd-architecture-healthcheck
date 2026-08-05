@@ -4,18 +4,19 @@ import { safeJsonSnapshot } from '../../utils/redact';
 import { logger } from '../../utils/logger';
 import type { DatadogClient } from '../client';
 import type { DDService } from '../../types/datadog.types';
-import type { CollectorResultSummary } from '../../types/api.types';
+import type { CollectorResultSummary, CollectionLimits } from '../../types/api.types';
 
 export async function collectAPM(
   client: DatadogClient,
   orgId: string,
-  scanRunId: string
+  scanRunId: string,
+  limits?: CollectionLimits
 ): Promise<CollectorResultSummary> {
   const start = Date.now();
   logger.info(`[${orgId}] Collecting APM services`);
 
-  // Services endpoint (v1)
-  const result = await client.get<DDService>('/api/v1/services', { count: 5000, start: 0 });
+  // Services endpoint (v1) — paginated so orgs with >5000 services aren't silently truncated
+  const result = await client.getPaginated<DDService>('/api/v1/services', {}, limits?.maxPagesServices ?? 100);
 
   if (result.status !== 'success' && result.status !== 'not_available') {
     return {
@@ -24,6 +25,11 @@ export async function collectAPM(
       itemCount: 0,
       error: result.error,
       durationMs: Date.now() - start,
+      endpoint: result.endpoint,
+      requestCount: result.requestCount,
+      pageCount: result.pageCount,
+      truncated: result.truncated,
+      rateLimitRemaining: result.rateLimitRemaining,
     };
   }
 
@@ -89,5 +95,10 @@ export async function collectAPM(
     status: result.status === 'success' ? 'success' : 'not_available',
     itemCount: result.itemCount,
     durationMs: Date.now() - start,
+    endpoint: `${result.endpoint}, ${spanStatsResult.endpoint}`,
+    requestCount: result.requestCount + spanStatsResult.requestCount,
+    pageCount: result.pageCount + spanStatsResult.pageCount,
+    truncated: result.truncated,
+    rateLimitRemaining: spanStatsResult.rateLimitRemaining ?? result.rateLimitRemaining,
   };
 }

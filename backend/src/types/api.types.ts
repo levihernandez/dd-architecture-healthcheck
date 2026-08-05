@@ -53,6 +53,19 @@ export interface CollectorResultSummary {
   itemCount: number;
   error?: string;
   durationMs?: number;
+  endpoint?: string;
+  requestCount?: number;
+  pageCount?: number;
+  truncated?: boolean;
+  rateLimitRemaining?: number;
+}
+
+// Page caps for the two collectors whose item count scales with fleet size (hosts,
+// services) rather than a fixed small resource count — configurable per deployment
+// via env for exceptionally large customers, without a code change.
+export interface CollectionLimits {
+  maxPagesHosts: number;
+  maxPagesServices: number;
 }
 
 export interface InventoryQueryParams {

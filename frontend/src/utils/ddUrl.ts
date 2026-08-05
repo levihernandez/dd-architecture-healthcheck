@@ -45,7 +45,8 @@ export const ddUrl = {
   logsQuery: (base: string, query: string) => `${base}/logs?query=${enc(query)}`,
   logIndex: (base: string, indexName?: string) =>
     indexName ? `${base}/logs?index=${enc(indexName)}` : `${base}/logs`,
-  logsIndexes: (base: string) => `${base}/logs/pipelines#indexes`,
+  logsIndexes: (base: string) => `${base}/logs/pipelines/indexes`,
+  logIndexConfig: (base: string, indexName: string) => `${base}/logs/pipelines/indexes/${enc(indexName)}`,
   logsPipelines: (base: string) => `${base}/logs/pipelines`,
   logsArchives: (base: string) => `${base}/logs/pipelines/archives`,
   logsMetrics: (base: string) => `${base}/logs/pipelines/generate-metrics`,

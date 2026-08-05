@@ -1,10 +1,13 @@
 import { useQuery } from '@tanstack/react-query';
-import { usageApi } from '../services/api';
+import { BarChart, Bar, XAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
+import { usageApi, scansApi } from '../services/api';
 import { useOrgAndScanFilters } from '../hooks/useFilters';
 import type { UsageProductSummary } from '../types';
 import PageHeader from '../components/ui/PageHeader';
 import { SkeletonCards, SkeletonTable } from '../components/ui/Skeleton';
 import DataTable, { type Column } from '../components/common/DataTable';
+import EvidenceTable from '../components/common/EvidenceTable';
+import { CATEGORICAL, CHART_INK, trackTint } from '../lib/chartColors';
 
 function fmt(value: number | null, unit: string): string {
   if (value === null) return '—';
@@ -21,6 +24,42 @@ function fmt(value: number | null, unit: string): string {
 
 function money(n: number) {
   return n > 0 ? `$${n.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}` : '';
+}
+
+// Friendly labels for the usage_summary metric keys Datadog's usage API commonly returns.
+// Not exhaustive — any numeric key not listed here still renders via humanizeMetricKey().
+const KNOWN_USAGE_METRICS: Array<{ label: string; key: string; unit: string }> = [
+  { label: 'Infra Hosts (p99)', key: 'agent_host_top99p', unit: 'hosts' },
+  { label: 'APM Hosts (p99)', key: 'apm_host_top99p', unit: 'hosts' },
+  { label: 'Containers (avg)', key: 'container_avg', unit: 'containers' },
+  { label: 'Custom Metrics (avg)', key: 'custom_ts_avg', unit: 'timeseries' },
+  { label: 'RUM Sessions', key: 'rum_total_sessions_sum', unit: 'sessions' },
+  { label: 'Log Ingestion', key: 'logs_ingested_bytes_sum', unit: 'bytes ingested' },
+  { label: 'Log Indexed Events', key: 'indexed_events_count_sum', unit: 'events' },
+  { label: 'Synthetics API Tests', key: 'synthetics_check_calls_count_sum', unit: 'calls' },
+  { label: 'Synthetics Browser Tests', key: 'synthetics_browser_check_calls_count_sum', unit: 'calls' },
+  { label: 'Cloud Network Mon. Hosts (p99)', key: 'npm_host_top99p', unit: 'hosts' },
+  { label: 'NDM Devices (p99)', key: 'ndm_router_top99p', unit: 'devices' },
+  { label: 'CSPM Hosts (p99)', key: 'cspm_host_top99p', unit: 'hosts' },
+  { label: 'CWS Hosts (p99)', key: 'cws_host_top99p', unit: 'hosts' },
+  { label: 'ASM Hosts (p99)', key: 'appsec_host_top99p', unit: 'hosts' },
+  { label: 'Profiled Hosts (p99)', key: 'profiling_host_top99p', unit: 'hosts' },
+  { label: 'CI Pipeline Indexed Spans', key: 'ci_pipeline_indexed_spans_sum', unit: 'spans' },
+  { label: 'CI Test Indexed Spans', key: 'ci_test_indexed_spans_sum', unit: 'spans' },
+  { label: 'Fargate Tasks (avg)', key: 'fargate_tasks_count_avg', unit: 'tasks' },
+  { label: 'Lambda Functions', key: 'lambda_functions_count', unit: 'functions' },
+  { label: 'Lambda Invocations', key: 'lambda_invocations_sum', unit: 'invocations' },
+  { label: 'DBM Hosts (avg)', key: 'dbm_host_count_avg', unit: 'hosts' },
+  { label: 'Estimated On-Demand Cost', key: 'estimated_on_demand_cost', unit: 'USD' },
+];
+
+function humanizeMetricKey(key: string): string {
+  return key
+    .replace(/_/g, ' ')
+    .replace(/\b(sum|avg|count|top99p|top95p)\b/gi, '')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 const productColumns: Column<UsageProductSummary>[] = [
@@ -40,9 +79,9 @@ const productColumns: Column<UsageProductSummary>[] = [
     </div>
   ) },
   { key: 'unit', header: 'Unit', render: (p) => <span className="text-sm text-ink-muted">{p.value !== null ? p.unit : ''}</span> },
-  { key: 'committedCost', header: 'Committed', sortable: true, render: (p) => <span className="font-mono text-sm text-green-700">{money(p.committedCost)}</span> },
+  { key: 'committedCost', header: 'Committed', sortable: true, render: (p) => <span className="font-mono text-sm text-green-400">{money(p.committedCost)}</span> },
   { key: 'onDemandCost', header: 'On-Demand', sortable: true, render: (p) => (
-    p.hasOnDemand ? <span className="font-mono text-sm text-red-600 font-semibold">{money(p.onDemandCost)}</span> : <span className="text-ink-faint">—</span>
+    p.hasOnDemand ? <span className="font-mono text-sm text-red-400 font-semibold">{money(p.onDemandCost)}</span> : <span className="text-ink-faint">—</span>
   ) },
   { key: 'status', header: 'Status', render: (p) => {
     const totalCost = p.committedCost + p.onDemandCost;
@@ -53,11 +92,11 @@ const productColumns: Column<UsageProductSummary>[] = [
           <div className="flex-1 bg-surface-sunken rounded-full h-2">
             <div className="bg-red-500 h-2 rounded-full" style={{ width: `${Math.min(100, onDemandPct)}%` }} />
           </div>
-          <span className="text-xs text-red-600 font-medium whitespace-nowrap">{onDemandPct.toFixed(0)}% OD</span>
+          <span className="text-xs text-red-400 font-medium whitespace-nowrap">{onDemandPct.toFixed(0)}% OD</span>
         </div>
       );
     }
-    if (totalCost > 0) return <span className="text-xs text-green-600 font-medium">✓ In allotment</span>;
+    if (totalCost > 0) return <span className="text-xs text-green-400 font-medium">✓ In allotment</span>;
     return <span className="text-xs text-ink-faint">—</span>;
   } },
 ];
@@ -65,7 +104,7 @@ const productColumns: Column<UsageProductSummary>[] = [
 const chargeColumns: Column<{ charge_type: string; product_name: string; cost: number }>[] = [
   { key: 'product_name', header: 'Product', sortable: true, render: (c) => <span className="text-sm text-ink">{c.product_name}</span> },
   { key: 'charge_type', header: 'Type', sortable: true, render: (c) => (
-    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${c.charge_type === 'on_demand' ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>
+    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${c.charge_type === 'on_demand' ? 'bg-red-500/15 text-red-400' : 'bg-green-500/15 text-green-400'}`}>
       {c.charge_type === 'on_demand' ? 'On-Demand' : 'Committed'}
     </span>
   ) },
@@ -82,19 +121,37 @@ function UsageBarChart({ history, metricKey, unit }: {
     value: typeof m[metricKey] === 'number' ? (m[metricKey] as number) : 0,
   }));
   if (points.every(p => p.value === 0)) return null;
-  const max = Math.max(...points.map(p => p.value));
   return (
-    <div className="flex items-end gap-1 h-12">
-      {points.map((p, i) => (
-        <div key={i} className="flex flex-col items-center gap-0.5 flex-1">
-          <div
-            className="w-full rounded-sm bg-violet-500 transition-all"
-            style={{ height: `${max > 0 ? Math.round((p.value / max) * 40) : 0}px`, minHeight: p.value > 0 ? 2 : 0 }}
-            title={`${p.month}: ${fmt(p.value, unit)}`}
+    <div className="h-14">
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart data={points} margin={{ top: 2, right: 4, bottom: 0, left: 4 }} barCategoryGap="20%">
+          <XAxis
+            dataKey="month"
+            tickFormatter={(m: string) => m.slice(5)}
+            tick={{ fontSize: 9, fill: CHART_INK.muted }}
+            axisLine={{ stroke: CHART_INK.gridline }}
+            tickLine={false}
+            interval={points.length > 8 ? 1 : 0}
           />
-          <span className="text-[9px] text-ink-faint leading-none">{p.month.slice(5)}</span>
-        </div>
-      ))}
+          <Tooltip
+            cursor={{ fill: 'rgba(15, 23, 42, 0.06)' }}
+            content={({ active, payload }) => {
+              if (!active || !payload?.length) return null;
+              const p = payload[0].payload as { month: string; value: number };
+              return (
+                <div className="bg-gray-800 text-white border border-gray-700 text-xs px-2 py-1 rounded shadow-popover whitespace-nowrap">
+                  {p.month}: <span className="font-semibold">{fmt(p.value, unit)}</span>
+                </div>
+              );
+            }}
+          />
+          <Bar dataKey="value" radius={[4, 4, 0, 0]}>
+            {points.map((p, i) => (
+              <Cell key={i} fill={i === points.length - 1 ? CATEGORICAL[0] : trackTint(CATEGORICAL[0], 0.35)} />
+            ))}
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
     </div>
   );
 }
@@ -106,6 +163,12 @@ export default function Usage() {
     queryKey: ['usage', selectedOrgId, selectedScanId],
     queryFn: () => usageApi.get(selectedOrgId, selectedScanId || undefined),
     enabled: Boolean(selectedOrgId),
+  });
+
+  const { data: costFindings = [] } = useQuery({
+    queryKey: ['findings', selectedScanId, 'cost_optimization'],
+    queryFn: () => scansApi.getFindings(selectedScanId, { category: 'cost_optimization' }),
+    enabled: Boolean(selectedScanId),
   });
 
   if (!selectedOrgId) {
@@ -159,9 +222,9 @@ export default function Usage() {
         title="Plan & Usage"
         subtitle={`${data.reportMonth} usage — collected ${new Date(data.collectedAt).toLocaleDateString()}`}
         actions={onDemandProducts.length > 0 ? (
-          <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-2 text-right">
+          <div className="bg-red-500/10 border border-red-500/30 rounded-xl px-4 py-2 text-right">
             <div className="text-xs text-red-500 font-semibold uppercase tracking-wide">On-Demand Charges</div>
-            <div className="text-xl font-bold text-red-600">{money(totalOnDemand)}</div>
+            <div className="text-xl font-bold text-red-400">{money(totalOnDemand)}</div>
             <div className="text-xs text-red-400">{onDemandProducts.length} product{onDemandProducts.length !== 1 ? 's' : ''} over allotment</div>
           </div>
         ) : undefined}
@@ -176,13 +239,13 @@ export default function Usage() {
             <div className="text-xs text-ink-faint mt-1">{data.reportMonth}</div>
           </div>
           <div className="card text-center py-4">
-            <div className="text-xs text-green-600 uppercase tracking-wide mb-1">Committed Spend</div>
-            <div className="text-2xl font-bold text-green-700">{money(totalCommitted)}</div>
+            <div className="text-xs text-green-400 uppercase tracking-wide mb-1">Committed Spend</div>
+            <div className="text-2xl font-bold text-green-400">{money(totalCommitted)}</div>
             <div className="text-xs text-ink-faint mt-1">In-allotment usage</div>
           </div>
-          <div className={`card text-center py-4 ${totalOnDemand > 0 ? 'bg-red-50 border-red-200' : ''}`}>
+          <div className={`card text-center py-4 ${totalOnDemand > 0 ? 'bg-red-500/10 border-red-500/30' : ''}`}>
             <div className="text-xs text-red-500 uppercase tracking-wide mb-1">On-Demand Charges</div>
-            <div className={`text-2xl font-bold ${totalOnDemand > 0 ? 'text-red-600' : 'text-ink-faint'}`}>{totalOnDemand > 0 ? money(totalOnDemand) : '$0'}</div>
+            <div className={`text-2xl font-bold ${totalOnDemand > 0 ? 'text-red-400' : 'text-ink-faint'}`}>{totalOnDemand > 0 ? money(totalOnDemand) : '$0'}</div>
             <div className="text-xs text-ink-faint mt-1">{totalOnDemand > 0 ? 'Overage charges' : 'No overages'}</div>
           </div>
         </div>
@@ -190,23 +253,36 @@ export default function Usage() {
 
       {/* On-demand alert */}
       {onDemandProducts.length > 0 && (
-        <div className="bg-red-50 border border-red-200 rounded-xl p-4">
+        <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-4">
           <div className="flex items-center gap-2 mb-2">
             <span className="text-red-500">⚠</span>
-            <span className="font-semibold text-red-800">On-Demand Charges Detected</span>
+            <span className="font-semibold text-red-400">On-Demand Charges Detected</span>
           </div>
-          <p className="text-sm text-red-700 mb-3">
+          <p className="text-sm text-red-400 mb-3">
             The following products are generating on-demand charges above your contracted allotment.
             These are typically billed at 1.5–3× the standard committed rate.
           </p>
           <div className="flex flex-wrap gap-2">
             {onDemandProducts.map(p => (
-              <div key={p.name} className="bg-white border border-red-200 rounded-lg px-3 py-1.5 text-xs">
-                <span className="font-semibold text-red-700">{p.name}</span>
+              <div key={p.name} className="bg-surface-subtle border border-red-500/30 rounded-lg px-3 py-1.5 text-xs">
+                <span className="font-semibold text-red-400">{p.name}</span>
                 <span className="text-red-500 ml-1">+{money(p.onDemandCost)}/mo</span>
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* Cost insights — root-cause correlation with tagging/config data, informational only */}
+      {costFindings.length > 0 && (
+        <div className="space-y-2">
+          <div>
+            <h2 className="font-bold text-ink">Cost Insights</h2>
+            <p className="text-xs text-ink-muted mt-0.5">
+              Contributing factors behind this spend, correlated from tagging and configuration data collected in this scan. Informational — does not affect the overall health score.
+            </p>
+          </div>
+          <EvidenceTable findings={costFindings} />
         </div>
       )}
 
@@ -230,6 +306,8 @@ export default function Usage() {
             data={orderedProducts}
             rowKey={(p) => p.name}
             tableId="usage-products"
+            searchable
+            pageSize={10}
           />
         ) : (
           <div className="card text-center py-10 text-ink-faint text-sm">
@@ -239,31 +317,41 @@ export default function Usage() {
       </div>
 
       {/* Usage trends (history sparklines) */}
-      {data.usageHistory.length > 1 && (
-        <div className="card">
-          <h2 className="font-bold text-ink mb-4">Usage Trends — Last {data.usageHistory.length} Months</h2>
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-6">
-            {[
-              { label: 'Infra Hosts (p99)', key: 'agent_host_top99p', unit: 'hosts' },
-              { label: 'APM Hosts (p99)', key: 'apm_host_top99p', unit: 'hosts' },
-              { label: 'Containers (avg)', key: 'container_avg', unit: 'containers' },
-              { label: 'Custom Metrics (avg)', key: 'custom_ts_avg', unit: 'timeseries' },
-              { label: 'RUM Sessions', key: 'rum_total_sessions_sum', unit: 'sessions' },
-              { label: 'Log Ingestion', key: 'logs_ingested_bytes_sum', unit: 'bytes ingested' },
-            ].map(({ label, key, unit }) => {
-              const latestVal = typeof data.latestUsage[key] === 'number' ? (data.latestUsage[key] as number) : null;
-              if (latestVal === null) return null;
-              return (
-                <div key={key}>
-                  <div className="text-xs font-semibold text-ink-muted mb-1">{label}</div>
-                  <div className="text-lg font-bold text-ink font-mono mb-1">{fmt(latestVal, unit)}</div>
-                  <UsageBarChart history={data.usageHistory} metricKey={key} unit={unit} />
-                </div>
-              );
-            })}
+      {data.usageHistory.length > 1 && (() => {
+        const shown = new Set<string>();
+        const curatedTiles = KNOWN_USAGE_METRICS
+          .filter(({ key }) => typeof data.latestUsage[key] === 'number')
+          .map(({ label, key, unit }) => { shown.add(key); return { label, key, unit }; });
+
+        // Any other numeric usage-history key this scan collected but that isn't in the
+        // curated list above — surfaced rather than silently dropped, since the backend
+        // already returns every usage_summary metric with no allowlist.
+        const extraTiles = Object.entries(data.latestUsage)
+          .filter(([key, val]) => typeof val === 'number' && !shown.has(key))
+          .map(([key]) => ({ label: humanizeMetricKey(key), key, unit: '' }));
+
+        const tiles = [...curatedTiles, ...extraTiles];
+        if (tiles.length === 0) return null;
+
+        return (
+          <div className="card">
+            <h2 className="font-bold text-ink mb-4">Usage Trends — Last {data.usageHistory.length} Months</h2>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-6">
+              {tiles.map(({ label, key, unit }) => {
+                const latestVal = typeof data.latestUsage[key] === 'number' ? (data.latestUsage[key] as number) : null;
+                if (latestVal === null) return null;
+                return (
+                  <div key={key}>
+                    <div className="text-xs font-semibold text-ink-muted mb-1">{label}</div>
+                    <div className="text-lg font-bold text-ink font-mono mb-1">{fmt(latestVal, unit)}</div>
+                    <UsageBarChart history={data.usageHistory} metricKey={key} unit={unit} />
+                  </div>
+                );
+              })}
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Raw charges table (if cost data available) */}
       {data.costCharges.length > 0 && (
@@ -277,6 +365,8 @@ export default function Usage() {
             data={[...data.costCharges].sort((a, b) => b.cost - a.cost)}
             rowKey={(c) => `${c.product_name}-${c.charge_type}`}
             tableId="usage-charges"
+            searchable
+            pageSize={10}
           />
         </div>
       )}

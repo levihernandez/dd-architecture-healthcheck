@@ -16,7 +16,7 @@ import type { FindingSeverity } from '../types';
 function DDLink({ href, label = 'Open in Datadog' }: { href: string; label?: string }) {
   return (
     <a href={href} target="_blank" rel="noopener noreferrer"
-      className="inline-flex items-center gap-1 text-xs text-violet-600 hover:text-violet-800 font-medium shrink-0">
+      className="inline-flex items-center gap-1 text-xs text-violet-400 hover:text-violet-400 font-medium shrink-0">
       {label} ↗
     </a>
   );
@@ -29,14 +29,14 @@ function RiskRow({ icon, label, count, total, threshold, href, hrefLabel }: {
   const pct = total > 0 ? Math.round((count / total) * 100) : 0;
   const isRisk = pct >= threshold;
   return (
-    <div className={`flex items-center gap-3 p-3 rounded-lg border ${isRisk ? 'bg-amber-50 border-amber-200' : 'bg-green-50 border-green-100'}`}>
+    <div className={`flex items-center gap-3 p-3 rounded-lg border ${isRisk ? 'bg-amber-500/10 border-amber-500/30' : 'bg-green-500/10 border-green-100'}`}>
       <span className="text-lg">{icon}</span>
       <div className="flex-1">
-        <div className="text-sm font-medium text-gray-800">{label}</div>
-        <div className="text-xs text-gray-500">{count.toLocaleString()} of {total.toLocaleString()} monitors ({pct}%)</div>
+        <div className="text-sm font-medium text-ink">{label}</div>
+        <div className="text-xs text-ink-faint">{count.toLocaleString()} of {total.toLocaleString()} monitors ({pct}%)</div>
       </div>
       <div className="flex items-center gap-2">
-        <div className={`w-16 bg-gray-200 rounded-full h-1.5`}>
+        <div className={`w-16 bg-surface-sunken rounded-full h-1.5`}>
           <div className={`h-1.5 rounded-full ${isRisk ? 'bg-amber-500' : 'bg-green-500'}`} style={{ width: `${Math.min(100, pct)}%` }} />
         </div>
         {count > 0 && <DDLink href={href} label={hrefLabel} />}
@@ -158,21 +158,21 @@ export default function MonitorsHealth() {
                 threshold={20} href={ddUrl.monitorListFiltered(base, '-tag:service:*')} hrefLabel="View untagged" />
             )}
             {alertingCount > 0 && (
-              <div className="flex items-center gap-3 p-3 rounded-lg border bg-red-50 border-red-200">
+              <div className="flex items-center gap-3 p-3 rounded-lg border bg-red-500/10 border-red-500/30">
                 <span className="text-lg">🚨</span>
                 <div className="flex-1">
-                  <div className="text-sm font-medium text-red-800">{alertingCount} monitor{alertingCount > 1 ? 's' : ''} currently in ALERT state</div>
-                  <div className="text-xs text-red-600">These require immediate attention — review and acknowledge or fix the underlying issue.</div>
+                  <div className="text-sm font-medium text-red-400">{alertingCount} monitor{alertingCount > 1 ? 's' : ''} currently in ALERT state</div>
+                  <div className="text-xs text-red-400">These require immediate attention — review and acknowledge or fix the underlying issue.</div>
                 </div>
                 <DDLink href={ddUrl.alertingMonitors(base)} label="View alerting" />
               </div>
             )}
             {noDataCount > 0 && (
-              <div className="flex items-center gap-3 p-3 rounded-lg border bg-gray-50 border-gray-200">
+              <div className="flex items-center gap-3 p-3 rounded-lg border bg-surface-sunken border-border">
                 <span className="text-lg">📭</span>
                 <div className="flex-1">
-                  <div className="text-sm font-medium text-gray-700">{noDataCount} monitors in No Data state</div>
-                  <div className="text-xs text-gray-500">Agent may be offline, metric name changed, or monitor query is incorrect.</div>
+                  <div className="text-sm font-medium text-ink-muted">{noDataCount} monitors in No Data state</div>
+                  <div className="text-xs text-ink-faint">Agent may be offline, metric name changed, or monitor query is incorrect.</div>
                 </div>
                 <DDLink href={ddUrl.noDataMonitors(base)} label="View no-data" />
               </div>
@@ -262,27 +262,29 @@ export default function MonitorsHealth() {
                       {String(r.monitor_name ?? '')}
                       {Boolean(r.monitor_id) && (
                         <a href={ddUrl.monitor(base, String(r.monitor_id))} target="_blank" rel="noopener noreferrer"
-                          className="text-xs text-ink-faint hover:text-violet-600 ml-1">↗</a>
+                          className="text-xs text-ink-faint hover:text-violet-400 ml-1">↗</a>
                       )}
                     </span>
                   )},
                   { key: 'monitor_type', header: 'Type', sortable: true, render: (r) => <code className="text-xs bg-surface-sunken px-1 rounded">{String(r.monitor_type ?? '')}</code> },
                   { key: 'overall_state', header: 'State', sortable: true, render: (r) => {
                     const state = String(r.overall_state ?? '');
-                    const cls = state === 'Alert' ? 'bg-red-100 text-red-800' : state === 'Warn' ? 'bg-amber-100 text-amber-800' : state === 'OK' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600';
+                    const cls = state === 'Alert' ? 'bg-red-500/15 text-red-400' : state === 'Warn' ? 'bg-amber-500/15 text-amber-400' : state === 'OK' ? 'bg-green-500/15 text-green-400' : 'bg-surface-sunken text-ink-muted';
                     return <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${cls}`}>{state || '—'}</span>;
                   }},
                   { key: 'priority', header: 'Priority', sortable: true, sortAccessor: (r) => Number(r.priority ?? 99), render: (r) => r.priority
-                    ? <span className="text-xs px-1.5 py-0.5 bg-purple-100 text-purple-800 rounded font-medium">P{String(r.priority)}</span>
+                    ? <span className="text-xs px-1.5 py-0.5 bg-emerald-500/15 text-emerald-400 rounded font-medium">P{String(r.priority)}</span>
                     : <span className="text-red-400 text-xs">None</span> },
-                  { key: 'notif', header: 'Notif', render: (r) => <span className={r.has_notification ? 'text-green-600' : 'text-red-400 font-bold'}>{r.has_notification ? '✓' : '✗'}</span> },
-                  { key: 'env', header: 'env', render: (r) => <span className={r.has_env_tag ? 'text-green-600' : 'text-amber-500'}>{r.has_env_tag ? '✓' : '✗'}</span> },
+                  { key: 'notif', header: 'Notif', render: (r) => <span className={r.has_notification ? 'text-green-400' : 'text-red-400 font-bold'}>{r.has_notification ? '✓' : '✗'}</span> },
+                  { key: 'env', header: 'env', render: (r) => <span className={r.has_env_tag ? 'text-green-400' : 'text-amber-500'}>{r.has_env_tag ? '✓' : '✗'}</span> },
                   { key: 'muted', header: 'Muted', render: (r) => r.is_muted
-                    ? <span className="text-xs px-1.5 py-0.5 bg-amber-100 text-amber-800 rounded">Muted</span>
+                    ? <span className="text-xs px-1.5 py-0.5 bg-amber-500/15 text-amber-400 rounded">Muted</span>
                     : null },
                 ]}
                 data={monitorData}
                 rowKey={(r) => String(r.id)}
+                searchable
+                pageSize={15}
               />
             </div>
           )}
@@ -300,8 +302,8 @@ export default function MonitorsHealth() {
                 { label: 'Monitor templates', href: `${ddUrl.monitorList(base)}/recommended` },
               ].map(({ label, href }) => (
                 <a key={label} href={href} target="_blank" rel="noopener noreferrer"
-                  className="flex items-center justify-between px-3 py-2.5 rounded-lg border border-border hover:border-violet-300 hover:bg-violet-50/30 transition-colors group">
-                  <span className="text-sm text-ink-muted group-hover:text-violet-700">{label}</span>
+                  className="flex items-center justify-between px-3 py-2.5 rounded-lg border border-border hover:border-violet-500/30 hover:bg-violet-500/30 transition-colors group">
+                  <span className="text-sm text-ink-muted group-hover:text-violet-400">{label}</span>
                   <span className="text-ink-faint group-hover:text-violet-500">↗</span>
                 </a>
               ))}

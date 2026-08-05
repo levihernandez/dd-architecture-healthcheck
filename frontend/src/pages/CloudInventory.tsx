@@ -7,11 +7,11 @@ import PageHeader from '../components/ui/PageHeader';
 import { SkeletonCards, SkeletonCard } from '../components/ui/Skeleton';
 
 const PROVIDER_META: Record<string, { label: string; color: string; bg: string; border: string; icon: string }> = {
-  aws:        { label: 'Amazon Web Services', color: 'text-amber-700',  bg: 'bg-amber-50',  border: 'border-amber-200', icon: '☁' },
-  gcp:        { label: 'Google Cloud Platform', color: 'text-blue-700', bg: 'bg-blue-50',   border: 'border-blue-200',  icon: '⛅' },
-  azure:      { label: 'Microsoft Azure',      color: 'text-cyan-700',  bg: 'bg-cyan-50',   border: 'border-cyan-200',  icon: '🌤' },
-  kubernetes: { label: 'Kubernetes',           color: 'text-violet-700',bg: 'bg-violet-50', border: 'border-violet-200',icon: '⎈' },
-  docker:     { label: 'Docker',               color: 'text-sky-700',   bg: 'bg-sky-50',    border: 'border-sky-200',   icon: '🐳' },
+  aws:        { label: 'Amazon Web Services', color: 'text-amber-400',  bg: 'bg-amber-500/10',  border: 'border-amber-500/30', icon: '☁' },
+  gcp:        { label: 'Google Cloud Platform', color: 'text-blue-400', bg: 'bg-blue-500/10',   border: 'border-blue-500/30',  icon: '⛅' },
+  azure:      { label: 'Microsoft Azure',      color: 'text-cyan-400',  bg: 'bg-cyan-500/10',   border: 'border-cyan-500/30',  icon: '🌤' },
+  kubernetes: { label: 'Kubernetes',           color: 'text-violet-400',bg: 'bg-violet-500/10', border: 'border-violet-500/30',icon: '⎈' },
+  docker:     { label: 'Docker',               color: 'text-sky-400',   bg: 'bg-sky-500/10',    border: 'border-sky-500/30',   icon: '🐳' },
 };
 
 const fallback = { label: 'Unknown', color: 'text-ink-muted', bg: 'bg-surface-subtle', border: 'border-border', icon: '☁' };
@@ -30,10 +30,10 @@ function StatCard({ label, value, sub, color = 'gray' }: {
 }) {
   const colors = {
     gray:   'bg-surface-subtle border-border text-ink',
-    green:  'bg-green-50 border-green-200 text-green-800',
-    amber:  'bg-amber-50 border-amber-200 text-amber-800',
-    red:    'bg-red-50 border-red-200 text-red-800',
-    violet: 'bg-violet-50 border-violet-200 text-violet-800',
+    green:  'bg-green-500/10 border-green-500/30 text-green-400',
+    amber:  'bg-amber-500/10 border-amber-500/30 text-amber-400',
+    red:    'bg-red-500/10 border-red-500/30 text-red-400',
+    violet: 'bg-violet-500/10 border-violet-500/30 text-violet-400',
   };
   return (
     <div className={`rounded-xl border p-4 ${colors[color]}`}>
@@ -76,7 +76,7 @@ export default function CloudInventory() {
       ) : (
         <>
           {data.usingFallback && (
-            <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-700">
+            <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl px-4 py-3 text-sm text-amber-400">
               <strong>Note:</strong> Tag sources extracted from host raw data (pre-fix scan). Run a new scan to get per-source tag tracking in the database.
             </div>
           )}
@@ -109,6 +109,34 @@ export default function CloudInventory() {
             />
           </div>
 
+          {/* ── Cloud Cost Management ──────────────────────────────────────── */}
+          {data.costManagement.length > 0 && (
+            <section>
+              <h2 className="text-lg font-bold text-ink mb-3">Cloud Cost Management</h2>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                {data.costManagement.map((cm) => {
+                  const m = PROVIDER_META[cm.provider] ?? fallback;
+                  return (
+                    <div key={cm.provider} className={`rounded-xl border ${m.border} ${m.bg} p-4 flex items-center justify-between`}>
+                      <div className="flex items-center gap-3">
+                        <span className="text-2xl">{m.icon}</span>
+                        <div>
+                          <div className={`text-sm font-bold ${m.color}`}>{m.label}</div>
+                          <div className="text-xs text-ink-muted mt-0.5">{cm.accountCount} account(s)</div>
+                        </div>
+                      </div>
+                      <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${
+                        cm.configured ? 'bg-green-500/10 border-green-500/30 text-green-400' : 'bg-surface-sunken border-border text-ink-muted'
+                      }`}>
+                        {cm.configured ? '✓ CCM Enabled' : 'CCM Not Configured'}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          )}
+
           {/* ── Cloud Accounts ─────────────────────────────────────────────── */}
           <section>
             <h2 className="text-lg font-bold text-ink mb-3">Cloud Account Connections</h2>
@@ -139,17 +167,17 @@ export default function CloudInventory() {
                         </div>
                         <div className="flex gap-2 shrink-0">
                           <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${
-                            acc.hasErrors ? 'bg-red-50 border-red-200 text-red-700' : 'bg-green-50 border-green-200 text-green-700'
+                            acc.hasErrors ? 'bg-red-500/10 border-red-500/30 text-red-400' : 'bg-green-500/10 border-green-500/30 text-green-400'
                           }`}>
                             {acc.hasErrors ? '⚠ Errors' : '✓ OK'}
                           </span>
                           <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${
-                            acc.metricsEnabled ? 'bg-green-50 border-green-200 text-green-700' : 'bg-surface-sunken border-border text-ink-muted'
+                            acc.metricsEnabled ? 'bg-green-500/10 border-green-500/30 text-green-400' : 'bg-surface-sunken border-border text-ink-muted'
                           }`}>
                             {acc.metricsEnabled ? 'Metrics ✓' : 'Metrics ✗'}
                           </span>
                           <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${
-                            acc.resourceCollectionEnabled ? 'bg-green-50 border-green-200 text-green-700' : 'bg-surface-sunken border-border text-ink-muted'
+                            acc.resourceCollectionEnabled ? 'bg-green-500/10 border-green-500/30 text-green-400' : 'bg-surface-sunken border-border text-ink-muted'
                           }`}>
                             {acc.resourceCollectionEnabled ? 'Resource Coll. ✓' : 'Resource Coll. ✗'}
                           </span>
@@ -173,21 +201,21 @@ export default function CloudInventory() {
               <div className="grid grid-cols-3 gap-3">
                 {data.mappingGaps.map(gap => (
                   <div key={gap.ddKey} className={`rounded-xl border p-4 ${
-                    gap.found ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'
+                    gap.found ? 'bg-green-500/10 border-green-500/30' : 'bg-red-500/10 border-red-500/30'
                   }`}>
                     <div className="flex items-center gap-2 mb-2">
-                      <code className={`text-sm font-bold font-mono ${gap.found ? 'text-green-800' : 'text-red-800'}`}>
+                      <code className={`text-sm font-bold font-mono ${gap.found ? 'text-green-400' : 'text-red-400'}`}>
                         {gap.ddKey}
                       </code>
                       <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${
-                        gap.found ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                        gap.found ? 'bg-green-500/15 text-green-400' : 'bg-red-500/15 text-red-400'
                       }`}>
                         {gap.found ? '✓ Found' : '✗ Missing'}
                       </span>
                     </div>
                     <div className="text-xs text-ink-muted">
                       Cloud variants: {gap.cloudVariants.slice(0, 4).map(v => (
-                        <code key={v} className="bg-white border border-border px-1 rounded mr-1">{v}</code>
+                        <code key={v} className="bg-surface-subtle border border-border px-1 rounded mr-1">{v}</code>
                       ))}
                     </div>
                   </div>
@@ -220,7 +248,7 @@ export default function CloudInventory() {
                 <button
                   onClick={() => setActiveProvider(null)}
                   className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
-                    activeProvider === null ? 'border-violet-600 text-violet-700' : 'border-transparent text-ink-muted hover:text-ink-muted'
+                    activeProvider === null ? 'border-violet-600 text-violet-400' : 'border-transparent text-ink-muted hover:text-ink-muted'
                   }`}
                 >
                   All providers
@@ -232,7 +260,7 @@ export default function CloudInventory() {
                       key={p}
                       onClick={() => setActiveProvider(p === activeProvider ? null : p)}
                       className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors flex items-center gap-1.5 ${
-                        activeProvider === p ? 'border-violet-600 text-violet-700' : 'border-transparent text-ink-muted hover:text-ink-muted'
+                        activeProvider === p ? 'border-violet-600 text-violet-400' : 'border-transparent text-ink-muted hover:text-ink-muted'
                       }`}
                     >
                       {m.icon} {p.toUpperCase()}
@@ -265,7 +293,7 @@ export default function CloudInventory() {
                         <div className="flex items-center gap-2">
                           <span className="text-xl">{m.icon}</span>
                           <span className={`font-semibold ${m.color}`}>{m.label}</span>
-                          <span className={`text-xs px-2 py-0.5 rounded-full border ${m.border} ${m.color} bg-white/60`}>
+                          <span className={`text-xs px-2 py-0.5 rounded-full border ${m.border} ${m.color} bg-surface-subtle/60`}>
                             {keys.length} tag keys · {rows.length} values
                           </span>
                         </div>

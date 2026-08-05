@@ -11,7 +11,9 @@ import { logger } from '../../utils/logger';
 const router = Router();
 
 const ScanRequestSchema = z.object({
-  orgId: z.string().uuid(),
+  // Not always a UUID — orgs are keyed by their detected Datadog org ID, which can be a
+  // short alphanumeric slug (e.g. "ubshmbmhwxejn7vv") rather than a generated UUID.
+  orgId: z.string().min(1),
   collectors: z.array(z.string()).optional(),
 });
 
@@ -103,6 +105,20 @@ router.get('/:id/findings', (req, res, next) => {
     if (severity) findings = findings.filter((f) => f.severity === severity);
 
     res.json(findings);
+  } catch (err) { next(err); }
+});
+
+// DELETE /api/scans/:id
+router.delete('/:id', (req, res, next) => {
+  try {
+    const scan = ScanRepository.findById(req.params.id);
+    if (!scan) throw new AppError('Scan not found', 404);
+    if (scan.status === 'running' || scan.status === 'pending') {
+      throw new AppError('Cannot delete a scan that is still running', 409);
+    }
+
+    ScanRepository.delete(req.params.id);
+    res.status(204).send();
   } catch (err) { next(err); }
 });
 

@@ -71,7 +71,7 @@ export default function Integrations() {
               </div>
               <EvidenceTable findings={filteredFindings} />
             </div>
-          ) : <div className="card text-center py-8"><div className="text-green-600 text-2xl mb-2">✓</div><p className="text-ink">Integrations look healthy</p></div>}
+          ) : <div className="card text-center py-8"><div className="text-green-400 text-2xl mb-2">✓</div><p className="text-ink">Integrations look healthy</p></div>}
         </>
       )}
     </div>

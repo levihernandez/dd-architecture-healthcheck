@@ -89,5 +89,10 @@ export async function collectLogs(
     status: totalItems > 0 ? 'success' : overallStatus,
     itemCount: totalItems,
     durationMs: Date.now() - start,
+    endpoint: `${indexResult.endpoint}, ${pipelineResult.endpoint}`,
+    requestCount: indexResult.requestCount + pipelineResult.requestCount,
+    pageCount: indexResult.pageCount + pipelineResult.pageCount,
+    truncated: indexResult.truncated || pipelineResult.truncated,
+    rateLimitRemaining: pipelineResult.rateLimitRemaining ?? indexResult.rateLimitRemaining,
   };
 }

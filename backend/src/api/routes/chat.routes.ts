@@ -14,6 +14,7 @@ const MessageSchema = z.object({
 const ChatRequestSchema = z.object({
   orgId: z.string().min(1),
   scanId: z.string().optional(),
+  page: z.string().optional(),
   messages: z.array(MessageSchema).min(1).max(40),
 });
 
@@ -24,7 +25,7 @@ router.post('/stream', async (req, res) => {
     return;
   }
 
-  const { orgId, scanId, messages } = parse.data;
+  const { orgId, scanId, page, messages } = parse.data;
 
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
@@ -33,8 +34,8 @@ router.post('/stream', async (req, res) => {
   res.flushHeaders();
 
   try {
-    const context = buildChatContext(orgId, scanId);
-    logger.info(`[chat] streaming response for org=${orgId} messages=${messages.length}`);
+    const context = buildChatContext(orgId, scanId, page);
+    logger.info(`[chat] streaming response for org=${orgId} page=${page ?? 'none'} messages=${messages.length}`);
     await streamChatResponse(context, messages, res);
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Internal error';
@@ -50,10 +51,10 @@ router.post('/stream', async (req, res) => {
 
 // Non-streaming context endpoint — useful for debugging / showing what context was built
 router.get('/context', (req, res) => {
-  const { orgId, scanId } = req.query as Record<string, string>;
+  const { orgId, scanId, page } = req.query as Record<string, string>;
   if (!orgId) { res.status(400).json({ error: 'orgId required' }); return; }
   try {
-    const context = buildChatContext(orgId, scanId);
+    const context = buildChatContext(orgId, scanId, page);
     res.json({ context });
   } catch (err) {
     res.status(500).json({ error: err instanceof Error ? err.message : 'Error' });

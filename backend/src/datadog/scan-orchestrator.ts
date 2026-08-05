@@ -13,11 +13,19 @@ import { collectSLOs } from './collectors/slos.collector';
 import { collectGovernance } from './collectors/governance.collector';
 import { collectRUM } from './collectors/rum.collector';
 import { collectUsage } from './collectors/usage.collector';
+import { collectSecurityFindings } from './collectors/security-findings.collector';
+import { collectCostManagement } from './collectors/cost-management.collector';
+import { collectIncidents } from './collectors/incidents.collector';
 import { runAssessment } from '../assessment/engine';
 import { logger } from '../utils/logger';
-import type { CollectorResultSummary } from '../types/api.types';
+import type { CollectorResultSummary, CollectionLimits } from '../types/api.types';
 
-type CollectorFn = (client: ReturnType<typeof createClient>, orgId: string, scanRunId: string) => Promise<CollectorResultSummary>;
+type CollectorFn = (
+  client: ReturnType<typeof createClient>,
+  orgId: string,
+  scanRunId: string,
+  limits?: CollectionLimits
+) => Promise<CollectorResultSummary>;
 
 const ALL_COLLECTORS: Array<{ name: string; fn: CollectorFn }> = [
   { name: 'infrastructure', fn: collectInfrastructure },
@@ -32,6 +40,9 @@ const ALL_COLLECTORS: Array<{ name: string; fn: CollectorFn }> = [
   { name: 'governance', fn: collectGovernance },
   { name: 'rum', fn: collectRUM },
   { name: 'usage', fn: collectUsage },
+  { name: 'security_findings', fn: collectSecurityFindings },
+  { name: 'cost_management', fn: collectCostManagement },
+  { name: 'incidents', fn: collectIncidents },
 ];
 
 export async function runScan(orgId: string, scanRunId: string, requestedCollectors?: string[]): Promise<void> {
@@ -55,12 +66,17 @@ export async function runScan(orgId: string, scanRunId: string, requestedCollect
     ? ALL_COLLECTORS.filter((c) => requestedCollectors.includes(c.name))
     : ALL_COLLECTORS;
 
+  const limits: CollectionLimits = {
+    maxPagesHosts: parseInt(process.env.DATADOG_MAX_PAGES_HOSTS ?? '300'),
+    maxPagesServices: parseInt(process.env.DATADOG_MAX_PAGES_SERVICES ?? '100'),
+  };
+
   const results: CollectorResultSummary[] = [];
 
   for (const collector of collectors) {
     try {
       logger.info(`[${orgId}] Running collector: ${collector.name}`);
-      const result = await collector.fn(client, orgId, scanRunId);
+      const result = await collector.fn(client, orgId, scanRunId, limits);
       results.push(result);
       logger.info(`[${orgId}] Collector ${collector.name}: ${result.status} (${result.itemCount} items)`);
     } catch (err) {

@@ -1,4 +1,4 @@
-import axios, { AxiosInstance, AxiosError } from 'axios';
+import axios, { AxiosInstance, AxiosError, AxiosResponse } from 'axios';
 import { logger } from '../utils/logger';
 import { redactString } from '../utils/redact';
 import type { DatadogSite, DDCollectionResult, DDValidationResult } from '../types/datadog.types';
@@ -72,7 +72,9 @@ export class DatadogClient {
     const collectedAt = new Date().toISOString();
     try {
       await this.checkRateLimit();
-      const response = await this.client.get<{ data?: T[]; [key: string]: unknown }>(endpoint, { params });
+      const { response, attempts } = await this.requestWithRetry(() =>
+        this.client.get<{ data?: T[]; [key: string]: unknown }>(endpoint, { params })
+      );
       const data = this.extractData<T>(response.data, endpoint);
       return {
         data,
@@ -80,6 +82,10 @@ export class DatadogClient {
         endpoint,
         itemCount: data.length,
         collectedAt,
+        requestCount: attempts,
+        pageCount: 1,
+        truncated: false,
+        rateLimitRemaining: this.rateLimitRemaining,
       };
     } catch (err) {
       return this.handleCollectionError<T>(err, endpoint, collectedAt);
@@ -95,13 +101,17 @@ export class DatadogClient {
     const allData: T[] = [];
     let page = 0;
     let hasMore = true;
+    let requestCount = 0;
 
     try {
       while (hasMore && page < maxPages) {
         await this.checkRateLimit();
-        const response = await this.client.get<Record<string, unknown>>(endpoint, {
-          params: { ...params, page, count: 1000 },
-        });
+        const { response, attempts } = await this.requestWithRetry(() =>
+          this.client.get<Record<string, unknown>>(endpoint, {
+            params: { ...params, page, count: 1000 },
+          })
+        );
+        requestCount += attempts;
 
         const pageData = this.extractData<T>(response.data, endpoint);
         allData.push(...pageData);
@@ -116,10 +126,17 @@ export class DatadogClient {
         endpoint,
         itemCount: allData.length,
         collectedAt,
+        requestCount,
+        pageCount: page,
+        truncated: hasMore && page >= maxPages,
+        rateLimitRemaining: this.rateLimitRemaining,
       };
     } catch (err) {
       if (allData.length > 0) {
-        return { data: allData, status: 'success', endpoint, itemCount: allData.length, collectedAt };
+        return {
+          data: allData, status: 'success', endpoint, itemCount: allData.length, collectedAt,
+          requestCount, pageCount: page, truncated: hasMore, rateLimitRemaining: this.rateLimitRemaining,
+        };
       }
       return this.handleCollectionError<T>(err, endpoint, collectedAt);
     }
@@ -134,6 +151,8 @@ export class DatadogClient {
     const allData: T[] = [];
     let cursor: string | undefined;
     let pageCount = 0;
+    let requestCount = 0;
+    let hasMoreAtStop = false;
 
     try {
       while (pageCount < maxPages) {
@@ -141,15 +160,19 @@ export class DatadogClient {
         const queryParams: Record<string, unknown> = { ...params, 'page[limit]': 100 };
         if (cursor) queryParams['page[cursor]'] = cursor;
 
-        const response = await this.client.get<{ data?: T[]; meta?: { pagination?: { next_cursor?: string } } }>(
-          endpoint, { params: queryParams }
+        const { response, attempts } = await this.requestWithRetry(() =>
+          this.client.get<{ data?: T[]; meta?: { pagination?: { next_cursor?: string } } }>(
+            endpoint, { params: queryParams }
+          )
         );
+        requestCount += attempts;
 
         const pageData = Array.isArray(response.data?.data) ? response.data.data : [];
         allData.push(...pageData);
         cursor = response.data?.meta?.pagination?.next_cursor;
         pageCount++;
-        if (!cursor || pageData.length === 0) break;
+        if (!cursor || pageData.length === 0) { hasMoreAtStop = false; break; }
+        hasMoreAtStop = true;
       }
 
       return {
@@ -158,10 +181,17 @@ export class DatadogClient {
         endpoint,
         itemCount: allData.length,
         collectedAt,
+        requestCount,
+        pageCount,
+        truncated: hasMoreAtStop && pageCount >= maxPages,
+        rateLimitRemaining: this.rateLimitRemaining,
       };
     } catch (err) {
       if (allData.length > 0) {
-        return { data: allData, status: 'success', endpoint, itemCount: allData.length, collectedAt };
+        return {
+          data: allData, status: 'success', endpoint, itemCount: allData.length, collectedAt,
+          requestCount, pageCount, truncated: Boolean(cursor), rateLimitRemaining: this.rateLimitRemaining,
+        };
       }
       return this.handleCollectionError<T>(err, endpoint, collectedAt);
     }
@@ -170,7 +200,7 @@ export class DatadogClient {
   async getRaw<T = unknown>(endpoint: string, params?: Record<string, unknown>): Promise<{ data: T | null; status: 'success' | 'permission_denied' | 'not_available' | 'error'; error?: string }> {
     try {
       await this.checkRateLimit();
-      const response = await this.client.get<T>(endpoint, { params });
+      const { response } = await this.requestWithRetry(() => this.client.get<T>(endpoint, { params }));
       return { data: response.data, status: 'success' };
     } catch (err) {
       const result = this.handleCollectionError<unknown>(err, endpoint, new Date().toISOString());
@@ -189,6 +219,41 @@ export class DatadogClient {
       if (wait > 0 && wait < 60000) {
         logger.warn(`Rate limit nearly exhausted, waiting ${wait}ms`);
         await new Promise((r) => setTimeout(r, wait));
+      }
+    } else if (this.rateLimitRemaining < 20) {
+      // Lighter proactive pacing before things get critical — smooths consumption
+      // for large orgs making hundreds of paginated requests in one scan.
+      await new Promise((r) => setTimeout(r, 300));
+    }
+  }
+
+  // Retries a request on HTTP 429 (rate limited), honoring `retry-after` or the
+  // `x-ratelimit-reset` header. Non-429 errors propagate immediately.
+  private async requestWithRetry<T>(
+    fn: () => Promise<AxiosResponse<T>>,
+    maxAttempts = 3
+  ): Promise<{ response: AxiosResponse<T>; attempts: number }> {
+    let attempt = 0;
+    while (true) {
+      attempt++;
+      try {
+        const response = await fn();
+        return { response, attempts: attempt };
+      } catch (err) {
+        const status = axios.isAxiosError(err) ? err.response?.status : undefined;
+        if (status === 429 && attempt < maxAttempts) {
+          const headers = (err as AxiosError).response?.headers ?? {};
+          const retryAfter = headers['retry-after'] as string | number | undefined;
+          const resetHeader = headers['x-ratelimit-reset'] as string | number | undefined;
+          let waitMs = 1000 * attempt;
+          if (retryAfter) waitMs = parseInt(String(retryAfter)) * 1000;
+          else if (resetHeader) waitMs = Math.max(0, parseInt(String(resetHeader)) - Math.floor(Date.now() / 1000) + 1) * 1000;
+          waitMs = Math.min(Math.max(waitMs, 500), 30000);
+          logger.warn(`Rate limited (429), retrying in ${waitMs}ms (attempt ${attempt}/${maxAttempts})`);
+          await new Promise((r) => setTimeout(r, waitMs));
+          continue;
+        }
+        throw err;
       }
     }
   }
@@ -228,29 +293,23 @@ export class DatadogClient {
     endpoint: string,
     collectedAt: string
   ): DDCollectionResult<T> {
+    const base = { data: [], endpoint, itemCount: 0, collectedAt, requestCount: 1, pageCount: 0, truncated: false, rateLimitRemaining: this.rateLimitRemaining };
     if (axios.isAxiosError(err)) {
       const status = (err as AxiosError).response?.status;
       if (status === 403 || status === 401) {
-        return { data: [], status: 'permission_denied', endpoint, itemCount: 0, collectedAt,
-          error: `HTTP ${status}: Permission denied` };
+        return { ...base, status: 'permission_denied', error: `HTTP ${status}: Permission denied` };
       }
       if (status === 404) {
-        return { data: [], status: 'not_available', endpoint, itemCount: 0, collectedAt,
-          error: 'Endpoint not available' };
+        return { ...base, status: 'not_available', error: 'Endpoint not available' };
       }
       if (status === 422) {
-        return { data: [], status: 'not_detected', endpoint, itemCount: 0, collectedAt,
-          error: 'Feature not enabled or detected' };
+        return { ...base, status: 'not_detected', error: 'Feature not enabled or detected' };
       }
       if (status === 400) {
-        return { data: [], status: 'not_detected', endpoint, itemCount: 0, collectedAt,
-          error: 'Integration not configured in this org' };
+        return { ...base, status: 'not_detected', error: 'Integration not configured in this org' };
       }
     }
-    return {
-      data: [], status: 'error', endpoint, itemCount: 0, collectedAt,
-      error: this.extractErrorMessage(err),
-    };
+    return { ...base, status: 'error', error: this.extractErrorMessage(err) };
   }
 
   private extractErrorMessage(err: unknown): string {

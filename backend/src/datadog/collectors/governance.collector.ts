@@ -137,11 +137,17 @@ export async function collectGovernance(
     );
   }
 
+  const allResults = [teamsResult, usersResult, orgSettingsResult, rolesResult];
   logger.info(`[${orgId}] Collected governance data (${totalItems} items) in ${Date.now() - start}ms`);
   return {
     collector: 'governance',
     status: 'success',
     itemCount: totalItems,
     durationMs: Date.now() - start,
+    endpoint: '/api/v2/teams, /api/v2/users, /api/v1/org, /api/v2/roles',
+    requestCount: allResults.reduce((sum, r) => sum + r.requestCount, 0),
+    pageCount: allResults.reduce((sum, r) => sum + r.pageCount, 0),
+    truncated: allResults.some((r) => r.truncated),
+    rateLimitRemaining: rolesResult.rateLimitRemaining,
   };
 }

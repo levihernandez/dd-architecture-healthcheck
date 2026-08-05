@@ -137,19 +137,21 @@ export default function ServicesServiceCatalog() {
                 { key: 'service_name', header: 'Service', sortable: true, render: (r) => (
                   <strong className="text-sm">
                     {String(r.service_name)}
-                    <a href={ddUrl.service(base, String(r.service_name))} target="_blank" rel="noopener noreferrer" className="text-xs text-ink-faint hover:text-violet-600 ml-1 font-normal">↗</a>
+                    <a href={ddUrl.service(base, String(r.service_name))} target="_blank" rel="noopener noreferrer" className="text-xs text-ink-faint hover:text-violet-400 ml-1 font-normal">↗</a>
                   </strong>
                 ) },
-                { key: 'env', header: 'Env', sortable: true, render: (r) => r.env ? <span className="badge bg-green-100 text-green-800">{String(r.env)}</span> : <span className="text-ink-faint">—</span> },
+                { key: 'env', header: 'Env', sortable: true, render: (r) => r.env ? <span className="badge bg-green-500/15 text-green-400">{String(r.env)}</span> : <span className="text-ink-faint">—</span> },
                 { key: 'team', header: 'Team', sortable: true, render: (r) => r.team ? <span className="text-sm">{String(r.team)}</span> : <span className="text-red-400 text-xs">No team</span> },
-                { key: 'catalog', header: 'Catalog', render: (r) => <span className={r.has_service_catalog ? 'text-green-600' : 'text-red-400'}>{r.has_service_catalog ? '✓' : '✗'}</span> },
-                { key: 'monitor', header: 'Monitor', render: (r) => <span className={r.has_monitor ? 'text-green-600' : 'text-red-400'}>{r.has_monitor ? '✓' : '✗'}</span> },
-                { key: 'slo', header: 'SLO', render: (r) => <span className={r.has_slo ? 'text-green-600' : 'text-amber-500'}>{r.has_slo ? '✓' : '✗'}</span> },
-                { key: 'version', header: 'Version', render: (r) => <span className={r.has_version_tag ? 'text-green-600' : 'text-ink-faint'}>{r.has_version_tag ? '✓' : '✗'}</span> },
+                { key: 'catalog', header: 'Catalog', render: (r) => <span className={r.has_service_catalog ? 'text-green-400' : 'text-red-400'}>{r.has_service_catalog ? '✓' : '✗'}</span> },
+                { key: 'monitor', header: 'Monitor', render: (r) => <span className={r.has_monitor ? 'text-green-400' : 'text-red-400'}>{r.has_monitor ? '✓' : '✗'}</span> },
+                { key: 'slo', header: 'SLO', render: (r) => <span className={r.has_slo ? 'text-green-400' : 'text-amber-500'}>{r.has_slo ? '✓' : '✗'}</span> },
+                { key: 'version', header: 'Version', render: (r) => <span className={r.has_version_tag ? 'text-green-400' : 'text-ink-faint'}>{r.has_version_tag ? '✓' : '✗'}</span> },
               ]}
               data={svcData}
               rowKey={(r) => String(r.id)}
               emptyMessage="No services found"
+              searchable
+              pageSize={15}
             />
           </div>
         </>

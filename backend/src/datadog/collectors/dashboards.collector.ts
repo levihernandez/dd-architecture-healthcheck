@@ -25,6 +25,11 @@ export async function collectDashboards(
       itemCount: 0,
       error: listResult.error,
       durationMs: Date.now() - start,
+      endpoint: listResult.endpoint,
+      requestCount: listResult.requestCount,
+      pageCount: listResult.pageCount,
+      truncated: listResult.truncated,
+      rateLimitRemaining: listResult.rateLimitRemaining,
     };
   }
 
@@ -34,9 +39,9 @@ export async function collectDashboards(
   const insert = db.prepare(`
     INSERT OR REPLACE INTO dashboards
       (id, org_id, scan_run_id, dashboard_id, title, layout_type, widget_count,
-       has_template_variables, template_variable_count, author_handle, tags,
+       has_template_variables, template_variable_count, author_handle, is_read_only, tags,
        created_at_dd, modified_at_dd, raw_json, first_seen, last_seen)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   const txn = db.transaction((dashboards: DDDashboard[]) => {
@@ -51,11 +56,12 @@ export async function collectDashboards(
         tvCount > 0 ? 1 : 0,
         tvCount,
         dash.author_handle ?? null,
+        dash.is_read_only ? 1 : 0,
         JSON.stringify(dash.tags ?? []),
         dash.created_at ?? null,
         dash.modified_at ?? null,
         safeJsonSnapshot({ id: dash.id, title: dash.title, layout_type: dash.layout_type,
-          template_variables: dash.template_variables, tags: dash.tags }),
+          template_variables: dash.template_variables, tags: dash.tags, is_read_only: dash.is_read_only }),
         now, now
       );
     }
@@ -71,6 +77,11 @@ export async function collectDashboards(
     status: 'success',
     itemCount: listResult.itemCount,
     durationMs: Date.now() - start,
+    endpoint: listResult.endpoint,
+    requestCount: listResult.requestCount,
+    pageCount: listResult.pageCount,
+    truncated: listResult.truncated,
+    rateLimitRemaining: listResult.rateLimitRemaining,
   };
 }
 

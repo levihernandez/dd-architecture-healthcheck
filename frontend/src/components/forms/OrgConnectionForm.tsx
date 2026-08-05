@@ -67,7 +67,7 @@ export default function OrgConnectionForm({ org, onSuccess, onCancel }: OrgConne
   return (
     <form onSubmit={handleSubmit} className="space-y-5">
       {isError && (
-        <div className="bg-red-50 border border-red-200 text-red-700 rounded-md px-4 py-3 text-sm">
+        <div className="bg-red-500/10 border border-red-500/30 text-red-400 rounded-md px-4 py-3 text-sm">
           {(error as Error)?.message ?? 'Failed to connect. Check credentials.'}
         </div>
       )}
@@ -159,7 +159,7 @@ export default function OrgConnectionForm({ org, onSuccess, onCancel }: OrgConne
         )}
       </div>
 
-      <div className="bg-blue-50 border border-blue-200 rounded-md px-4 py-3 text-sm text-blue-700">
+      <div className="bg-blue-500/10 border border-blue-500/30 rounded-md px-4 py-3 text-sm text-blue-400">
         <strong>Read-only access only.</strong> This tool makes only GET requests to the Datadog API.
         No configurations are modified.
       </div>

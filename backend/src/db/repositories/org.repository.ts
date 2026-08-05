@@ -25,9 +25,11 @@ interface CredRow {
 }
 
 export const OrgRepository = {
-  create(req: CreateOrgRequest): OrgResponse {
+  create(req: CreateOrgRequest & { ddOrgId?: string; ddOrgName?: string }): OrgResponse {
     const db = getDatabase();
-    const id = uuidv4();
+    // Prefer the org ID Datadog itself reports at connection time — keeps the row's
+    // primary key stable across reconnects instead of minting a fresh app-generated UUID.
+    const id = req.ddOrgId || uuidv4();
     const now = new Date().toISOString();
 
     const credId = uuidv4();
@@ -38,9 +40,9 @@ export const OrgRepository = {
 
     db.transaction(() => {
       db.prepare(`
-        INSERT INTO orgs (id, name, site, session_only, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?)
-      `).run(id, req.name, req.site, req.sessionOnly ? 1 : 0, now, now);
+        INSERT INTO orgs (id, name, site, session_only, dd_org_id, dd_org_name, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(id, req.name, req.site, req.sessionOnly ? 1 : 0, req.ddOrgId ?? null, req.ddOrgName ?? null, now, now);
 
       db.prepare(`
         INSERT INTO api_credentials_metadata

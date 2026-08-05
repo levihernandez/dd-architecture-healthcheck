@@ -17,7 +17,7 @@ export async function collectMonitors(
   const result = await client.getPaginated<DDMonitor>(
     '/api/v1/monitor',
     { with_downtimes: true, group_states: 'all', page_size: 1000 },
-    50
+    100
   );
 
   if (result.status !== 'success') {
@@ -27,6 +27,11 @@ export async function collectMonitors(
       itemCount: 0,
       error: result.error,
       durationMs: Date.now() - start,
+      endpoint: result.endpoint,
+      requestCount: result.requestCount,
+      pageCount: result.pageCount,
+      truncated: result.truncated,
+      rateLimitRemaining: result.rateLimitRemaining,
     };
   }
 
@@ -86,5 +91,10 @@ export async function collectMonitors(
     status: 'success',
     itemCount: result.itemCount,
     durationMs: Date.now() - start,
+    endpoint: result.endpoint,
+    requestCount: result.requestCount,
+    pageCount: result.pageCount,
+    truncated: result.truncated,
+    rateLimitRemaining: result.rateLimitRemaining,
   };
 }

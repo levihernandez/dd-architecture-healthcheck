@@ -3,7 +3,9 @@ import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { toast } from 'sonner';
 import { useOrgAndScanFilters } from '../../hooks/useFilters';
+import { useCurrentPage } from '../../hooks/useCurrentPage';
 import { aiSettingsApi } from '../../services/api';
+import { streamChat } from '../../lib/chat-client';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -24,9 +26,9 @@ function renderInline(text: string): React.ReactNode {
   const parts = text.split(/(\*\*[^*]+\*\*|`[^`]+`)/g);
   return parts.map((part, i) => {
     if (part.startsWith('**') && part.endsWith('**'))
-      return <strong key={i} className="font-semibold text-gray-900">{part.slice(2, -2)}</strong>;
+      return <strong key={i} className="font-semibold text-ink">{part.slice(2, -2)}</strong>;
     if (part.startsWith('`') && part.endsWith('`'))
-      return <code key={i} className="bg-violet-50 text-violet-700 text-xs px-1 py-0.5 rounded font-mono">{part.slice(1, -1)}</code>;
+      return <code key={i} className="bg-violet-500/10 text-violet-400 text-xs px-1 py-0.5 rounded font-mono">{part.slice(1, -1)}</code>;
     return part;
   });
 }
@@ -53,7 +55,7 @@ function MarkdownContent({ content }: { content: string }) {
 
     const hm = line.match(/^(#{1,3})\s+(.+)/);
     if (hm) {
-      const cls = hm[1].length === 1 ? 'text-sm font-bold text-gray-900 mt-2 mb-0.5' : 'text-xs font-bold text-gray-800 mt-1.5';
+      const cls = hm[1].length === 1 ? 'text-sm font-bold text-ink mt-2 mb-0.5' : 'text-xs font-bold text-ink mt-1.5';
       elements.push(<p key={i} className={cls}>{hm[2]}</p>);
       i++; continue;
     }
@@ -64,7 +66,7 @@ function MarkdownContent({ content }: { content: string }) {
       elements.push(
         <ul key={i} className="space-y-0.5 my-0.5">
           {items.map((it, j) => (
-            <li key={j} className="flex gap-1.5 text-xs text-gray-700">
+            <li key={j} className="flex gap-1.5 text-xs text-ink-muted">
               <span className="text-violet-400 shrink-0">▸</span>
               <span>{renderInline(it)}</span>
             </li>
@@ -80,8 +82,8 @@ function MarkdownContent({ content }: { content: string }) {
       elements.push(
         <ol key={i} className="space-y-0.5 my-0.5">
           {items.map((it, j) => (
-            <li key={j} className="flex gap-1.5 text-xs text-gray-700">
-              <span className="text-violet-600 font-semibold shrink-0 w-3">{j + 1}.</span>
+            <li key={j} className="flex gap-1.5 text-xs text-ink-muted">
+              <span className="text-violet-400 font-semibold shrink-0 w-3">{j + 1}.</span>
               <span>{renderInline(it)}</span>
             </li>
           ))}
@@ -92,7 +94,7 @@ function MarkdownContent({ content }: { content: string }) {
 
     if (line.trim() === '') { elements.push(<div key={i} className="h-1" />); i++; continue; }
 
-    elements.push(<p key={i} className="text-xs text-gray-700 leading-relaxed">{renderInline(line)}</p>);
+    elements.push(<p key={i} className="text-xs text-ink-muted leading-relaxed">{renderInline(line)}</p>);
     i++;
   }
 
@@ -102,6 +104,7 @@ function MarkdownContent({ content }: { content: string }) {
 export default function FloatingChat() {
   const [open, setOpen] = useState(false);
   const { orgs, scans, selectedOrgId, selectedScanId, setSelectedOrgId, setSelectedScanId } = useOrgAndScanFilters();
+  const currentPage = useCurrentPage();
   const { data: aiSettings } = useQuery({ queryKey: ['ai-settings'], queryFn: aiSettingsApi.get });
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
@@ -134,53 +137,33 @@ export default function FloatingChat() {
 
     abortRef.current = new AbortController();
 
+    let assistantContent = '';
     try {
-      const response = await fetch('/api/chat/stream', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      await streamChat(
+        {
           orgId: selectedOrgId,
           scanId: selectedScanId || undefined,
+          page: currentPage?.path,
           messages: nextMessages.map(m => ({ role: m.role, content: m.content })),
-        }),
-        signal: abortRef.current.signal,
-      });
-
-      if (!response.ok || !response.body) throw new Error(`HTTP ${response.status}`);
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let assistantContent = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        const rawChunk = decoder.decode(value, { stream: true });
-        for (const line of rawChunk.split('\n')) {
-          if (!line.startsWith('data: ')) continue;
-          const data = line.slice(6).trim();
-          if (data === '[DONE]') break;
-          try {
-            const parsed = JSON.parse(data) as { type: string; content: string };
-            if (parsed.type === 'token') {
-              assistantContent += parsed.content;
-              setMessages(prev => {
-                const updated = [...prev];
-                updated[updated.length - 1] = { role: 'assistant', content: assistantContent, streaming: true };
-                return updated;
-              });
-            } else if (parsed.type === 'error') {
-              assistantContent = `Error: ${parsed.content}`;
-              setMessages(prev => {
-                const updated = [...prev];
-                updated[updated.length - 1] = { role: 'assistant', content: assistantContent, error: true };
-                return updated;
-              });
-            }
-          } catch { /* skip */ }
+          signal: abortRef.current.signal,
+        },
+        (delta) => {
+          assistantContent += delta;
+          setMessages(prev => {
+            const updated = [...prev];
+            updated[updated.length - 1] = { role: 'assistant', content: assistantContent, streaming: true };
+            return updated;
+          });
+        },
+        (errMsg) => {
+          assistantContent = `Error: ${errMsg}`;
+          setMessages(prev => {
+            const updated = [...prev];
+            updated[updated.length - 1] = { role: 'assistant', content: assistantContent, error: true };
+            return updated;
+          });
         }
-      }
+      );
 
       setMessages(prev => {
         const updated = [...prev];
@@ -207,24 +190,28 @@ export default function FloatingChat() {
       setIsStreaming(false);
       abortRef.current = null;
     }
-  }, [messages, isStreaming, selectedOrgId, selectedScanId, open]);
+  }, [messages, isStreaming, selectedOrgId, selectedScanId, open, currentPage]);
 
   const aiConfigured = aiSettings && (aiSettings.provider !== 'none' || aiSettings.envProvider);
 
   return (
     <>
       {/* Panel */}
-      {open && (
-        <div
-          className="fixed bottom-20 right-5 z-50 flex flex-col bg-white rounded-2xl shadow-2xl border border-gray-200 overflow-hidden"
-          style={{ width: 380, height: 560 }}
-        >
+      <div
+        className={`fixed top-1/2 -translate-y-1/2 right-0 z-50 flex flex-col bg-surface-subtle rounded-l-2xl shadow-2xl border border-border overflow-hidden transition-all duration-300 ease-out ${
+          open
+            ? 'translate-x-0 opacity-100 pointer-events-auto'
+            : 'translate-x-full opacity-0 pointer-events-none'
+        }`}
+        style={{ width: 380, height: 560 }}
+      >
+        <>
           {/* Header */}
           <div className="flex items-center justify-between px-3 py-2.5 bg-violet-600 text-white shrink-0">
             <div className="flex items-center gap-2 min-w-0">
               <span className="text-sm font-semibold">AI Advisor</span>
               {aiConfigured ? (
-                <span className="text-xs bg-white/20 px-1.5 py-0.5 rounded-full truncate max-w-[120px]">
+                <span className="text-xs bg-surface-subtle/20 px-1.5 py-0.5 rounded-full truncate max-w-[120px]">
                   {aiSettings.provider !== 'none' ? aiSettings.provider : aiSettings.envProvider}
                   {aiSettings.model ? ` · ${aiSettings.model}` : ''}
                 </span>
@@ -236,16 +223,16 @@ export default function FloatingChat() {
             </div>
             <div className="flex items-center gap-1.5 shrink-0">
               <select
-                className="text-xs bg-white/10 border border-white/20 text-white rounded px-1.5 py-0.5 cursor-pointer max-w-[110px]"
+                className="text-xs bg-surface-subtle/10 border border-white/20 text-white rounded px-1.5 py-0.5 cursor-pointer max-w-[110px]"
                 value={selectedOrgId}
                 onChange={(e) => { setSelectedOrgId(e.target.value); setMessages([]); }}
               >
                 {orgs.length === 0 && <option value="">No orgs</option>}
-                {orgs.map(o => <option key={o.id} value={o.id} className="text-gray-900">{o.name}</option>)}
+                {orgs.map(o => <option key={o.id} value={o.id} className="text-ink">{o.name}</option>)}
               </select>
               <button
                 onClick={() => setOpen(false)}
-                className="p-0.5 rounded hover:bg-white/20 transition-colors text-white/80 hover:text-white"
+                className="p-0.5 rounded hover:bg-surface-subtle/20 transition-colors text-white/80 hover:text-white"
                 aria-label="Close chat"
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -255,14 +242,20 @@ export default function FloatingChat() {
             </div>
           </div>
 
+          {currentPage && (
+            <div className="px-3 py-1 text-[10px] text-ink-faint bg-surface-sunken border-b border-gray-100" title="Assessments focus on this page's domain when relevant">
+              📍 Focused on <span className="font-medium text-ink-muted">{currentPage.label}</span>
+            </div>
+          )}
+
           {/* Quick chips */}
-          <div className="flex gap-1.5 px-3 py-2 overflow-x-auto shrink-0 border-b border-gray-100 bg-gray-50">
+          <div className="flex gap-1.5 px-3 py-2 overflow-x-auto shrink-0 border-b border-gray-100 bg-surface-sunken">
             {QUICK_CHIPS.map(c => (
               <button
                 key={c.label}
                 onClick={() => send(c.prompt)}
                 disabled={isStreaming || !selectedOrgId}
-                className="shrink-0 flex items-center gap-1 text-xs bg-white border border-gray-200 rounded-full px-2.5 py-1 text-gray-600 hover:bg-violet-50 hover:border-violet-200 hover:text-violet-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
+                className="shrink-0 flex items-center gap-1 text-xs bg-surface-subtle border border-border rounded-full px-2.5 py-1 text-ink-muted hover:bg-violet-500/10 hover:border-violet-500/30 hover:text-violet-400 transition-colors disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
               >
                 <span>{c.icon}</span>
                 <span>{c.label}</span>
@@ -273,9 +266,9 @@ export default function FloatingChat() {
           {/* Messages */}
           <div className="flex-1 overflow-y-auto px-3 py-3 space-y-3">
             {messages.length === 0 && (
-              <div className="flex flex-col items-center justify-center h-full text-center gap-2 text-gray-400">
+              <div className="flex flex-col items-center justify-center h-full text-center gap-2 text-ink-faint">
                 <div className="text-3xl">✨</div>
-                <div className="text-xs text-gray-500">
+                <div className="text-xs text-ink-faint">
                   {selectedOrgId
                     ? 'Ask anything about your Datadog setup, or pick a quick assessment above.'
                     : 'Select an org from the dropdown to get started.'}
@@ -295,8 +288,8 @@ export default function FloatingChat() {
                     msg.role === 'user'
                       ? 'bg-violet-600 text-white rounded-br-sm'
                       : msg.error
-                      ? 'bg-red-50 border border-red-200 rounded-bl-sm'
-                      : 'bg-gray-50 border border-gray-200 shadow-sm rounded-bl-sm'
+                      ? 'bg-red-500/10 border border-red-500/30 rounded-bl-sm'
+                      : 'bg-surface-sunken border border-border shadow-sm rounded-bl-sm'
                   }`}
                 >
                   {msg.role === 'user' ? (
@@ -319,7 +312,7 @@ export default function FloatingChat() {
                   )}
                 </div>
                 {msg.role === 'user' && (
-                  <div className="w-5 h-5 rounded-full bg-gray-200 flex items-center justify-center text-gray-600 text-[9px] font-bold shrink-0 mt-0.5">
+                  <div className="w-5 h-5 rounded-full bg-surface-sunken flex items-center justify-center text-ink-muted text-[9px] font-bold shrink-0 mt-0.5">
                     You
                   </div>
                 )}
@@ -329,7 +322,7 @@ export default function FloatingChat() {
           </div>
 
           {/* Input */}
-          <div className="shrink-0 border-t border-gray-200 bg-white px-3 py-2">
+          <div className="shrink-0 border-t border-border bg-surface-subtle px-3 py-2">
             <div className="flex gap-2 items-end">
               <textarea
                 ref={inputRef}
@@ -341,7 +334,7 @@ export default function FloatingChat() {
                 placeholder={selectedOrgId ? 'Ask about your setup…' : 'Select an org first…'}
                 disabled={!selectedOrgId}
                 rows={1}
-                className="flex-1 resize-none text-xs border border-gray-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-violet-400 max-h-24 overflow-y-auto disabled:opacity-50"
+                className="flex-1 resize-none text-xs border border-border rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-violet-400 max-h-24 overflow-y-auto disabled:opacity-50"
                 style={{ lineHeight: '1.5' }}
                 onInput={(e) => {
                   const el = e.currentTarget;
@@ -369,44 +362,45 @@ export default function FloatingChat() {
             <div className="flex items-center justify-between mt-1">
               <button
                 onClick={() => setMessages([])}
-                className="text-[10px] text-gray-400 hover:text-gray-600"
+                className="text-[10px] text-ink-faint hover:text-ink-muted"
               >
                 Clear
               </button>
               <Link
                 to="/chat"
                 onClick={() => setOpen(false)}
-                className="text-[10px] text-violet-500 hover:text-violet-700"
+                className="text-[10px] text-violet-500 hover:text-violet-400"
               >
                 Open full view →
               </Link>
             </div>
           </div>
-        </div>
-      )}
+        </>
+      </div>
 
-      {/* FAB */}
+      {/* Toggle tab */}
       <button
         onClick={() => setOpen(o => !o)}
-        className="fixed bottom-5 right-5 z-50 w-14 h-14 rounded-full bg-violet-600 text-white shadow-lg hover:bg-violet-700 hover:shadow-xl transition-all flex items-center justify-center"
-        aria-label="Open AI Chat"
+        className={`fixed top-1/2 -translate-y-1/2 z-50 w-8 h-16 rounded-l-xl bg-violet-600 text-white shadow-lg hover:bg-violet-700 hover:w-9 transition-all flex items-center justify-center ${
+          open ? 'right-[380px]' : 'right-0'
+        }`}
+        aria-label={open ? 'Close AI Chat' : 'Open AI Chat'}
       >
-        {open ? (
-          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+        <span className="relative">
+          <svg
+            className={`w-5 h-5 transition-transform duration-300 ${open ? 'rotate-180' : ''}`}
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
           </svg>
-        ) : (
-          <span className="relative">
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
-            </svg>
-            {unread > 0 && (
-              <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-red-500 text-white text-[9px] font-bold flex items-center justify-center">
-                {unread}
-              </span>
-            )}
-          </span>
-        )}
+          {!open && unread > 0 && (
+            <span className="absolute -top-2 -right-2 w-4 h-4 rounded-full bg-red-500 text-white text-[9px] font-bold flex items-center justify-center">
+              {unread}
+            </span>
+          )}
+        </span>
       </button>
     </>
   );

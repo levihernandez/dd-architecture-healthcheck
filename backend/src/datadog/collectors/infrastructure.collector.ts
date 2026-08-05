@@ -4,7 +4,7 @@ import { safeJsonSnapshot } from '../../utils/redact';
 import { logger } from '../../utils/logger';
 import type { DatadogClient } from '../client';
 import type { DDHost } from '../../types/datadog.types';
-import type { CollectorResultSummary } from '../../types/api.types';
+import type { CollectorResultSummary, CollectionLimits } from '../../types/api.types';
 
 const STANDARD_TAGS = new Set(['env', 'service', 'version', 'team', 'owner', 'host']);
 
@@ -34,7 +34,8 @@ function normalizeTagSource(source: string): string {
 export async function collectInfrastructure(
   client: DatadogClient,
   orgId: string,
-  scanRunId: string
+  scanRunId: string,
+  limits?: CollectionLimits
 ): Promise<CollectorResultSummary> {
   const start = Date.now();
   logger.info(`[${orgId}] Collecting infrastructure/hosts`);
@@ -42,7 +43,7 @@ export async function collectInfrastructure(
   const result = await client.getPaginated<DDHost>(
     '/api/v1/hosts',
     { with_apps: true, with_mute_status: true, include_muted_hosts_data: true },
-    50
+    limits?.maxPagesHosts ?? 300
   );
 
   if (result.status !== 'success') {
@@ -52,6 +53,11 @@ export async function collectInfrastructure(
       itemCount: 0,
       error: result.error,
       durationMs: Date.now() - start,
+      endpoint: result.endpoint,
+      requestCount: result.requestCount,
+      pageCount: result.pageCount,
+      truncated: result.truncated,
+      rateLimitRemaining: result.rateLimitRemaining,
     };
   }
 
@@ -207,6 +213,11 @@ export async function collectInfrastructure(
     status: 'success',
     itemCount: result.itemCount,
     durationMs: Date.now() - start,
+    endpoint: result.endpoint,
+    requestCount: result.requestCount,
+    pageCount: result.pageCount,
+    truncated: result.truncated,
+    rateLimitRemaining: result.rateLimitRemaining,
   };
 }
 

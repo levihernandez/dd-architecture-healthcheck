@@ -2,16 +2,21 @@ import type {
   Finding, OrgScorecard, CategoryScore, ScoreGrade, FindingCategory
 } from '../types/assessment.types';
 
-const CATEGORY_WEIGHTS: Record<FindingCategory, number> = {
-  unified_tagging: 30,
-  service_architecture: 20,
-  monitors_health: 15,
-  logs_health: 10,
+// Partial, not Record<FindingCategory, number>: categories absent here (e.g.
+// cost_optimization) are informational-only and never enter the weighted score.
+// Rebalanced when security_posture was added: the 9 pre-existing weights were
+// scaled down ~10% (rounded) to make room, keeping the sum at exactly 100.
+const CATEGORY_WEIGHTS: Partial<Record<FindingCategory, number>> = {
+  unified_tagging: 27,
+  service_architecture: 18,
+  monitors_health: 13,
+  logs_health: 9,
   dashboards_health: 5,
-  synthetics_health: 5,
-  integration_hygiene: 8,
+  synthetics_health: 4,
+  integration_hygiene: 7,
   network_cloud: 4,
   governance: 3,
+  security_posture: 10,
 };
 
 const SEVERITY_DEDUCTIONS: Record<string, number> = {
@@ -34,11 +39,12 @@ export function computeScorecard(
   let weightSum = 0;
 
   for (const category of categories) {
+    const weight = CATEGORY_WEIGHTS[category] ?? 0;
     const catFindings = findings.filter((f) => f.category === category);
     const score = computeCategoryScore(category, catFindings);
     categoryScores.push(score);
-    weightedTotal += score.percentage * CATEGORY_WEIGHTS[category];
-    weightSum += CATEGORY_WEIGHTS[category];
+    weightedTotal += score.percentage * weight;
+    weightSum += weight;
   }
 
   const overallScore = weightSum > 0 ? Math.round(weightedTotal / weightSum) : 100;

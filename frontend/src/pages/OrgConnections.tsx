@@ -128,7 +128,7 @@ export default function OrgConnections() {
                     )}
                     <ScanStatusBadge status={org.lastScanStatus ?? 'pending'} />
                     {org.sessionOnly && (
-                      <span className="badge bg-amber-100 text-amber-700">Session Only</span>
+                      <span className="badge bg-amber-500/15 text-amber-400">Session Only</span>
                     )}
                   </div>
                   <div className="mt-1.5 flex gap-4 text-sm text-ink-muted flex-wrap">
@@ -139,13 +139,14 @@ export default function OrgConnections() {
                     {org.ddOrgId && (
                       <span>DD Org ID: <code className="text-xs bg-surface-sunken px-1 rounded">{org.ddOrgId}</code></span>
                     )}
+                    <span>App ID: <code className="text-xs bg-surface-sunken px-1 rounded">{org.id}</code></span>
                   </div>
 
                   {validateResult[org.id] && (
                     <div className={`mt-2 text-sm px-3 py-1.5 rounded ${
                       validateResult[org.id].valid
-                        ? 'bg-green-50 text-green-700'
-                        : 'bg-red-50 text-red-700'
+                        ? 'bg-green-500/10 text-green-400'
+                        : 'bg-red-500/10 text-red-400'
                     }`}>
                       {validateResult[org.id].valid ? '✓' : '✗'} {validateResult[org.id].message}
                     </div>
@@ -154,8 +155,8 @@ export default function OrgConnections() {
 
                 <div className="flex items-center gap-2">
                   {confirmingDeleteId === org.id ? (
-                    <div className="flex items-center gap-2 bg-red-50 border border-red-200 rounded-md px-3 py-1.5 animate-fade-in">
-                      <span className="text-xs text-red-700">Delete "{org.name}" and all scan data?</span>
+                    <div className="flex items-center gap-2 bg-red-500/10 border border-red-500/30 rounded-md px-3 py-1.5 animate-fade-in">
+                      <span className="text-xs text-red-400">Delete "{org.name}" and all scan data?</span>
                       <button
                         className="btn-danger text-xs"
                         disabled={deleteOrg.isPending}
@@ -204,9 +205,9 @@ export default function OrgConnections() {
         </div>
       )}
 
-      <div className="card bg-blue-50 border-blue-200">
-        <h3 className="text-sm font-semibold text-blue-800 mb-2">Security Notice</h3>
-        <ul className="text-sm text-blue-700 space-y-1 list-disc list-inside">
+      <div className="card bg-blue-500/10 border-blue-500/30">
+        <h3 className="text-sm font-semibold text-blue-400 mb-2">Security Notice</h3>
+        <ul className="text-sm text-blue-400 space-y-1 list-disc list-inside">
           <li>API and App keys are encrypted using AES before storage</li>
           <li>Keys are never logged, exported, or sent to AI providers</li>
           <li>Only read-only Datadog API endpoints are used</li>

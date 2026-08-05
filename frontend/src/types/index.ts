@@ -36,7 +36,8 @@ export type FindingSeverity = 'critical' | 'high' | 'medium' | 'low' | 'info';
 export type FindingCategory =
   | 'unified_tagging' | 'service_architecture' | 'integration_hygiene'
   | 'logs_health' | 'monitors_health' | 'dashboards_health'
-  | 'synthetics_health' | 'network_cloud' | 'governance';
+  | 'synthetics_health' | 'network_cloud' | 'governance'
+  | 'security_posture' | 'cost_optimization';
 
 export interface Org {
   id: string;
@@ -70,6 +71,11 @@ export interface CollectorResult {
   itemCount: number;
   error?: string;
   durationMs?: number;
+  endpoint?: string;
+  requestCount?: number;
+  pageCount?: number;
+  truncated?: boolean;
+  rateLimitRemaining?: number;
 }
 
 export interface CategoryScore {
@@ -166,6 +172,8 @@ export interface InventorySummary {
   slos: number;
   tagKeys: number;
   envTagCoverage: number;
+  securityFindings: number;
+  openIncidents: number;
 }
 
 export interface TagAnalysisRow {
@@ -193,19 +201,20 @@ export const GRADE_LABELS: Record<ScoreGrade, string> = {
   critical: 'Critical',
 };
 
+// Validated status palette (dataviz skill) — reserved for state, never reused as a series color.
 export const GRADE_COLORS: Record<ScoreGrade, string> = {
-  excellent: '#10b981',
-  good: '#3b82f6',
-  needs_attention: '#f59e0b',
-  critical: '#ef4444',
+  excellent: '#0ca30c', // good
+  good: '#2a78d6', // categorical blue — distinct from the other three status tiers
+  needs_attention: '#fab219', // warning
+  critical: '#d03b3b', // critical
 };
 
 export const SEVERITY_COLORS: Record<FindingSeverity, string> = {
-  critical: '#ef4444',
-  high: '#f97316',
-  medium: '#f59e0b',
-  low: '#3b82f6',
-  info: '#6b7280',
+  critical: '#d03b3b', // critical
+  high: '#ec835a', // serious
+  medium: '#fab219', // warning
+  low: '#2a78d6', // categorical blue — informational, not a status color
+  info: '#898781', // muted ink
 };
 
 export const CATEGORY_LABELS: Record<FindingCategory, string> = {
@@ -218,6 +227,8 @@ export const CATEGORY_LABELS: Record<FindingCategory, string> = {
   synthetics_health: 'Synthetics Health',
   network_cloud: 'Network & Cloud',
   governance: 'Governance',
+  security_posture: 'Security Posture',
+  cost_optimization: 'Cost Optimization',
 };
 
 // ─── Tagging Intelligence types ───────────────────────────────────────────────
@@ -312,12 +323,41 @@ export interface TemplateSummary {
   id: string;
   name: string;
   category: 'industry' | 'org';
+  sector?: string;
   description: string;
   icon: string;
   requiredCount: number;
   recommendedCount: number;
   optionalCount: number;
   hasComplianceTags: boolean;
+}
+
+// Static tag definition — the raw template shape from GET /tagging/templates/:id,
+// with no found/coverage since it's not scored against any org's scan data.
+export interface TemplateTagDef {
+  key: string;
+  description: string;
+  why: string;
+  how: string;
+  when: string;
+  where: string;
+  exampleValues?: string[];
+  platformGuides?: Array<{ platform: string; method: string }>;
+}
+
+export interface IndustryTemplateDetail {
+  id: string;
+  name: string;
+  category: 'industry' | 'org';
+  sector?: string;
+  description: string;
+  icon: string;
+  detectSignals?: string[];
+  globalBaseline: TemplateTagDef[];
+  required: TemplateTagDef[];
+  recommended: TemplateTagDef[];
+  optional: TemplateTagDef[];
+  complianceTags?: Array<{ key: string; standard: string; note: string }>;
 }
 
 export interface TemplateTag {
@@ -331,6 +371,19 @@ export interface TemplateTag {
   found: boolean;
   coverage: number;
   foundKey?: string | null;
+  platformGuides?: Array<{ platform: string; method: string }>;
+}
+
+export interface CloudAutoTagScore {
+  key: string;
+  provider: 'aws' | 'gcp' | 'azure' | 'kubernetes' | 'agent';
+  description: string;
+  pairsWith: string;
+  reuseNote: string;
+  exampleValues?: string[];
+  found: boolean;
+  coverage: number;
+  foundKey?: string | null;
 }
 
 export interface TemplateScore {
@@ -340,15 +393,120 @@ export interface TemplateScore {
   overallScore: number;
   complianceScore: number;
   baselineScore: number;
+  cloudAutoScore: number;
   globalBaseline: TemplateTag[];
   required: TemplateTag[];
   recommended: Array<{ key: string; description: string; found: boolean; coverage: number }>;
   optional: Array<{ key: string; description: string; found: boolean }>;
   complianceTags: Array<{ key: string; standard: string; note: string; found: boolean }>;
+  cloudAuto: CloudAutoTagScore[];
   missingBaseline: string[];
   missingRequired: string[];
   missingRecommended: string[];
   quickWins: string[];
+}
+
+export interface TagPolicyLayer {
+  layer: string;
+  where: string;
+  mechanism: string;
+  catchesAt: 'design' | 'build' | 'deploy' | 'runtime';
+  outcome: string;
+  orgSettingsPath?: string;
+}
+
+export interface TagEnforcementRow {
+  resource: string;
+  tagsSupported: string;
+  mandatoryEnforcement: boolean;
+  notes?: string;
+  orgSettingsPath?: string;
+  docsUrl?: string;
+}
+
+export interface TagPolicyResource {
+  title: string;
+  url: string;
+  type: 'product' | 'docs' | 'api';
+  description: string;
+}
+
+export interface OrgTagTemplateSelection {
+  templateId: string;
+  updatedAt: string;
+}
+
+// ─── Host instrumentation blind-spot analysis ─────────────────────────────────
+
+export interface HostGapRow {
+  hostName: string;
+  cloudProvider: string;
+  instanceType: string | null;
+  region: string | null;
+  availabilityZone: string | null;
+  platform: string | null;
+  agentVersion: string | null;
+  envTag: string | null;
+  serviceTag: string | null;
+  hasEnvTag: boolean;
+  hasServiceTag: boolean;
+  hasVersionTag: boolean;
+  hasTeamTag: boolean;
+  hasApm: boolean;
+  matchedService: string | null;
+  installedChecks: string[];
+  isBlindSpot: boolean;
+}
+
+export interface ProductGap {
+  product: string;
+  icon: string;
+  hostsCoveredEstimate: number;
+  totalHosts: number;
+  coveragePct: number;
+  gapCount: number;
+  severity: 'critical' | 'high' | 'medium' | 'low';
+  why: string;
+  what: string;
+  how: string;
+  howMuch: string;
+  improvement: string;
+}
+
+export interface ServiceMaturityRow {
+  serviceName: string;
+  env: string | null;
+  team: string | null;
+  score: number;
+  grade: ScoreGrade;
+  hasServiceCatalog: boolean;
+  hasMonitor: boolean;
+  hasSLO: boolean;
+  hasVersionTag: boolean;
+  hasOwner: boolean;
+  missing: string[];
+}
+
+export interface AppBreakdownRow {
+  type: string;
+  label: string;
+  icon: string;
+  count: number;
+  tagCoveragePct: number | null;
+  tagCoverageNote: string;
+}
+
+export interface HostGapAnalysis {
+  totalHosts: number;
+  blindSpotCount: number;
+  hosts: HostGapRow[];
+  productGaps: ProductGap[];
+  serviceMaturity: {
+    services: ServiceMaturityRow[];
+    avgScore: number;
+    distribution: Record<ScoreGrade, number>;
+  };
+  appBreakdown: AppBreakdownRow[];
 }
 
 export interface GovernanceResult {
@@ -411,6 +569,7 @@ export interface CloudInventory {
   tagsBySource: Record<string, Array<{ key: string; value: string; hostCount: number }>>;
   mappingGaps: Array<{ ddKey: string; cloudVariants: string[]; found: boolean }>;
   usingFallback: boolean;
+  costManagement: Array<{ provider: string; configured: boolean; accountCount: number }>;
 }
 
 export interface TagDetail {
@@ -421,6 +580,12 @@ export interface TagDetail {
   collisions: Array<{ canonical: string; variants: string[]; kind: 'synonym' | 'casing' }>;
 }
 
+export interface CostFigure {
+  amount: number;
+  source: 'real' | 'estimated';
+  note?: string;
+}
+
 export interface AnalyticsData {
   scannedAt: string | null;
   infrastructure: {
@@ -428,11 +593,15 @@ export interface AnalyticsData {
     tagCoverage: { env: number; service: number; version: number; team: number };
     cloudAccounts: Array<{ provider: string; n: number }>;
     containers: number | null;
+    cost: CostFigure | null;
+    recommendations: string[];
   };
   customMetrics: {
     estimated: number; allotmentAt100PerHost: number; allotmentAt200PerHost: number;
     utilizationPct: number; risk: 'low' | 'medium' | 'high';
     topDrivers: Array<{ key: string; uniqueValues: number; estimatedMetrics: number }>;
+    cost: CostFigure | null;
+    recommendations: string[];
   };
   logs: {
     totalIndexes: number; pipelines: number; enabledPipelines: number;
@@ -443,18 +612,32 @@ export interface AnalyticsData {
       name: string; retentionDays: number | null; dailyLimitEvents: number | null;
       exclusionFilters: number; isRateLimited: boolean; filterQuery: string | null; isFlex: boolean;
     }>;
+    cost: CostFigure | null;
+    recommendations: string[];
   };
   integrations: {
     total: number; configured: number; enabled: number;
+    installed: number; broken: number; idle: number; notInstalled: number;
     byType: Array<{ type: string; count: number }>;
     list: Array<{ name: string; type: string | null; status: string | null; isConfigured: boolean; isEnabled: boolean }>;
+    recommendations: string[];
   };
   synthetics: {
     apiTests: number; browserTests: number; estimatedMonthlyRuns: number;
     details: Array<{ name: string; type: string; status: string; locations: number; estimatedMonthlyRuns: number }>;
+    cost: CostFigure | null;
+    recommendations: string[];
   };
-  apm: { totalServices: number; svcInCatalog: number; svcWithMonitor: number; svcWithSLO: number; slos: number };
-  observability: { monitors: number; dashboards: number };
+  apm: {
+    totalServices: number; svcInCatalog: number; svcWithMonitor: number; svcWithSLO: number; slos: number;
+    cost: CostFigure | null;
+    recommendations: string[];
+  };
+  observability: {
+    monitors: number;
+    dashboards: number;
+    dashboardBreakdown: { ootb: number; byAuthor: Array<{ author: string; count: number }> };
+  };
   monitorBreakdown: {
     total: number;
     byState: Record<string, number>;
@@ -464,12 +647,14 @@ export interface AnalyticsData {
     withoutEnvTag: number;
     withoutServiceTag: number;
     withoutTeamTag: number;
+    recommendations: string[];
   };
   sloBreakdown: {
     total: number;
     byType: Record<string, number>;
     withEnvTag: number;
     withServiceTag: number;
+    recommendations: string[];
   };
   governance: {
     userCount: number | null;
@@ -478,6 +663,7 @@ export interface AnalyticsData {
       ruleName: string; severity: string; title: string; description: string;
       affectedCount: number; totalCount: number; recommendation: string | null;
     }>;
+    recommendations: string[];
   };
   scorecard: {
     overallScore: number;
@@ -496,12 +682,85 @@ export interface AnalyticsData {
     total: number;
     byType: Record<string, number>;
     apps: Array<{ id: string; name: string | null; type: string | null; framework: string | null; createdAt: string | null }>;
+    cost: CostFigure | null;
+    recommendations: string[];
   };
   fleet: {
     agentVersions: Record<string, number>;
     platforms: Record<string, number>;
     installedChecks: Array<{ name: string; count: number }>;
+    recommendations: string[];
   };
+  security: {
+    total: number;
+    unresolvedCritical: number;
+    bySeverity: Record<string, number>;
+    byCategory: Record<string, number>;
+    cost: CostFigure | null;
+    recommendations: string[];
+  };
+  incidents: {
+    total: number;
+    open: number;
+    bySeverity: Record<string, number>;
+  };
+  costManagement: {
+    providers: Array<{ provider: string; configured: boolean }>;
+  };
+  productProxies: {
+    npm: number;
+    ndm: number;
+    dbm: number;
+    cost: CostFigure | null;
+    recommendations: string[];
+  };
+}
+
+export interface PricingSnapshot {
+  id: string;
+  capturedAt: string;
+  sourceUrl: string;
+  product: string;
+  tier?: string;
+  unit: string;
+  price: number;
+  rawText?: string;
+}
+
+export interface SizingSnapshotSkuLine {
+  sku: string;
+  description: string;
+  quantity: number;
+  unit: string;
+  rate: number;
+  amount: number;
+}
+
+export interface SizingSnapshotCartItem {
+  id: string;
+  label: string;
+  icon: string;
+  primaryMetric: string;
+  listPriceCost: number;
+  realCost?: number;
+  skuLines?: SizingSnapshotSkuLine[];
+}
+
+export interface SizingSnapshotSummary {
+  id: string;
+  name: string;
+  createdAt: string;
+  mode: string;
+  orgId?: string;
+  orgName?: string;
+  totalListPrice: number;
+  totalRealCost?: number;
+  categoryCount: number;
+  cart: SizingSnapshotCartItem[];
+}
+
+export interface SizingSnapshotRecord extends SizingSnapshotSummary {
+  state: Record<string, unknown>;
 }
 
 export interface UsageProductSummary {

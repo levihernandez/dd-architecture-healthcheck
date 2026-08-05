@@ -29,9 +29,11 @@ export const NAV_ITEMS: NavItem[] = [
   { path: '/overview', label: 'Overview', icon: '⬡', hub: 'home' },
 
   { path: '/orgs', label: 'Org Connections', icon: '⚙', hub: 'organizations' },
+  { path: '/tag-templates', label: 'Industry Templates', icon: '⊞', hub: 'organizations' },
   { path: '/scans', label: 'Scan Runs', icon: '▶', hub: 'organizations' },
 
   { path: '/inventory', label: 'Inventory Explorer', icon: '📦', hub: 'inventory' },
+  { path: '/host-gaps', label: 'Instrumentation Gaps', icon: '🕳', hub: 'inventory', keywords: ['blind spot', 'coverage', 'gaps'] },
   { path: '/cloud', label: 'Cloud Inventory', icon: '☁', hub: 'inventory' },
   { path: '/products', label: 'Product Usage', icon: '📊', hub: 'inventory' },
   { path: '/analytics', label: 'Analytics', icon: '📈', hub: 'inventory' },
@@ -51,7 +53,6 @@ export const NAV_ITEMS: NavItem[] = [
   { path: '/tags', label: 'Tag Explorer', icon: '🔎', hub: 'tagging' },
   { path: '/tag-mapping', label: 'Tag Normalization', icon: '⇄', hub: 'tagging' },
   { path: '/cloud-tags', label: 'Cloud Alignment', icon: '☁', hub: 'tagging' },
-  { path: '/tag-templates', label: 'Industry Templates', icon: '⊞', hub: 'tagging' },
   { path: '/tag-governance', label: 'Multi-Org Governance', icon: '⊛', hub: 'tagging' },
 
   { path: '/chat', label: 'AI Chat Advisor', icon: '💬', hub: 'ai' },

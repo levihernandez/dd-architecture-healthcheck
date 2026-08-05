@@ -10,8 +10,13 @@ import PageHeader from '../components/ui/PageHeader';
 import { SkeletonTable } from '../components/ui/Skeleton';
 import FilterChip, { FilterChipRow } from '../components/ui/FilterChip';
 
-type ResourceTab = 'hosts' | 'services' | 'monitors';
+type ResourceTab = 'hosts' | 'services' | 'monitors' | 'dashboards' | 'synthetics' | 'slos';
 type HostRow = Record<string, unknown>;
+
+const TAB_LABELS: Record<ResourceTab, string> = {
+  hosts: 'Hosts', services: 'Services', monitors: 'Monitors',
+  dashboards: 'Dashboards', synthetics: 'Synthetics', slos: 'SLOs',
+};
 
 const QUICK_FILTERS: Record<ResourceTab, Array<{ id: string; label: string; test: (r: HostRow) => boolean }>> = {
   hosts: [
@@ -28,6 +33,19 @@ const QUICK_FILTERS: Record<ResourceTab, Array<{ id: string; label: string; test
   monitors: [
     { id: 'muted', label: 'Muted', test: (r) => Boolean(r.is_muted) },
     { id: 'alert', label: 'In alert', test: (r) => r.overall_state === 'Alert' },
+    { id: 'missing-env', label: 'Missing env tag', test: (r) => !r.has_env_tag },
+    { id: 'missing-service', label: 'Missing service tag', test: (r) => !r.has_service_tag },
+  ],
+  dashboards: [
+    { id: 'no-template-vars', label: 'No template variables', test: (r) => !r.has_template_variables },
+    { id: 'empty', label: 'Empty (0 widgets)', test: (r) => Number(r.widget_count ?? 0) === 0 },
+  ],
+  synthetics: [
+    { id: 'no-notification', label: 'No notification', test: (r) => !r.has_notification },
+    { id: 'missing-env', label: 'Missing env tag', test: (r) => !r.has_env_tag },
+    { id: 'single-location', label: 'Single location', test: (r) => Number(r.location_count ?? 0) <= 1 },
+  ],
+  slos: [
     { id: 'missing-env', label: 'Missing env tag', test: (r) => !r.has_env_tag },
     { id: 'missing-service', label: 'Missing service tag', test: (r) => !r.has_service_tag },
   ],
@@ -66,10 +84,31 @@ export default function InventoryExplorer() {
     enabled: Boolean(selectedOrgId && selectedScanId && tab === 'monitors'),
   });
 
-  const isLoading = hostsLoading || servicesLoading || monitorsLoading;
+  const { data: dashboards, isLoading: dashboardsLoading } = useQuery({
+    queryKey: ['inv-dashboards', selectedOrgId, selectedScanId, page, search],
+    queryFn: () => inventoryApi.dashboards(selectedOrgId, selectedScanId, { page, pageSize: 50, search }),
+    enabled: Boolean(selectedOrgId && selectedScanId && tab === 'dashboards'),
+  });
 
-  const tabData = ({ hosts: hosts?.data, services: services?.data, monitors: monitors?.data }[tab] ?? []) as HostRow[];
-  const tabMeta = { hosts, services, monitors }[tab];
+  const { data: synthetics, isLoading: syntheticsLoading } = useQuery({
+    queryKey: ['inv-synthetics', selectedOrgId, selectedScanId, page, search],
+    queryFn: () => inventoryApi.synthetics(selectedOrgId, selectedScanId, { page, pageSize: 50, search }),
+    enabled: Boolean(selectedOrgId && selectedScanId && tab === 'synthetics'),
+  });
+
+  const { data: slos, isLoading: slosLoading } = useQuery({
+    queryKey: ['inv-slos', selectedOrgId, selectedScanId, page, search],
+    queryFn: () => inventoryApi.slos(selectedOrgId, selectedScanId, { page, pageSize: 50, search }),
+    enabled: Boolean(selectedOrgId && selectedScanId && tab === 'slos'),
+  });
+
+  const isLoading = hostsLoading || servicesLoading || monitorsLoading || dashboardsLoading || syntheticsLoading || slosLoading;
+
+  const tabData = ({
+    hosts: hosts?.data, services: services?.data, monitors: monitors?.data,
+    dashboards: dashboards?.data, synthetics: synthetics?.data, slos: slos?.data,
+  }[tab] ?? []) as HostRow[];
+  const tabMeta = { hosts, services, monitors, dashboards, synthetics, slos }[tab];
 
   const filteredData = useMemo(() => {
     if (activeFilters.size === 0) return tabData;
@@ -92,7 +131,7 @@ export default function InventoryExplorer() {
   }
 
   function CheckMark({ ok }: { ok: boolean }) {
-    return <span className={ok ? 'text-emerald-600' : 'text-red-400'}>{ok ? '✓' : '✗'}</span>;
+    return <span className={ok ? 'text-emerald-400' : 'text-red-400'}>{ok ? '✓' : '✗'}</span>;
   }
 
   const hostColumns = [
@@ -110,11 +149,43 @@ export default function InventoryExplorer() {
     { key: 'team', header: 'team', sortable: true, sortAccessor: (r: HostRow) => (r.has_team_tag ? 1 : 0), render: (r: HostRow) => <CheckMark ok={Boolean(r.has_team_tag)} /> },
     { key: 'tag_count', header: 'Tags', sortable: true, sortAccessor: (r: HostRow) => Number(r.tag_count ?? 0), render: (r: HostRow) => String(r.tag_count ?? 0) },
     { key: 'agent_version', header: 'Agent', render: (r: HostRow) => <code className="text-xs text-ink-faint">{String(r.agent_version ?? '—')}</code> },
+    { key: 'software', header: 'Software', render: (r: HostRow) => {
+      const checks = (r.installed_checks as string[] | undefined) ?? [];
+      if (checks.length === 0) return <span className="text-ink-faint">—</span>;
+      return (
+        <span className="text-xs text-ink-muted truncate max-w-[220px] inline-block" title={checks.join(', ')}>
+          {checks.slice(0, 3).join(', ')}{checks.length > 3 ? ` +${checks.length - 3}` : ''}
+        </span>
+      );
+    } },
+    { key: 'configuration', header: 'Configuration', render: (r: HostRow) => {
+      const provider = String(r.cloud_provider ?? 'on-prem/unknown');
+      const parts = [r.instance_type, r.region, r.availability_zone].filter(Boolean).map(String);
+      return (
+        <span className="text-xs">
+          <span className="badge bg-surface-sunken text-ink-muted capitalize">{provider}</span>
+          {parts.length > 0 && <span className="text-ink-faint ml-1">{parts.join(' · ')}</span>}
+        </span>
+      );
+    } },
+    { key: 'recommended_products', header: 'Recommended', render: (r: HostRow) => {
+      const recs = (r.recommended_products as Array<{ product: string; icon: string; reason: string }> | undefined) ?? [];
+      if (recs.length === 0) return <span className="text-ink-faint">—</span>;
+      return (
+        <span className="flex flex-wrap gap-1">
+          {recs.map((rec) => (
+            <span key={rec.product} title={rec.reason} className="badge bg-dd-purple/15 text-dd-purple whitespace-nowrap">
+              {rec.icon} {rec.product}
+            </span>
+          ))}
+        </span>
+      );
+    } },
   ];
 
   const serviceColumns = [
     { key: 'service_name', header: 'Service', sortable: true, sortAccessor: (r: HostRow) => String(r.service_name ?? ''), render: (r: HostRow) => <strong className="text-sm">{String(r.service_name ?? '')}</strong> },
-    { key: 'env', header: 'Env', sortable: true, sortAccessor: (r: HostRow) => String(r.env ?? ''), render: (r: HostRow) => r.env ? <span className="badge bg-emerald-100 text-emerald-800">{String(r.env)}</span> : <span className="text-ink-faint">—</span> },
+    { key: 'env', header: 'Env', sortable: true, sortAccessor: (r: HostRow) => String(r.env ?? ''), render: (r: HostRow) => r.env ? <span className="badge bg-emerald-500/15 text-emerald-400">{String(r.env)}</span> : <span className="text-ink-faint">—</span> },
     { key: 'version', header: 'Version', sortable: true, sortAccessor: (r: HostRow) => (r.has_version_tag ? 1 : 0), render: (r: HostRow) => <CheckMark ok={Boolean(r.has_version_tag)} /> },
     { key: 'catalog', header: 'Catalog', sortable: true, sortAccessor: (r: HostRow) => (r.has_service_catalog ? 1 : 0), render: (r: HostRow) => <CheckMark ok={Boolean(r.has_service_catalog)} /> },
     { key: 'monitor', header: 'Monitor', sortable: true, sortAccessor: (r: HostRow) => (r.has_monitor ? 1 : 0), render: (r: HostRow) => <CheckMark ok={Boolean(r.has_monitor)} /> },
@@ -127,15 +198,42 @@ export default function InventoryExplorer() {
     { key: 'monitor_type', header: 'Type', sortable: true, sortAccessor: (r: HostRow) => String(r.monitor_type ?? ''), render: (r: HostRow) => <code className="text-xs bg-surface-sunken px-1 rounded">{String(r.monitor_type ?? '')}</code> },
     { key: 'overall_state', header: 'State', sortable: true, sortAccessor: (r: HostRow) => String(r.overall_state ?? ''), render: (r: HostRow) => {
       const state = String(r.overall_state ?? '');
-      return <span className={`badge ${state === 'OK' ? 'bg-emerald-100 text-emerald-800' : state === 'Alert' ? 'bg-red-100 text-red-800' : 'bg-surface-sunken text-ink-muted'}`}>{state || '—'}</span>;
+      return <span className={`badge ${state === 'OK' ? 'bg-emerald-500/15 text-emerald-400' : state === 'Alert' ? 'bg-red-500/15 text-red-400' : 'bg-surface-sunken text-ink-muted'}`}>{state || '—'}</span>;
     }},
-    { key: 'priority', header: 'P', sortable: true, sortAccessor: (r: HostRow) => Number(r.priority ?? 0), render: (r: HostRow) => r.priority ? <span className="badge bg-purple-100 text-purple-800">P{String(r.priority)}</span> : <span className="text-ink-faint">—</span> },
+    { key: 'priority', header: 'P', sortable: true, sortAccessor: (r: HostRow) => Number(r.priority ?? 0), render: (r: HostRow) => r.priority ? <span className="badge bg-emerald-500/15 text-emerald-400">P{String(r.priority)}</span> : <span className="text-ink-faint">—</span> },
     { key: 'env', header: 'env', sortable: true, sortAccessor: (r: HostRow) => (r.has_env_tag ? 1 : 0), render: (r: HostRow) => <CheckMark ok={Boolean(r.has_env_tag)} /> },
     { key: 'service', header: 'service', sortable: true, sortAccessor: (r: HostRow) => (r.has_service_tag ? 1 : 0), render: (r: HostRow) => <CheckMark ok={Boolean(r.has_service_tag)} /> },
-    { key: 'muted', header: 'Muted', sortable: true, sortAccessor: (r: HostRow) => (r.is_muted ? 1 : 0), render: (r: HostRow) => r.is_muted ? <span className="badge bg-amber-100 text-amber-800">Muted</span> : null },
+    { key: 'muted', header: 'Muted', sortable: true, sortAccessor: (r: HostRow) => (r.is_muted ? 1 : 0), render: (r: HostRow) => r.is_muted ? <span className="badge bg-amber-500/15 text-amber-400">Muted</span> : null },
   ];
 
-  const columns = { hosts: hostColumns, services: serviceColumns, monitors: monitorColumns }[tab];
+  const dashboardColumns = [
+    { key: 'title', header: 'Dashboard', sortable: true, sortAccessor: (r: HostRow) => String(r.title ?? ''), render: (r: HostRow) => <span className="text-sm">{String(r.title ?? '')}</span> },
+    { key: 'layout_type', header: 'Layout', sortable: true, sortAccessor: (r: HostRow) => String(r.layout_type ?? ''), render: (r: HostRow) => <code className="text-xs bg-surface-sunken px-1 rounded">{String(r.layout_type ?? '—')}</code> },
+    { key: 'widget_count', header: 'Widgets', sortable: true, sortAccessor: (r: HostRow) => Number(r.widget_count ?? 0), render: (r: HostRow) => String(r.widget_count ?? 0) },
+    { key: 'template_vars', header: 'Template Vars', sortable: true, sortAccessor: (r: HostRow) => (r.has_template_variables ? 1 : 0), render: (r: HostRow) => <CheckMark ok={Boolean(r.has_template_variables)} /> },
+    { key: 'author_handle', header: 'Author', render: (r: HostRow) => <span className="text-xs text-ink-faint">{String(r.author_handle ?? '—')}</span> },
+  ];
+
+  const syntheticsColumns = [
+    { key: 'test_name', header: 'Test', sortable: true, sortAccessor: (r: HostRow) => String(r.test_name ?? ''), render: (r: HostRow) => <span className="text-sm">{String(r.test_name ?? '')}</span> },
+    { key: 'test_type', header: 'Type', sortable: true, sortAccessor: (r: HostRow) => String(r.test_type ?? ''), render: (r: HostRow) => <code className="text-xs bg-surface-sunken px-1 rounded">{String(r.test_type ?? '')}</code> },
+    { key: 'status', header: 'Status', sortable: true, sortAccessor: (r: HostRow) => String(r.status ?? ''), render: (r: HostRow) => <span className="text-xs">{String(r.status ?? '—')}</span> },
+    { key: 'location_count', header: 'Locations', sortable: true, sortAccessor: (r: HostRow) => Number(r.location_count ?? 0), render: (r: HostRow) => String(r.location_count ?? 0) },
+    { key: 'env', header: 'env', sortable: true, sortAccessor: (r: HostRow) => (r.has_env_tag ? 1 : 0), render: (r: HostRow) => <CheckMark ok={Boolean(r.has_env_tag)} /> },
+    { key: 'notification', header: 'Notification', sortable: true, sortAccessor: (r: HostRow) => (r.has_notification ? 1 : 0), render: (r: HostRow) => <CheckMark ok={Boolean(r.has_notification)} /> },
+  ];
+
+  const sloColumns = [
+    { key: 'slo_name', header: 'SLO', sortable: true, sortAccessor: (r: HostRow) => String(r.slo_name ?? ''), render: (r: HostRow) => <span className="text-sm">{String(r.slo_name ?? '')}</span> },
+    { key: 'slo_type', header: 'Type', sortable: true, sortAccessor: (r: HostRow) => String(r.slo_type ?? ''), render: (r: HostRow) => <code className="text-xs bg-surface-sunken px-1 rounded">{String(r.slo_type ?? '—')}</code> },
+    { key: 'env', header: 'env', sortable: true, sortAccessor: (r: HostRow) => (r.has_env_tag ? 1 : 0), render: (r: HostRow) => <CheckMark ok={Boolean(r.has_env_tag)} /> },
+    { key: 'service', header: 'service', sortable: true, sortAccessor: (r: HostRow) => (r.has_service_tag ? 1 : 0), render: (r: HostRow) => <CheckMark ok={Boolean(r.has_service_tag)} /> },
+  ];
+
+  const columns = {
+    hosts: hostColumns, services: serviceColumns, monitors: monitorColumns,
+    dashboards: dashboardColumns, synthetics: syntheticsColumns, slos: sloColumns,
+  }[tab];
   const quickFilters = QUICK_FILTERS[tab];
 
   return (
@@ -143,30 +241,39 @@ export default function InventoryExplorer() {
       <PageHeader title="Inventory Explorer" subtitle="Browse collected resources" />
 
       {summary && (
-        <div className="grid grid-cols-4 gap-3">
+        <div className="grid grid-cols-4 md:grid-cols-7 gap-3">
           <MetricCard label="Hosts" value={summary.hosts} />
           <MetricCard label="Services" value={summary.services} />
           <MetricCard label="Monitors" value={summary.monitors} />
+          <MetricCard label="Dashboards" value={summary.dashboards} />
+          <MetricCard label="Synthetics" value={summary.syntheticsTests} />
+          <MetricCard label="SLOs" value={summary.slos} />
           <MetricCard label="env Coverage" value={`${summary.envTagCoverage}%`}
             color={summary.envTagCoverage >= 90 ? 'green' : summary.envTagCoverage >= 70 ? 'amber' : 'red'} />
+          <MetricCard label="Log Resources" value={summary.logsIndexes + summary.logsPipelines} />
+          <MetricCard label="Integrations" value={summary.integrations} />
+          <MetricCard label="Cloud Accounts" value={summary.cloudAccounts} />
+          <MetricCard label="Security Findings" value={summary.securityFindings} />
+          <MetricCard label="Open Incidents" value={summary.openIncidents} />
+          <MetricCard label="Tag Keys" value={summary.tagKeys} />
         </div>
       )}
 
       <div className="card p-0 overflow-hidden">
         <div className="flex items-center border-b border-border flex-wrap">
-          {(['hosts', 'services', 'monitors'] as ResourceTab[]).map((t) => (
+          {(['hosts', 'services', 'monitors', 'dashboards', 'synthetics', 'slos'] as ResourceTab[]).map((t) => (
             <button
               key={t}
-              className={`px-6 py-3 text-sm font-medium border-b-2 transition-colors capitalize ${
+              className={`px-6 py-3 text-sm font-medium border-b-2 transition-colors ${
                 tab === t
                   ? 'border-dd-purple text-dd-purple'
                   : 'border-transparent text-ink-muted hover:text-ink'
               }`}
               onClick={() => switchTab(t)}
             >
-              {t}
+              {TAB_LABELS[t]}
               {summary && <span className="ml-1.5 text-xs text-ink-faint">
-                ({summary[t as keyof typeof summary] ?? 0})
+                ({summary[t === 'synthetics' ? 'syntheticsTests' : (t as keyof typeof summary)] ?? 0})
               </span>}
             </button>
           ))}

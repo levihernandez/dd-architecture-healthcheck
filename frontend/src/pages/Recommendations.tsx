@@ -13,10 +13,10 @@ import type { Finding, FindingCategory, FindingSeverity } from '../types';
 
 const SEVERITY_ORDER: Record<FindingSeverity, number> = { critical: 0, high: 1, medium: 2, low: 3, info: 4 };
 const SEVERITY_TILES: Array<{ severity: FindingSeverity; label: string; color: string }> = [
-  { severity: 'critical', label: 'Critical', color: 'text-red-600 bg-red-50 border-red-200' },
-  { severity: 'high', label: 'High', color: 'text-orange-600 bg-orange-50 border-orange-200' },
-  { severity: 'medium', label: 'Medium', color: 'text-amber-600 bg-amber-50 border-amber-200' },
-  { severity: 'low', label: 'Low', color: 'text-blue-600 bg-blue-50 border-blue-200' },
+  { severity: 'critical', label: 'Critical', color: 'text-red-400 bg-red-500/10 border-red-500/30' },
+  { severity: 'high', label: 'High', color: 'text-orange-400 bg-orange-500/10 border-orange-500/30' },
+  { severity: 'medium', label: 'Medium', color: 'text-amber-400 bg-amber-500/10 border-amber-500/30' },
+  { severity: 'low', label: 'Low', color: 'text-blue-400 bg-blue-500/10 border-blue-500/30' },
   { severity: 'info', label: 'Info', color: 'text-ink-faint bg-surface-subtle border-border' },
 ];
 
@@ -119,7 +119,7 @@ export default function Recommendations() {
           {f.evidence.length > 0 && (
             <div className="mt-1.5 flex flex-wrap gap-1">
               {f.evidence.slice(0, 3).map((ev, i) => (
-                <span key={i} className="text-xs bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded border border-blue-200">
+                <span key={i} className="text-xs bg-blue-500/10 text-blue-400 px-1.5 py-0.5 rounded border border-blue-500/30">
                   {ev.description}
                 </span>
               ))}
@@ -143,7 +143,7 @@ export default function Recommendations() {
       {!selectedScanId ? <EmptyState message="Run a scan to see recommendations" /> : isLoading ? <LoadingState /> : findings.length === 0 ? (
         <div className="card text-center py-12">
           <div className="text-4xl mb-4">🎉</div>
-          <h3 className="text-lg font-semibold text-green-700">No findings!</h3>
+          <h3 className="text-lg font-semibold text-green-400">No findings!</h3>
           <p className="text-ink-muted">Your Datadog environment passed all health checks.</p>
         </div>
       ) : (
@@ -192,6 +192,8 @@ export default function Recommendations() {
             data={filteredFindings}
             rowKey={(f) => f.id}
             emptyMessage="No findings match the selected filters"
+            searchable
+            pageSize={15}
             selectable
             bulkActions={(selected, clear) => (
               <button

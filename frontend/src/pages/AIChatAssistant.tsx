@@ -3,7 +3,9 @@ import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { toast } from 'sonner';
 import { useOrgAndScanFilters } from '../hooks/useFilters';
+import { useCurrentPage } from '../hooks/useCurrentPage';
 import { aiSettingsApi } from '../services/api';
+import { streamChat } from '../lib/chat-client';
 import PageHeader from '../components/ui/PageHeader';
 
 interface Message {
@@ -85,7 +87,7 @@ function MarkdownContent({ content }: { content: string }) {
         i++;
       }
       elements.push(
-        <pre key={i} className="bg-ink text-green-300 text-xs rounded-lg p-3 overflow-x-auto my-2 font-mono">
+        <pre key={i} className="bg-gray-800 text-green-300 text-xs rounded-lg p-3 overflow-x-auto my-2 font-mono">
           {lang && <div className="text-ink-faint text-xs mb-1">{lang}</div>}
           <code>{codeLines.join('\n')}</code>
         </pre>
@@ -189,6 +191,7 @@ function renderInline(text: string): React.ReactNode {
 
 export default function AIChatAssistant() {
   const { orgs, scans, selectedOrgId, selectedScanId } = useOrgAndScanFilters();
+  const currentPage = useCurrentPage();
   const { data: aiSettings } = useQuery({ queryKey: ['ai-settings'], queryFn: aiSettingsApi.get });
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
@@ -224,62 +227,33 @@ export default function AIChatAssistant() {
 
     abortRef.current = new AbortController();
 
+    let assistantContent = '';
     try {
-      const response = await fetch('/api/chat/stream', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      await streamChat(
+        {
           orgId: selectedOrgId,
           scanId: selectedScanId || undefined,
+          page: currentPage?.path,
           messages: nextMessages.map(m => ({ role: m.role, content: m.content })),
-        }),
-        signal: abortRef.current.signal,
-      });
-
-      if (!response.ok || !response.body) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let assistantContent = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        const rawChunk = decoder.decode(value, { stream: true });
-        const lines = rawChunk.split('\n');
-
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
-          const data = line.slice(6).trim();
-          if (data === '[DONE]') break;
-
-          try {
-            const parsed = JSON.parse(data) as { type: string; content: string };
-            if (parsed.type === 'token') {
-              assistantContent += parsed.content;
-              setMessages(prev => {
-                const updated = [...prev];
-                updated[updated.length - 1] = {
-                  role: 'assistant',
-                  content: assistantContent,
-                  streaming: true,
-                };
-                return updated;
-              });
-            } else if (parsed.type === 'error') {
-              assistantContent = `Error: ${parsed.content}`;
-              setMessages(prev => {
-                const updated = [...prev];
-                updated[updated.length - 1] = { role: 'assistant', content: assistantContent, error: true };
-                return updated;
-              });
-            }
-          } catch { /* malformed SSE line, skip */ }
+          signal: abortRef.current.signal,
+        },
+        (delta) => {
+          assistantContent += delta;
+          setMessages(prev => {
+            const updated = [...prev];
+            updated[updated.length - 1] = { role: 'assistant', content: assistantContent, streaming: true };
+            return updated;
+          });
+        },
+        (errMsg) => {
+          assistantContent = `Error: ${errMsg}`;
+          setMessages(prev => {
+            const updated = [...prev];
+            updated[updated.length - 1] = { role: 'assistant', content: assistantContent, error: true };
+            return updated;
+          });
         }
-      }
+      );
 
       setMessages(prev => {
         const updated = [...prev];
@@ -309,7 +283,7 @@ export default function AIChatAssistant() {
       abortRef.current = null;
       setTimeout(() => inputRef.current?.focus(), 50);
     }
-  }, [messages, isStreaming, selectedOrgId, selectedScanId]);
+  }, [messages, isStreaming, selectedOrgId, selectedScanId, currentPage]);
 
   const stop = () => {
     abortRef.current?.abort();
@@ -331,19 +305,19 @@ export default function AIChatAssistant() {
         subtitle="Ask anything about your Datadog setup — grounded in your latest scan data."
         actions={
           providerConfigured ? (
-            <span className="badge bg-green-100 text-green-700">
+            <span className="badge bg-green-500/15 text-green-400">
               {aiSettings!.provider !== 'none' ? aiSettings!.provider : aiSettings!.envProvider}
               {aiSettings!.model ? ` · ${aiSettings!.model}` : ''}
             </span>
           ) : (
-            <Link to="/ai-settings" className="badge bg-amber-100 text-amber-700 hover:bg-amber-200">
+            <Link to="/ai-settings" className="badge bg-amber-500/15 text-amber-400 hover:bg-amber-200">
               ⚙ Configure AI provider
             </Link>
           )
         }
       />
 
-      <div className="flex flex-1 min-h-[560px] rounded-lg border border-border bg-white shadow-xs overflow-hidden">
+      <div className="flex flex-1 min-h-[560px] rounded-lg border border-border bg-surface-subtle shadow-xs overflow-hidden">
         {/* Quick prompts sidebar */}
         <div className="w-56 shrink-0 bg-surface-subtle border-r border-border flex flex-col overflow-hidden">
           <div className="px-3 pt-4 pb-2">
@@ -397,8 +371,8 @@ export default function AIChatAssistant() {
                     msg.role === 'user'
                       ? 'bg-dd-purple text-white rounded-br-sm'
                       : msg.error
-                      ? 'bg-red-50 border border-red-200 rounded-bl-sm'
-                      : 'bg-white border border-border shadow-xs rounded-bl-sm'
+                      ? 'bg-red-500/10 border border-red-500/30 rounded-bl-sm'
+                      : 'bg-surface-subtle border border-border shadow-xs rounded-bl-sm'
                   }`}
                 >
                   {msg.role === 'user' ? (
@@ -431,7 +405,7 @@ export default function AIChatAssistant() {
           </div>
 
           {/* Input bar */}
-          <div className="shrink-0 border-t border-border bg-white px-4 py-3">
+          <div className="shrink-0 border-t border-border bg-surface-subtle px-4 py-3">
             <div className="flex gap-2 items-end">
               <textarea
                 ref={inputRef}
@@ -466,9 +440,10 @@ export default function AIChatAssistant() {
             <div className="text-xs text-ink-faint mt-1.5 flex items-center gap-1">
               <span>Context: {selectedOrgId ? `${orgs.find(o => o.id === selectedOrgId)?.name ?? ''}` : 'no org'}</span>
               {selectedScanId && <span>· scan {new Date(scans.find(s => s.id === selectedScanId)?.startedAt ?? '').toLocaleDateString()}</span>}
+              {currentPage && <span title="Assessments focus on this page's domain when relevant">· 📍 {currentPage.label}</span>}
               {aiSettings?.provider && aiSettings.provider !== 'none'
-                ? <span className="ml-auto text-green-600">✓ {aiSettings.provider} · {aiSettings.model}</span>
-                : <Link to="/ai-settings" className="ml-auto text-amber-600 hover:underline">Configure AI provider →</Link>
+                ? <span className="ml-auto text-green-400">✓ {aiSettings.provider} · {aiSettings.model}</span>
+                : <Link to="/ai-settings" className="ml-auto text-amber-400 hover:underline">Configure AI provider →</Link>
               }
             </div>
           </div>

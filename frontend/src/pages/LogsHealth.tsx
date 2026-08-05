@@ -15,7 +15,7 @@ import type { FindingSeverity } from '../types';
 function DDLink({ href, label = 'Open in Datadog' }: { href: string; label?: string }) {
   return (
     <a href={href} target="_blank" rel="noopener noreferrer"
-      className="inline-flex items-center gap-1 text-xs text-violet-600 hover:text-violet-800 font-medium shrink-0">
+      className="inline-flex items-center gap-1 text-xs text-violet-400 hover:text-violet-400 font-medium shrink-0">
       {label} ↗
     </a>
   );
@@ -26,9 +26,9 @@ function SideEffectBanner({ severity, title, detail, href, hrefLabel }: {
   title: string; detail: string; href?: string; hrefLabel?: string;
 }) {
   const styles = {
-    critical: 'bg-red-50 border-red-200 text-red-900',
-    warning: 'bg-amber-50 border-amber-200 text-amber-900',
-    info: 'bg-blue-50 border-blue-200 text-blue-900',
+    critical: 'bg-red-500/10 border-red-500/30 text-red-900',
+    warning: 'bg-amber-500/10 border-amber-500/30 text-amber-900',
+    info: 'bg-blue-500/10 border-blue-500/30 text-blue-900',
   };
   const icons = { critical: '🔴', warning: '⚠️', info: 'ℹ️' };
   return (
@@ -195,7 +195,7 @@ export default function LogsHealth() {
                     <span className="font-mono text-xs font-medium text-ink max-w-[160px] truncate inline-block" title={idx.name}>{idx.name}</span>
                   ) },
                   { key: 'isFlex', header: 'Type', sortable: true, sortAccessor: (idx) => (idx.isFlex ? 'Flex' : 'Online'), render: (idx) => (
-                    <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${idx.isFlex ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'}`}>
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${idx.isFlex ? 'bg-blue-500/15 text-blue-400' : 'bg-surface-sunken text-ink-muted'}`}>
                       {idx.isFlex ? 'Flex' : 'Online'}
                     </span>
                   ) },
@@ -208,20 +208,22 @@ export default function LogsHealth() {
                       : <span className="text-xs text-amber-500">∞ No limit</span>
                   ) },
                   { key: 'exclusionFilters', header: 'Excl. Filters', sortable: true, render: (idx) => (
-                    <span className={`text-xs font-medium ${idx.exclusionFilters === 0 && !idx.isFlex ? 'text-amber-600' : 'text-green-600'}`}>
+                    <span className={`text-xs font-medium ${idx.exclusionFilters === 0 && !idx.isFlex ? 'text-amber-400' : 'text-green-400'}`}>
                       {idx.exclusionFilters === 0 && !idx.isFlex ? '⚠ None' : idx.exclusionFilters}
                     </span>
                   ) },
                   { key: 'isRateLimited', header: 'Status', sortable: true, render: (idx) => (
                     idx.isRateLimited
-                      ? <span className="text-[10px] px-1.5 py-0.5 bg-red-100 text-red-700 rounded font-bold">RATE LIMITED</span>
-                      : <span className="text-green-600 text-xs">✓</span>
+                      ? <span className="text-[10px] px-1.5 py-0.5 bg-red-500/15 text-red-400 rounded font-bold">RATE LIMITED</span>
+                      : <span className="text-green-400 text-xs">✓</span>
                   ) },
-                  { key: 'view', header: '', render: (idx) => <DDLink href={ddUrl.logIndex(base, idx.name)} label="View" /> },
+                  { key: 'view', header: '', render: (idx) => <DDLink href={ddUrl.logIndexConfig(base, idx.name)} label="View" /> },
                 ]}
                 data={indexDetails}
                 rowKey={(idx) => idx.name}
                 emptyMessage="No indexes found"
+                searchable
+                pageSize={10}
               />
             </div>
           )}
@@ -248,7 +250,7 @@ export default function LogsHealth() {
                 })}
               </div>
               {retEntries.some(([days]) => parseInt(days) > 30) && (
-                <p className="text-xs text-amber-600 mt-2 pt-2 border-t border-border">
+                <p className="text-xs text-amber-400 mt-2 pt-2 border-t border-border">
                   ⚠ Indexes with &gt;30 day retention have elevated storage costs. Consider Flex Logs for infrequently accessed data.
                 </p>
               )}
@@ -268,8 +270,8 @@ export default function LogsHealth() {
                 { label: 'Log archives', href: ddUrl.logsArchives(base) },
               ].map(({ label, href }) => (
                 <a key={label} href={href} target="_blank" rel="noopener noreferrer"
-                  className="flex items-center justify-between px-3 py-2.5 rounded-lg border border-border hover:border-violet-300 hover:bg-violet-50/30 transition-colors group">
-                  <span className="text-sm text-ink-muted group-hover:text-violet-700">{label}</span>
+                  className="flex items-center justify-between px-3 py-2.5 rounded-lg border border-border hover:border-violet-500/30 hover:bg-violet-500/30 transition-colors group">
+                  <span className="text-sm text-ink-muted group-hover:text-violet-400">{label}</span>
                   <span className="text-ink-faint group-hover:text-violet-500">↗</span>
                 </a>
               ))}
@@ -278,12 +280,12 @@ export default function LogsHealth() {
 
           {/* Best practices */}
           {findings.length === 0 && (
-            <div className="card bg-green-50 border-green-200">
+            <div className="card bg-green-500/10 border-green-500/30">
               <div className="flex items-center gap-2 mb-2">
-                <span className="text-green-600 text-xl">✓</span>
-                <h3 className="text-sm font-semibold text-green-800">Logs configuration looks healthy</h3>
+                <span className="text-green-400 text-xl">✓</span>
+                <h3 className="text-sm font-semibold text-green-400">Logs configuration looks healthy</h3>
               </div>
-              <ul className="text-sm text-green-700 space-y-1 list-disc list-inside">
+              <ul className="text-sm text-green-400 space-y-1 list-disc list-inside">
                 <li>Use targeted index filters to control what gets indexed</li>
                 <li>Add exclusion filters for health checks, 2xx responses, and debug-level logs</li>
                 <li>Route infrequently queried logs to Flex Logs to reduce cost by 80–90%</li>

@@ -9,9 +9,9 @@ import FilterChip, { FilterChipRow } from '../components/ui/FilterChip';
 
 function StatusBadge({ status }: { status: 'found' | 'missing' | 'drifted' }) {
   const map = {
-    found: 'bg-green-100 text-green-700',
-    missing: 'bg-red-100 text-red-700',
-    drifted: 'bg-amber-100 text-amber-700',
+    found: 'bg-green-500/15 text-green-400',
+    missing: 'bg-red-500/15 text-red-400',
+    drifted: 'bg-amber-500/15 text-amber-400',
   };
   const label = { found: '✓ Found', missing: '✗ Missing', drifted: '⚠ Drifted' };
   return <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${map[status]}`}>{label[status]}</span>;
@@ -19,9 +19,9 @@ function StatusBadge({ status }: { status: 'found' | 'missing' | 'drifted' }) {
 
 function ConflictTypeBadge({ type }: { type: string }) {
   const map: Record<string, string> = {
-    casing: 'bg-amber-100 text-amber-700',
-    value_drift: 'bg-orange-100 text-orange-700',
-    synonym_duplicate: 'bg-red-100 text-red-700',
+    casing: 'bg-amber-500/15 text-amber-400',
+    value_drift: 'bg-orange-500/15 text-orange-400',
+    synonym_duplicate: 'bg-red-500/15 text-red-400',
   };
   const label: Record<string, string> = {
     casing: 'Casing Conflict',
@@ -70,15 +70,15 @@ export default function TagMappingDashboard() {
               </div>
               <div className="flex-1 grid grid-cols-3 gap-4 text-center">
                 <div>
-                  <div className="text-2xl font-bold text-violet-700">{norm.totalTagKeys}</div>
+                  <div className="text-2xl font-bold text-violet-400">{norm.totalTagKeys}</div>
                   <div className="text-xs text-ink-muted">Total Tag Keys</div>
                 </div>
                 <div>
-                  <div className="text-2xl font-bold text-amber-600">{norm.conflicts.length}</div>
+                  <div className="text-2xl font-bold text-amber-400">{norm.conflicts.length}</div>
                   <div className="text-xs text-ink-muted">Conflicts Detected</div>
                 </div>
                 <div>
-                  <div className="text-2xl font-bold text-blue-600">{norm.synonymGroups.filter((g) => !g.isAligned).length}</div>
+                  <div className="text-2xl font-bold text-blue-400">{norm.synonymGroups.filter((g) => !g.isAligned).length}</div>
                   <div className="text-xs text-ink-muted">Synonyms to Merge</div>
                 </div>
               </div>
@@ -120,11 +120,11 @@ export default function TagMappingDashboard() {
                           </div>
                           <div className="flex flex-wrap gap-1 mb-2">
                             {c.valuesFound.map((v) => (
-                              <code key={v} className="text-xs bg-red-50 border border-red-200 text-red-700 px-1.5 py-0.5 rounded">{v}</code>
+                              <code key={v} className="text-xs bg-red-500/10 border border-red-500/30 text-red-400 px-1.5 py-0.5 rounded">{v}</code>
                             ))}
                           </div>
                           <div className="text-xs text-ink-muted">
-                            <span className="font-semibold text-blue-600 uppercase tracking-wide">Fix: </span>
+                            <span className="font-semibold text-blue-400 uppercase tracking-wide">Fix: </span>
                             {c.recommendation}
                           </div>
                         </div>
@@ -145,10 +145,10 @@ export default function TagMappingDashboard() {
                     <div className="flex items-start justify-between gap-4">
                       <div className="flex-1">
                         <div className="flex items-center gap-2 mb-2">
-                          <code className="text-sm font-mono text-violet-700 bg-violet-50 px-1.5 py-0.5 rounded border border-violet-200">
+                          <code className="text-sm font-mono text-violet-400 bg-violet-500/10 px-1.5 py-0.5 rounded border border-violet-500/30">
                             {g.canonicalKey}
                           </code>
-                          <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${g.isAligned ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
+                          <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${g.isAligned ? 'bg-green-500/15 text-green-400' : 'bg-amber-500/15 text-amber-400'}`}>
                             {g.isAligned ? '✓ Aligned' : `${g.detectedVariants.length} variants`}
                           </span>
                           <span className="text-xs text-ink-faint">confidence: {Math.round(g.confidence * 100)}%</span>
@@ -156,14 +156,14 @@ export default function TagMappingDashboard() {
                         <p className="text-xs text-ink-muted mb-2">{g.description}</p>
                         <div className="flex flex-wrap gap-1 mb-2">
                           {g.detectedVariants.map((v) => (
-                            <code key={v} className={`text-xs px-1.5 py-0.5 rounded border ${v === g.canonicalKey ? 'bg-green-50 border-green-200 text-green-700' : 'bg-amber-50 border-amber-200 text-amber-700'}`}>
+                            <code key={v} className={`text-xs px-1.5 py-0.5 rounded border ${v === g.canonicalKey ? 'bg-green-500/10 border-green-500/30 text-green-400' : 'bg-amber-500/10 border-amber-500/30 text-amber-400'}`}>
                               {v}
                             </code>
                           ))}
                         </div>
                         {!g.isAligned && (
                           <div className="text-xs">
-                            <span className="font-semibold text-blue-600 uppercase tracking-wide">Action: </span>
+                            <span className="font-semibold text-blue-400 uppercase tracking-wide">Action: </span>
                             <span className="text-ink-muted">{g.recommendation}</span>
                           </div>
                         )}
@@ -187,22 +187,22 @@ export default function TagMappingDashboard() {
                   <div key={entry.canonicalKey} className="card">
                     <div className="flex items-center justify-between mb-1">
                       <div className="flex items-center gap-2">
-                        <code className="text-sm font-mono text-violet-700 bg-violet-50 px-1.5 py-0.5 rounded border border-violet-200">
+                        <code className="text-sm font-mono text-violet-400 bg-violet-500/10 px-1.5 py-0.5 rounded border border-violet-500/30">
                           {entry.canonicalKey}
                         </code>
-                        {entry.isUst && <span className="text-xs bg-violet-100 text-violet-700 px-1.5 py-0.5 rounded font-medium">UST</span>}
+                        {entry.isUst && <span className="text-xs bg-violet-500/15 text-violet-400 px-1.5 py-0.5 rounded font-medium">UST</span>}
                       </div>
                       <StatusBadge status={entry.status} />
                     </div>
                     <p className="text-xs text-ink-muted mb-2">{entry.definition}</p>
                     {entry.foundKey && entry.foundKey !== entry.canonicalKey && (
-                      <p className="text-xs text-amber-600">Found as: <code>{entry.foundKey}</code></p>
+                      <p className="text-xs text-amber-400">Found as: <code>{entry.foundKey}</code></p>
                     )}
                     {entry.status !== 'missing' && (
                       <div className="mt-2">
                         <div className="flex justify-between text-xs text-ink-muted mb-0.5">
                           <span>Host coverage</span>
-                          <span className={entry.currentCoverage >= 80 ? 'text-green-700' : entry.currentCoverage >= 40 ? 'text-amber-700' : 'text-red-600'}>
+                          <span className={entry.currentCoverage >= 80 ? 'text-green-400' : entry.currentCoverage >= 40 ? 'text-amber-400' : 'text-red-400'}>
                             {entry.currentCoverage}%
                           </span>
                         </div>

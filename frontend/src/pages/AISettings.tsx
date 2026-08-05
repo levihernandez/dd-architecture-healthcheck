@@ -168,9 +168,9 @@ export default function AISettings() {
       />
 
       {hasEnvFallback && activeEnvProvider && activeEnvProvider !== 'none' && (
-        <div className="card bg-amber-50 border-amber-200 text-sm text-amber-800 flex items-start gap-2 p-3">
+        <div className="card bg-amber-500/10 border-amber-500/30 text-sm text-amber-400 flex items-start gap-2 p-3">
           <span className="mt-0.5">⚠</span>
-          <span>Currently using <strong>{activeEnvProvider}</strong> from <code className="text-xs bg-amber-100 px-1 rounded">.env</code>. Configure here to override.</span>
+          <span>Currently using <strong>{activeEnvProvider}</strong> from <code className="text-xs bg-amber-500/15 px-1 rounded">.env</code>. Configure here to override.</span>
         </div>
       )}
 
@@ -185,7 +185,7 @@ export default function AISettings() {
               className={`text-left p-4 rounded-xl border-2 transition-all ${
                 provider === p.id
                   ? 'border-dd-purple bg-dd-purple/5'
-                  : 'border-border bg-white hover:border-border-strong'
+                  : 'border-border bg-surface-subtle hover:border-border-strong'
               }`}
             >
               <div className="text-2xl mb-2">{p.icon}</div>
@@ -214,11 +214,11 @@ export default function AISettings() {
                 />
                 {saved?.hasKey && saved.provider === provider && !apiKey && (
                   <div className="flex items-center gap-2">
-                    <span className="text-xs text-green-600">✓ Key saved</span>
+                    <span className="text-xs text-green-400">✓ Key saved</span>
                     <span className="text-xs text-ink-faint">{saved.keyHint}</span>
                     <button
                       onClick={() => { saveMutation.mutate({ provider, model, clearKey: true }); }}
-                      className="text-xs text-red-500 hover:text-red-700 ml-auto"
+                      className="text-xs text-red-500 hover:text-red-400 ml-auto"
                     >
                       Remove key
                     </button>
@@ -264,7 +264,7 @@ export default function AISettings() {
             </div>
 
             {discoverError && (
-              <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1 mb-2">
+              <div className="text-xs text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded px-2 py-1 mb-2">
                 {discoverError}
               </div>
             )}
@@ -278,7 +278,7 @@ export default function AISettings() {
                     className={`w-full text-left px-3 py-2 rounded-lg text-sm border transition-colors ${
                       model === m
                         ? 'border-dd-purple bg-dd-purple/5 text-dd-purple-dark font-medium'
-                        : 'border-border bg-white text-ink-muted hover:bg-surface-subtle'
+                        : 'border-border bg-surface-subtle text-ink-muted hover:bg-surface-subtle'
                     }`}
                   >
                     <span className="font-mono">{m}</span>
@@ -316,10 +316,10 @@ export default function AISettings() {
             >
               Test Connection
             </button>
-            {dirty && <span className="text-xs text-amber-600">Unsaved changes</span>}
-            {saveMutation.isSuccess && !dirty && <span className="text-xs text-green-600">✓ Saved</span>}
+            {dirty && <span className="text-xs text-amber-400">Unsaved changes</span>}
+            {saveMutation.isSuccess && !dirty && <span className="text-xs text-green-400">✓ Saved</span>}
             {saveMutation.isError && (
-              <span className="text-xs text-red-600">
+              <span className="text-xs text-red-400">
                 {saveMutation.error instanceof Error ? saveMutation.error.message : 'Save failed'}
               </span>
             )}
@@ -329,8 +329,8 @@ export default function AISettings() {
           {testResult && (
             <div className={`rounded-lg px-4 py-3 text-sm ${
               testResult.ok
-                ? 'bg-green-50 border border-green-200 text-green-800'
-                : 'bg-red-50 border border-red-200 text-red-800'
+                ? 'bg-green-500/10 border border-green-500/30 text-green-400'
+                : 'bg-red-500/10 border border-red-500/30 text-red-400'
             }`}>
               <span className="font-medium mr-1">{testResult.ok ? '✓' : '✗'}</span>
               {testResult.message}
@@ -358,7 +358,7 @@ export default function AISettings() {
                 <code className="bg-surface-sunken text-ink-muted px-1.5 py-0.5 rounded text-xs font-mono">{saved.baseUrl}</code>
               </span>
             )}
-            {saved.hasKey && <span className="text-green-600 text-xs">✓ API key saved</span>}
+            {saved.hasKey && <span className="text-green-400 text-xs">✓ API key saved</span>}
             {saved.updatedAt && (
               <span className="text-ink-faint text-xs ml-auto">
                 Updated {new Date(saved.updatedAt).toLocaleString()}

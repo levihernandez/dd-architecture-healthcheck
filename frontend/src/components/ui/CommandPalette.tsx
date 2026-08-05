@@ -60,13 +60,13 @@ export default function CommandPalette() {
       className="fixed inset-0 z-[100]"
       shouldFilter
     >
-      <div className="fixed inset-0 bg-ink/40 animate-fade-in" onClick={() => setOpen(false)} />
+      <div className="fixed inset-0 bg-black/60 animate-fade-in" onClick={() => setOpen(false)} />
       <div className="fixed top-[12%] left-1/2 -translate-x-1/2 w-full max-w-lg animate-scale-in">
-        <div className="bg-white rounded-lg shadow-lg border border-border overflow-hidden">
+        <div className="bg-surface-subtle rounded-lg shadow-lg border border-border overflow-hidden">
           <Command.Input
             autoFocus
             placeholder="Search pages, switch org, run scan…"
-            className="w-full px-4 py-3.5 text-sm border-b border-border outline-none placeholder-ink-faint"
+            className="w-full px-4 py-3.5 text-sm bg-surface-subtle text-ink border-b border-border outline-none placeholder-ink-faint"
           />
           <Command.List className="max-h-96 overflow-y-auto p-2">
             <Command.Empty className="py-8 text-center text-sm text-ink-faint">No results found.</Command.Empty>

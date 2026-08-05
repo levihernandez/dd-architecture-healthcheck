@@ -14,7 +14,7 @@ import type { FindingSeverity } from '../types';
 function DDLink({ href, label = 'Open in Datadog' }: { href: string; label?: string }) {
   return (
     <a href={href} target="_blank" rel="noopener noreferrer"
-      className="inline-flex items-center gap-1 text-xs text-violet-600 hover:text-violet-800 font-medium shrink-0">
+      className="inline-flex items-center gap-1 text-xs text-violet-400 hover:text-violet-400 font-medium shrink-0">
       {label} ↗
     </a>
   );
@@ -108,29 +108,29 @@ export default function DashboardsHealth() {
                     <div className="text-xs text-ink-muted mt-0.5">
                       {totalDashboards} dashboards across {totalServices} services ({dashPerService} per service)
                     </div>
-                    <div className={`text-xs mt-1 font-medium ${coverageGrade === 'good' ? 'text-green-600' : coverageGrade === 'partial' ? 'text-amber-600' : 'text-red-500'}`}>
+                    <div className={`text-xs mt-1 font-medium ${coverageGrade === 'good' ? 'text-green-400' : coverageGrade === 'partial' ? 'text-amber-400' : 'text-red-500'}`}>
                       {coverageGrade === 'good' ? '✓ Good coverage' : coverageGrade === 'partial' ? '⚠ Consider adding service dashboards' : '⚠ Low dashboard coverage'}
                     </div>
                   </div>
                 </div>
 
                 {sloCount === 0 && totalServices > 0 && (
-                  <div className="flex items-start gap-3 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                  <div className="flex items-start gap-3 p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg">
                     <span className="text-xl">🎯</span>
                     <div className="flex-1">
-                      <div className="text-sm font-medium text-amber-800">No SLOs configured</div>
-                      <div className="text-xs text-amber-600 mt-0.5">SLOs are critical for measuring reliability. Define availability and latency SLOs for your key services.</div>
+                      <div className="text-sm font-medium text-amber-400">No SLOs configured</div>
+                      <div className="text-xs text-amber-400 mt-0.5">SLOs are critical for measuring reliability. Define availability and latency SLOs for your key services.</div>
                     </div>
                     <DDLink href={ddUrl.slos(base)} label="Create SLO" />
                   </div>
                 )}
 
                 {totalMonitors > 0 && totalDashboards > 0 && (
-                  <div className="flex items-start gap-3 p-3 bg-blue-50 rounded-lg">
+                  <div className="flex items-start gap-3 p-3 bg-blue-500/10 rounded-lg">
                     <span className="text-xl">🔔</span>
                     <div>
-                      <div className="text-sm font-medium text-blue-800">Monitor-to-Dashboard Ratio</div>
-                      <div className="text-xs text-blue-600 mt-0.5">
+                      <div className="text-sm font-medium text-blue-400">Monitor-to-Dashboard Ratio</div>
+                      <div className="text-xs text-blue-400 mt-0.5">
                         {totalMonitors} monitors / {totalDashboards} dashboards = {(totalMonitors / totalDashboards).toFixed(1)} monitors per dashboard
                       </div>
                     </div>
@@ -151,7 +151,7 @@ export default function DashboardsHealth() {
                 ].map(({ icon, text, done }) => (
                   <li key={text} className="flex items-start gap-2 text-sm">
                     <span className={done ? 'text-green-500' : 'text-ink-faint'}>{done ? '✓' : icon}</span>
-                    <span className={done ? 'text-green-700' : 'text-ink-muted'}>{text}</span>
+                    <span className={done ? 'text-green-400' : 'text-ink-muted'}>{text}</span>
                   </li>
                 ))}
               </ul>
@@ -183,8 +183,8 @@ export default function DashboardsHealth() {
               <EvidenceTable findings={filteredFindings} />
             </div>
           ) : (
-            <div className="card bg-green-50 border-green-200 text-center py-6">
-              <div className="text-green-600 text-2xl mb-2">✓</div>
+            <div className="card bg-green-500/10 border-green-500/30 text-center py-6">
+              <div className="text-green-400 text-2xl mb-2">✓</div>
               <p className="text-ink font-medium">No dashboard-specific findings detected</p>
             </div>
           )}
@@ -202,8 +202,8 @@ export default function DashboardsHealth() {
                 { label: 'Create dashboard', href: `${base}/dashboard/new` },
               ].map(({ label, href }) => (
                 <a key={label} href={href} target="_blank" rel="noopener noreferrer"
-                  className="flex items-center justify-between px-3 py-2.5 rounded-lg border border-border hover:border-violet-300 hover:bg-violet-50/30 transition-colors group">
-                  <span className="text-sm text-ink-muted group-hover:text-violet-700">{label}</span>
+                  className="flex items-center justify-between px-3 py-2.5 rounded-lg border border-border hover:border-violet-500/30 hover:bg-violet-500/30 transition-colors group">
+                  <span className="text-sm text-ink-muted group-hover:text-violet-400">{label}</span>
                   <span className="text-ink-faint group-hover:text-violet-500">↗</span>
                 </a>
               ))}

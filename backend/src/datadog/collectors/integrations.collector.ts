@@ -102,11 +102,20 @@ export async function collectIntegrations(
     if (isConfigured) totalItems++;
   }
 
+  const allResults = [awsResult, azureResult, gcpResult, webhooksResult, pagerdutyResult, slackResult];
   logger.info(`[${orgId}] Collected integration data in ${Date.now() - start}ms`);
   return {
     collector: 'integrations',
     status: 'success',
     itemCount: totalItems,
     durationMs: Date.now() - start,
+    endpoint: [
+      '/api/v1/integration/aws', '/api/v1/integration/azure', '/api/v1/integration/gcp',
+      '/api/v1/integration/webhooks', '/api/v1/integration/pagerduty', '/api/v1/integration/slack',
+    ].join(', '),
+    requestCount: allResults.reduce((sum, r) => sum + r.requestCount, 0),
+    pageCount: allResults.reduce((sum, r) => sum + r.pageCount, 0),
+    truncated: allResults.some((r) => r.truncated),
+    rateLimitRemaining: gcpResult.rateLimitRemaining,
   };
 }

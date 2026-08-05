@@ -3,14 +3,15 @@ import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useOrgScanContext } from '../../context/OrgScanContext';
 import { aiSettingsApi } from '../../services/api';
+import { streamChat } from '../../lib/chat-client';
 
 function renderInline(text: string): React.ReactNode {
   const parts = text.split(/(\*\*[^*]+\*\*|`[^`]+`)/g);
   return parts.map((part, i) => {
     if (part.startsWith('**') && part.endsWith('**'))
-      return <strong key={i} className="font-semibold text-gray-900">{part.slice(2, -2)}</strong>;
+      return <strong key={i} className="font-semibold text-ink">{part.slice(2, -2)}</strong>;
     if (part.startsWith('`') && part.endsWith('`'))
-      return <code key={i} className="bg-violet-50 text-violet-700 text-xs px-1 py-0.5 rounded font-mono">{part.slice(1, -1)}</code>;
+      return <code key={i} className="bg-violet-500/10 text-violet-400 text-xs px-1 py-0.5 rounded font-mono">{part.slice(1, -1)}</code>;
     return part;
   });
 }
@@ -37,7 +38,7 @@ function MiniMarkdown({ content, streaming }: { content: string; streaming: bool
 
     const hm = line.match(/^(#{1,3})\s+(.+)/);
     if (hm) {
-      const cls = hm[1].length === 1 ? 'text-sm font-bold text-gray-900 mt-3 mb-1' : 'text-xs font-bold text-gray-700 mt-2';
+      const cls = hm[1].length === 1 ? 'text-sm font-bold text-ink mt-3 mb-1' : 'text-xs font-bold text-ink-muted mt-2';
       elements.push(<div key={i} className={cls}>{hm[2]}</div>);
       i++; continue;
     }
@@ -48,7 +49,7 @@ function MiniMarkdown({ content, streaming }: { content: string; streaming: bool
       elements.push(
         <ul key={i} className="space-y-0.5 my-1">
           {items.map((it, j) => (
-            <li key={j} className="flex gap-1.5 text-sm text-gray-700">
+            <li key={j} className="flex gap-1.5 text-sm text-ink-muted">
               <span className="text-violet-400 shrink-0 mt-0.5">▸</span>
               <span>{renderInline(it)}</span>
             </li>
@@ -64,8 +65,8 @@ function MiniMarkdown({ content, streaming }: { content: string; streaming: bool
       elements.push(
         <ol key={i} className="space-y-0.5 my-1">
           {items.map((it, j) => (
-            <li key={j} className="flex gap-1.5 text-sm text-gray-700">
-              <span className="text-violet-600 font-bold shrink-0 w-4">{j + 1}.</span>
+            <li key={j} className="flex gap-1.5 text-sm text-ink-muted">
+              <span className="text-violet-400 font-bold shrink-0 w-4">{j + 1}.</span>
               <span>{renderInline(it)}</span>
             </li>
           ))}
@@ -74,11 +75,11 @@ function MiniMarkdown({ content, streaming }: { content: string; streaming: bool
       continue;
     }
 
-    if (line.match(/^---+$/)) { elements.push(<hr key={i} className="my-2 border-gray-200" />); i++; continue; }
+    if (line.match(/^---+$/)) { elements.push(<hr key={i} className="my-2 border-border" />); i++; continue; }
     if (line.trim() === '') { elements.push(<div key={i} className="h-1.5" />); i++; continue; }
 
     elements.push(
-      <p key={i} className="text-sm text-gray-700 leading-relaxed">{renderInline(line)}</p>
+      <p key={i} className="text-sm text-ink-muted leading-relaxed">{renderInline(line)}</p>
     );
     i++;
   }
@@ -94,9 +95,12 @@ function MiniMarkdown({ content, streaming }: { content: string; streaming: bool
 interface AISectionInsightProps {
   section: string;
   prompt: string;
+  // FindingCategory this section is about (e.g. 'logs_health') — scopes the backend's
+  // context to this domain and triggers maturity framing, same as page-level chat.
+  category?: string;
 }
 
-export function AISectionInsight({ section, prompt }: AISectionInsightProps) {
+export function AISectionInsight({ section, prompt, category }: AISectionInsightProps) {
   const [open, setOpen] = useState(false);
   const [content, setContent] = useState('');
   const [streaming, setStreaming] = useState(false);
@@ -115,42 +119,18 @@ export function AISectionInsight({ section, prompt }: AISectionInsightProps) {
     abortRef.current = new AbortController();
 
     try {
-      const response = await fetch('/api/chat/stream', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      let acc = '';
+      await streamChat(
+        {
           orgId: selectedOrgId,
           scanId: selectedScanId || undefined,
+          page: category,
           messages: [{ role: 'user', content: prompt }],
-        }),
-        signal: abortRef.current.signal,
-      });
-
-      if (!response.ok || !response.body) throw new Error(`HTTP ${response.status}`);
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let acc = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        const rawChunk = decoder.decode(value, { stream: true });
-        for (const line of rawChunk.split('\n')) {
-          if (!line.startsWith('data: ')) continue;
-          const data = line.slice(6).trim();
-          if (data === '[DONE]') break;
-          try {
-            const parsed = JSON.parse(data) as { type: string; content: string };
-            if (parsed.type === 'token') {
-              acc += parsed.content;
-              setContent(acc);
-            } else if (parsed.type === 'error') {
-              setError(parsed.content);
-            }
-          } catch { /* skip */ }
-        }
-      }
+          signal: abortRef.current.signal,
+        },
+        (delta) => { acc += delta; setContent(acc); },
+        (errMsg) => setError(errMsg)
+      );
     } catch (err) {
       if ((err as Error).name !== 'AbortError') {
         setError('Connection failed. Check AI Settings.');
@@ -169,7 +149,7 @@ export function AISectionInsight({ section, prompt }: AISectionInsightProps) {
     <>
       <button
         onClick={handleOpen}
-        className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg bg-violet-50 text-violet-700 border border-violet-200 hover:bg-violet-100 transition-colors font-medium whitespace-nowrap"
+        className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg bg-violet-500/10 text-violet-400 border border-violet-500/30 hover:bg-violet-500/15 transition-colors font-medium whitespace-nowrap"
       >
         ✨ AI Insights
       </button>
@@ -177,7 +157,7 @@ export function AISectionInsight({ section, prompt }: AISectionInsightProps) {
       {open && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" onClick={() => setOpen(false)} />
-          <div className="relative w-[560px] max-h-[80vh] bg-white rounded-2xl shadow-2xl border border-gray-200 flex flex-col overflow-hidden">
+          <div className="relative w-[560px] max-h-[80vh] bg-surface-subtle rounded-2xl shadow-2xl border border-border flex flex-col overflow-hidden">
             {/* Header */}
             <div className="flex items-center justify-between px-4 py-3 bg-violet-600 text-white shrink-0">
               <div className="flex items-center gap-2 min-w-0">
@@ -196,7 +176,7 @@ export function AISectionInsight({ section, prompt }: AISectionInsightProps) {
                 {streaming && (
                   <button
                     onClick={() => abortRef.current?.abort()}
-                    className="text-xs bg-white/20 px-2 py-0.5 rounded hover:bg-white/30 transition-colors"
+                    className="text-xs bg-surface-subtle/20 px-2 py-0.5 rounded hover:bg-surface-subtle/30 transition-colors"
                   >
                     Stop
                   </button>
@@ -204,14 +184,14 @@ export function AISectionInsight({ section, prompt }: AISectionInsightProps) {
                 {content && !streaming && (
                   <button
                     onClick={() => { setContent(''); analyze(); }}
-                    className="text-xs bg-white/20 px-2 py-0.5 rounded hover:bg-white/30 transition-colors"
+                    className="text-xs bg-surface-subtle/20 px-2 py-0.5 rounded hover:bg-surface-subtle/30 transition-colors"
                   >
                     ↺ Re-analyze
                   </button>
                 )}
                 <button
                   onClick={() => setOpen(false)}
-                  className="p-0.5 rounded hover:bg-white/20 transition-colors"
+                  className="p-0.5 rounded hover:bg-surface-subtle/20 transition-colors"
                   aria-label="Close"
                 >
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -231,20 +211,20 @@ export function AISectionInsight({ section, prompt }: AISectionInsightProps) {
                 </div>
               )}
               {!content && !error && !streaming && (
-                <div className="text-center py-8 text-gray-400">
+                <div className="text-center py-8 text-ink-faint">
                   <div className="text-3xl mb-2">✨</div>
                   <div className="text-sm">
                     {!selectedOrgId
                       ? 'Select an org in the header to get AI insights'
                       : !aiConfigured
-                      ? <span>Configure an <Link to="/ai-settings" onClick={() => setOpen(false)} className="text-violet-600 underline">AI provider</Link> to use this feature</span>
+                      ? <span>Configure an <Link to="/ai-settings" onClick={() => setOpen(false)} className="text-violet-400 underline">AI provider</Link> to use this feature</span>
                       : 'Click Re-analyze to generate insights'
                     }
                   </div>
                 </div>
               )}
               {error && (
-                <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700">
+                <div className="bg-red-500/10 border border-red-500/30 rounded-lg px-4 py-3 text-sm text-red-400">
                   {error}
                 </div>
               )}
@@ -252,15 +232,15 @@ export function AISectionInsight({ section, prompt }: AISectionInsightProps) {
             </div>
 
             {/* Footer */}
-            <div className="shrink-0 px-4 py-2.5 border-t border-gray-100 flex items-center justify-between bg-gray-50">
-              <span className="text-xs text-gray-400">
+            <div className="shrink-0 px-4 py-2.5 border-t border-gray-100 flex items-center justify-between bg-surface-sunken">
+              <span className="text-xs text-ink-faint">
                 {aiSettings?.provider && aiSettings.provider !== 'none'
                   ? `${aiSettings.provider}${aiSettings.model ? ` · ${aiSettings.model}` : ''}`
                   : aiSettings?.envProvider
                   ? aiSettings.envProvider
                   : 'No AI provider configured'}
               </span>
-              <Link to="/chat" onClick={() => setOpen(false)} className="text-xs text-violet-500 hover:text-violet-700">
+              <Link to="/chat" onClick={() => setOpen(false)} className="text-xs text-violet-500 hover:text-violet-400">
                 Open full AI Advisor →
               </Link>
             </div>

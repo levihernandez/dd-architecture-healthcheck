@@ -3,7 +3,10 @@ import { AppError } from '../middleware/error.middleware';
 import { analyzeTagNormalization } from '../../tagging/normalization';
 import { analyzeCloudAlignment } from '../../tagging/cloud-alignment';
 import { analyzeTagPropagation } from '../../tagging/propagation';
-import { INDUSTRY_TEMPLATES, ORG_TEMPLATES, scoreAgainstTemplate, detectRecommendedTemplate } from '../../tagging/templates';
+import {
+  INDUSTRY_TEMPLATES, ORG_TEMPLATES, scoreAgainstTemplate, detectRecommendedTemplate,
+  TAG_POLICY_GUIDANCE, TAG_ENFORCEMENT_MATRIX, TAG_POLICY_RESOURCES,
+} from '../../tagging/templates';
 import { analyzeMultiOrgGovernance } from '../../tagging/governance';
 import { analyzeCostReadiness } from '../../tagging/cost-readiness';
 import { TAG_DICTIONARY, lookupTag } from '../../tagging/tag-dictionary';
@@ -68,6 +71,7 @@ router.get('/templates', (_req, res) => {
     id: t.id,
     name: t.name,
     category: t.category,
+    sector: t.sector,
     description: t.description,
     icon: t.icon,
     requiredCount: t.globalBaseline.length + t.required.length,
@@ -109,6 +113,21 @@ router.get('/detect-template', (req, res, next) => {
     const recommended = detectRecommendedTemplate(orgId, scanRunId);
     res.json({ recommended });
   } catch (err) { next(err); }
+});
+
+// GET /api/tagging/policy-guidance — where/how to enforce tag policy, independent of any one template
+router.get('/policy-guidance', (_req, res) => {
+  res.json(TAG_POLICY_GUIDANCE);
+});
+
+// GET /api/tagging/tag-enforcement — which resource types support tags vs. can be made mandatory
+router.get('/tag-enforcement', (_req, res) => {
+  res.json(TAG_ENFORCEMENT_MATRIX);
+});
+
+// GET /api/tagging/policy-resources — public docs/product links for setting up tag policies
+router.get('/policy-resources', (_req, res) => {
+  res.json(TAG_POLICY_RESOURCES);
 });
 
 // GET /api/tagging/governance

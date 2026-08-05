@@ -7,16 +7,16 @@ interface TagPillProps {
 }
 
 const STANDARD_KEYS_STYLE: Record<string, string> = {
-  env: 'bg-green-100 text-green-800 border-green-200',
-  service: 'bg-blue-100 text-blue-800 border-blue-200',
-  version: 'bg-purple-100 text-purple-800 border-purple-200',
-  team: 'bg-amber-100 text-amber-800 border-amber-200',
-  owner: 'bg-amber-100 text-amber-800 border-amber-200',
+  env: 'bg-green-500/15 text-green-400 border-green-500/30',
+  service: 'bg-blue-500/15 text-blue-400 border-blue-500/30',
+  version: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',
+  team: 'bg-amber-500/15 text-amber-400 border-amber-500/30',
+  owner: 'bg-amber-500/15 text-amber-400 border-amber-500/30',
 };
 
 export default function TagPill({ tag, size = 'sm' }: TagPillProps) {
   const key = tag.split(':')[0].toLowerCase();
-  const cls = STANDARD_KEYS_STYLE[key] ?? 'bg-gray-100 text-gray-700 border-gray-200';
+  const cls = STANDARD_KEYS_STYLE[key] ?? 'bg-surface-sunken text-ink-muted border-border';
 
   return (
     <span className={clsx('inline-block border rounded px-1.5 py-0.5 font-mono leading-none',
@@ -28,7 +28,7 @@ export default function TagPill({ tag, size = 'sm' }: TagPillProps) {
 
 export function MissingTagPill({ tagKey }: { tagKey: string }) {
   return (
-    <span className="inline-block border border-dashed border-red-300 rounded px-1.5 py-0.5 font-mono text-xs text-red-500 leading-none">
+    <span className="inline-block border border-dashed border-red-500/30 rounded px-1.5 py-0.5 font-mono text-xs text-red-500 leading-none">
       {tagKey}: <em>missing</em>
     </span>
   );

@@ -10,7 +10,11 @@ export type FindingCategory =
   | 'dashboards_health'
   | 'synthetics_health'
   | 'network_cloud'
-  | 'governance';
+  | 'governance'
+  | 'security_posture'
+  // Informational only — deliberately absent from scorer.ts's CATEGORY_WEIGHTS so
+  // these findings never affect the overall score or category breakdown.
+  | 'cost_optimization';
 
 export type ScoreGrade = 'excellent' | 'good' | 'needs_attention' | 'critical';
 

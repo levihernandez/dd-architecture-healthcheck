@@ -88,10 +88,10 @@ export default function AIAssessment() {
           <SkeletonText lines={4} />
         </div>
       ) : generate.isError ? (
-        <div className="card bg-red-50 border-red-200">
-          <p className="text-red-700 text-sm">{(generate.error as Error)?.message}</p>
+        <div className="card bg-red-500/10 border-red-500/30">
+          <p className="text-red-400 text-sm">{(generate.error as Error)?.message}</p>
           {String(generate.error).includes('No AI provider') && (
-            <p className="text-red-600 text-xs mt-2">
+            <p className="text-red-400 text-xs mt-2">
               Configure AI_PROVIDER=openai or AI_PROVIDER=anthropic in your backend .env file
             </p>
           )}
@@ -122,7 +122,7 @@ export default function AIAssessment() {
           <div className="grid md:grid-cols-2 gap-4">
             {/* Strengths */}
             <div className="card">
-              <h2 className="text-base font-semibold text-green-700 mb-3">✓ Key Strengths</h2>
+              <h2 className="text-base font-semibold text-green-400 mb-3">✓ Key Strengths</h2>
               <ul className="space-y-2">
                 {assessment.keyStrengths.map((s, i) => (
                   <li key={i} className="flex items-start gap-2 text-sm text-ink-muted">
@@ -134,7 +134,7 @@ export default function AIAssessment() {
 
             {/* Risks */}
             <div className="card">
-              <h2 className="text-base font-semibold text-red-700 mb-3">⚠ Top Risks</h2>
+              <h2 className="text-base font-semibold text-red-400 mb-3">⚠ Top Risks</h2>
               <ul className="space-y-2">
                 {assessment.topRisks.map((r, i) => (
                   <li key={i} className="flex items-start gap-2 text-sm text-ink-muted">
@@ -161,10 +161,10 @@ export default function AIAssessment() {
                       <div className="flex items-center gap-2 flex-wrap">
                         <h3 className="text-sm font-semibold text-ink">{rec.title}</h3>
                         <span className="badge bg-surface-sunken text-ink-muted">{CATEGORY_LABELS[rec.category as FindingCategory]}</span>
-                        <span className={`badge ${rec.impact === 'high' ? 'bg-red-100 text-red-700' : rec.impact === 'medium' ? 'bg-amber-100 text-amber-700' : 'bg-surface-sunken text-ink-muted'}`}>
+                        <span className={`badge ${rec.impact === 'high' ? 'bg-red-500/15 text-red-400' : rec.impact === 'medium' ? 'bg-amber-500/15 text-amber-400' : 'bg-surface-sunken text-ink-muted'}`}>
                           {rec.impact} impact
                         </span>
-                        <span className={`badge ${rec.effort === 'low' ? 'bg-green-100 text-green-700' : rec.effort === 'medium' ? 'bg-blue-100 text-blue-700' : 'bg-surface-sunken text-ink-muted'}`}>
+                        <span className={`badge ${rec.effort === 'low' ? 'bg-green-500/15 text-green-400' : rec.effort === 'medium' ? 'bg-blue-500/15 text-blue-400' : 'bg-surface-sunken text-ink-muted'}`}>
                           {rec.effort} effort
                         </span>
                       </div>
@@ -172,7 +172,7 @@ export default function AIAssessment() {
                       {rec.evidenceRefs?.length > 0 && (
                         <div className="mt-2 flex flex-wrap gap-1">
                           {rec.evidenceRefs.map((ref, i) => (
-                            <span key={i} className="text-xs text-blue-600 bg-blue-50 px-2 py-0.5 rounded">
+                            <span key={i} className="text-xs text-blue-400 bg-blue-500/10 px-2 py-0.5 rounded">
                               {ref}
                             </span>
                           ))}
@@ -192,9 +192,9 @@ export default function AIAssessment() {
                 <h3 className="text-sm font-semibold text-ink-muted mb-2">Required Tags</h3>
                 <div className="space-y-2">
                   {assessment.taggingStrategyProposal.requiredTags.map((t) => (
-                    <div key={t.key} className="bg-green-50 border border-green-200 rounded p-2">
-                      <code className="text-sm font-mono text-green-800">{t.key}</code>
-                      <p className="text-xs text-green-700 mt-0.5">{t.description}</p>
+                    <div key={t.key} className="bg-green-500/10 border border-green-500/30 rounded p-2">
+                      <code className="text-sm font-mono text-green-400">{t.key}</code>
+                      <p className="text-xs text-green-400 mt-0.5">{t.description}</p>
                       {t.examples?.length > 0 && <p className="text-xs text-ink-faint">e.g. {t.examples.join(', ')}</p>}
                     </div>
                   ))}
@@ -204,9 +204,9 @@ export default function AIAssessment() {
                 <h3 className="text-sm font-semibold text-ink-muted mb-2">Recommended Tags</h3>
                 <div className="space-y-2">
                   {assessment.taggingStrategyProposal.recommendedTags.map((t) => (
-                    <div key={t.key} className="bg-blue-50 border border-blue-200 rounded p-2">
-                      <code className="text-sm font-mono text-blue-800">{t.key}</code>
-                      <p className="text-xs text-blue-700 mt-0.5">{t.description}</p>
+                    <div key={t.key} className="bg-blue-500/10 border border-blue-500/30 rounded p-2">
+                      <code className="text-sm font-mono text-blue-400">{t.key}</code>
+                      <p className="text-xs text-blue-400 mt-0.5">{t.description}</p>
                       {t.examples?.length > 0 && <p className="text-xs text-ink-faint">e.g. {t.examples.join(', ')}</p>}
                     </div>
                   ))}
@@ -218,10 +218,10 @@ export default function AIAssessment() {
                 <h3 className="text-sm font-semibold text-ink-muted mb-2">Tag Mappings</h3>
                 <div className="space-y-2">
                   {assessment.taggingStrategyProposal.tagMappings.map((m, i) => (
-                    <div key={i} className="flex items-center gap-3 text-sm bg-amber-50 border border-amber-200 rounded p-2">
-                      <code className="text-amber-800">{m.from}</code>
+                    <div key={i} className="flex items-center gap-3 text-sm bg-amber-500/10 border border-amber-500/30 rounded p-2">
+                      <code className="text-amber-400">{m.from}</code>
                       <span>→</span>
-                      <code className="text-green-800">{m.to}</code>
+                      <code className="text-green-400">{m.to}</code>
                       <span className="text-ink-faint text-xs">{m.rationale}</span>
                     </div>
                   ))}

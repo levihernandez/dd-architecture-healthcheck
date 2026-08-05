@@ -1,6 +1,7 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { inventoryApi } from '../services/api';
+import { inventoryApi, taggingApi, tagTemplateApi } from '../services/api';
 import { useOrgAndScanFilters } from '../hooks/useFilters';
 import DataTable from '../components/common/DataTable';
 import { EmptyState } from '../components/common/LoadingState';
@@ -90,7 +91,7 @@ const SECTOR_GROUPS = [
 const CROSS_PRODUCT_TAGS = [
   {
     key: 'host',
-    products: ['Infra', 'APM', 'Logs', 'NPM'],
+    products: ['Infra', 'APM', 'Logs', 'CNM'],
     description: 'The universal pivot key. Automatically correlates infrastructure metrics, APM traces, logs, and network flows by hostname.',
     autoInjected: true,
   },
@@ -114,8 +115,8 @@ const CROSS_PRODUCT_TAGS = [
   },
   {
     key: 'network.destination.service',
-    products: ['NPM', 'APM'],
-    description: 'Set by NPM on network flows to match APM service names. Correlates TCP/UDP traffic volume to service-level request rates.',
+    products: ['CNM', 'APM'],
+    description: 'Set by CNM on network flows to match APM service names. Correlates TCP/UDP traffic volume to service-level request rates.',
     autoInjected: false,
   },
   {
@@ -227,7 +228,7 @@ const PRODUCT_LAYERS: ProductLayer[] = [
 function CoverageBar({ pct, label }: { pct: number | null; label: string }) {
   if (pct === null) return null;
   const color = pct >= 80 ? 'bg-green-500' : pct >= 50 ? 'bg-amber-400' : 'bg-red-500';
-  const textColor = pct >= 80 ? 'text-green-700' : pct >= 50 ? 'text-amber-700' : 'text-red-600';
+  const textColor = pct >= 80 ? 'text-green-400' : pct >= 50 ? 'text-amber-400' : 'text-red-400';
   return (
     <div className="flex items-center gap-1.5 min-w-0">
       <span className="text-xs text-ink-muted w-14 shrink-0">{label}</span>
@@ -241,7 +242,7 @@ function CoverageBar({ pct, label }: { pct: number | null; label: string }) {
 
 function TagPill({ tagKey }: { tagKey: string }) {
   return (
-    <code className="inline-block px-1.5 py-0.5 bg-violet-50 text-violet-700 border border-violet-200 rounded text-xs font-mono">
+    <code className="inline-block px-1.5 py-0.5 bg-violet-500/10 text-violet-400 border border-violet-500/30 rounded text-xs font-mono">
       {tagKey}
     </code>
   );
@@ -276,16 +277,16 @@ function HierarchyLayerCard({
 
   const statusBadge =
     layer.status === 'tracked'
-      ? <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">Tracked</span>
+      ? <span className="text-xs bg-green-500/15 text-green-400 px-2 py-0.5 rounded-full">Tracked</span>
       : layer.status === 'partial'
-      ? <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">Partial</span>
+      ? <span className="text-xs bg-amber-500/15 text-amber-400 px-2 py-0.5 rounded-full">Partial</span>
       : <span className="text-xs bg-surface-sunken text-ink-muted px-2 py-0.5 rounded-full">Guidance only</span>;
 
   return (
     <div className="flex gap-0">
       {/* Connector spine */}
       <div className="flex flex-col items-center w-8 shrink-0">
-        <div className="w-3 h-3 rounded-full border-2 border-violet-400 bg-white mt-4 shrink-0 z-10" />
+        <div className="w-3 h-3 rounded-full border-2 border-violet-400 bg-surface-subtle mt-4 shrink-0 z-10" />
         {!isLast && <div className="w-0.5 bg-violet-200 flex-1 mt-1" />}
       </div>
 
@@ -348,7 +349,7 @@ function HierarchyLayerCard({
                     </div>
                     <div className="flex flex-wrap gap-1">
                       {layer.inheritedTags.map((t) => (
-                        <code key={t} className="inline-block px-1.5 py-0.5 bg-blue-50 text-blue-700 border border-blue-200 rounded text-xs font-mono">
+                        <code key={t} className="inline-block px-1.5 py-0.5 bg-blue-500/10 text-blue-400 border border-blue-500/30 rounded text-xs font-mono">
                           {t}
                         </code>
                       ))}
@@ -358,7 +359,7 @@ function HierarchyLayerCard({
               </div>
 
               {layer.note && (
-                <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2">
+                <div className="text-xs text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded px-3 py-2">
                   💡 {layer.note}
                 </div>
               )}
@@ -376,7 +377,7 @@ export default function TagExplorer() {
   const { selectedOrgId, selectedScanId } =
     useOrgAndScanFilters();
   const [search, setSearch] = useState('');
-  const [activeTab, setActiveTab] = useState<'required' | 'sector' | 'crossproduct'>('required');
+  const [activeTab, setActiveTab] = useState<'required' | 'template' | 'sector' | 'crossproduct'>('required');
 
   const enabled = Boolean(selectedOrgId && selectedScanId);
 
@@ -391,6 +392,23 @@ export default function TagExplorer() {
     queryFn: () => inventoryApi.tagCoverage(selectedOrgId, selectedScanId),
     enabled,
   });
+
+  // The org's selected tagging template (see Industry Templates) — surfaced here
+  // as its own tab so the industry-specific tags it defines are checked too, not
+  // just the universal UST baseline.
+  const { data: activeSelection } = useQuery({
+    queryKey: ['tag-template', selectedOrgId],
+    queryFn: () => tagTemplateApi.get(selectedOrgId),
+    enabled: Boolean(selectedOrgId),
+  });
+  const templateId = activeSelection?.templateId ?? 'generic';
+
+  const { data: templateScore } = useQuery({
+    queryKey: ['tagging-score', selectedOrgId, selectedScanId, templateId],
+    queryFn: () => taggingApi.score(selectedOrgId, selectedScanId, templateId),
+    enabled,
+  });
+  const templateTags = templateScore ? [...templateScore.required, ...templateScore.recommended] : [];
 
   const filtered = tags.filter(
     (t) => !search || t.tag_key.toLowerCase().includes(search.toLowerCase())
@@ -443,15 +461,15 @@ export default function TagExplorer() {
               <div className="text-sm text-ink-muted">Unique Tag Keys</div>
             </div>
             <div className="card text-center">
-              <div className="text-3xl font-bold text-green-600">{standardFound}</div>
+              <div className="text-3xl font-bold text-green-400">{standardFound}</div>
               <div className="text-sm text-ink-muted">Standard Keys Found</div>
             </div>
             <div className="card text-center">
-              <div className="text-3xl font-bold text-blue-600">{customCount}</div>
+              <div className="text-3xl font-bold text-blue-400">{customCount}</div>
               <div className="text-sm text-ink-muted">Custom Keys</div>
             </div>
             <div className="card text-center">
-              <div className="text-3xl font-bold text-violet-600">
+              <div className="text-3xl font-bold text-violet-400">
                 {coverage?.layers.hosts.total ?? '—'}
               </div>
               <div className="text-sm text-ink-muted">Hosts Scanned</div>
@@ -473,6 +491,7 @@ export default function TagExplorer() {
               {(
                 [
                   { id: 'required', label: '🔴 Required (UST)', count: REQUIRED_TAGS.length },
+                  { id: 'template', label: `🏷️ ${templateScore?.templateName ?? 'Industry Template'}`, count: templateTags.length },
                   { id: 'sector', label: '🔵 Leverage by Sector', count: SECTOR_GROUPS.length },
                   { id: 'crossproduct', label: '🟣 Cross-product Metadata', count: CROSS_PRODUCT_TAGS.length },
                 ] as const
@@ -482,7 +501,7 @@ export default function TagExplorer() {
                   onClick={() => setActiveTab(tab.id)}
                   className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
                     activeTab === tab.id
-                      ? 'border-violet-600 text-violet-700'
+                      ? 'border-violet-600 text-violet-400'
                       : 'border-transparent text-ink-muted hover:text-ink-muted'
                   }`}
                 >
@@ -494,7 +513,7 @@ export default function TagExplorer() {
             {/* Required UST tags */}
             {activeTab === 'required' && (
               <div className="space-y-3">
-                <p className="text-sm text-ink-muted bg-red-50 border border-red-200 rounded px-3 py-2">
+                <p className="text-sm text-ink-muted bg-red-500/10 border border-red-500/30 rounded px-3 py-2">
                   These three tags form the <strong>Unified Service Tagging</strong> foundation. They
                   must be applied consistently across every resource type for Service Map, Deployment
                   Tracking, and cross-product correlation to function.
@@ -510,8 +529,8 @@ export default function TagExplorer() {
                             <span
                               className={`text-xs px-2 py-0.5 rounded-full font-medium ${
                                 found
-                                  ? 'bg-green-100 text-green-700'
-                                  : 'bg-red-100 text-red-700'
+                                  ? 'bg-green-500/15 text-green-400'
+                                  : 'bg-red-500/15 text-red-400'
                               }`}
                             >
                               {found ? '✓ Detected' : '✗ Not found'}
@@ -550,7 +569,7 @@ export default function TagExplorer() {
             {/* Sector tags */}
             {activeTab === 'sector' && (
               <div className="space-y-4">
-                <p className="text-sm text-ink-muted bg-blue-50 border border-blue-200 rounded px-3 py-2">
+                <p className="text-sm text-ink-muted bg-blue-500/10 border border-blue-500/30 rounded px-3 py-2">
                   Tags to <strong>leverage based on your platform</strong>. Detected means at least
                   one resource in this org already uses a tag from that sector — apply them more broadly
                   for full coverage.
@@ -565,7 +584,7 @@ export default function TagExplorer() {
                         <span
                           className={`text-xs px-2 py-0.5 rounded-full font-medium ml-auto ${
                             detected
-                              ? 'bg-blue-100 text-blue-700'
+                              ? 'bg-blue-500/15 text-blue-400'
                               : 'bg-surface-sunken text-ink-muted'
                           }`}
                         >
@@ -580,7 +599,7 @@ export default function TagExplorer() {
                               key={tag.key}
                               className={`flex items-start gap-2 p-2 rounded border ${
                                 tagDetected
-                                  ? 'border-blue-200 bg-blue-50'
+                                  ? 'border-blue-500/30 bg-blue-500/10'
                                   : 'border-border bg-surface-subtle'
                               }`}
                             >
@@ -601,7 +620,7 @@ export default function TagExplorer() {
             {/* Cross-product correlation tags */}
             {activeTab === 'crossproduct' && (
               <div className="space-y-3">
-                <p className="text-sm text-ink-muted bg-violet-50 border border-violet-200 rounded px-3 py-2">
+                <p className="text-sm text-ink-muted bg-violet-500/10 border border-violet-500/30 rounded px-3 py-2">
                   Tags that <strong>enable correlation across product surfaces</strong> — RUM,
                   APM, Logs, Network, and Infrastructure. Many are auto-injected by the Agent or SDKs;
                   others require configuration in your application code or log pipeline.
@@ -612,7 +631,7 @@ export default function TagExplorer() {
                       <div className="shrink-0">
                         <TagPill tagKey={tag.key} />
                         {tag.autoInjected && (
-                          <div className="text-xs text-green-600 mt-1 text-center">auto-injected</div>
+                          <div className="text-xs text-green-400 mt-1 text-center">auto-injected</div>
                         )}
                       </div>
                       <div className="flex-1 min-w-0">
@@ -620,7 +639,7 @@ export default function TagExplorer() {
                           {tag.products.map((p) => (
                             <span
                               key={p}
-                              className="text-xs bg-violet-100 text-violet-700 px-1.5 py-0.5 rounded"
+                              className="text-xs bg-violet-500/15 text-violet-400 px-1.5 py-0.5 rounded"
                             >
                               {p}
                             </span>
@@ -631,6 +650,44 @@ export default function TagExplorer() {
                     </div>
                   ))}
                 </div>
+              </div>
+            )}
+
+            {/* Active industry/org template tags */}
+            {activeTab === 'template' && (
+              <div className="space-y-3">
+                <p className="text-sm text-ink-muted bg-amber-500/10 border border-amber-500/30 rounded px-3 py-2 flex items-center justify-between gap-3">
+                  <span>
+                    Tags defined by your org's selected tagging template
+                    {templateScore && <> — <strong>{templateScore.templateName}</strong></>}.
+                  </span>
+                  <Link to="/tag-templates" className="shrink-0 text-amber-400 font-medium hover:underline">Change template →</Link>
+                </p>
+                {templateTags.length === 0 ? (
+                  <div className="card text-center text-ink-faint py-8">
+                    No org-specific tags yet — using the generic baseline.{' '}
+                    <Link to="/tag-templates" className="text-dd-purple hover:underline">Pick an industry template</Link> to see tags specific to your sector here.
+                  </div>
+                ) : (
+                  templateTags.map((tag) => (
+                    <div key={tag.key} className="card">
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 mb-1">
+                            <TagPill tagKey={tag.key} />
+                            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${tag.found ? 'bg-green-500/15 text-green-400' : 'bg-red-500/15 text-red-400'}`}>
+                              {tag.found ? `✓ Detected (${tag.coverage}%)` : '✗ Not found'}
+                            </span>
+                          </div>
+                          <p className="text-sm text-ink-muted mt-1">{tag.description}</p>
+                          {(tag as { why?: string }).why && (
+                            <p className="text-xs text-ink-muted mt-1 italic">{(tag as { why?: string }).why}</p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
             )}
           </section>
@@ -684,10 +741,10 @@ export default function TagExplorer() {
                       <div className="flex items-center gap-2">
                         <code className="text-sm font-mono">{String(r.tag_key)}</code>
                         {r.is_standard_key ? (
-                          <span className="badge bg-green-100 text-green-700">standard</span>
+                          <span className="badge bg-green-500/15 text-green-400">standard</span>
                         ) : null}
                         {r.suggested_mapping ? (
-                          <span className="badge bg-amber-100 text-amber-700">
+                          <span className="badge bg-amber-500/15 text-amber-400">
                             → {String(r.suggested_mapping)}
                           </span>
                         ) : null}
@@ -742,6 +799,7 @@ export default function TagExplorer() {
                 ]}
                 data={filtered}
                 rowKey={(r) => String(r.tag_key)}
+                pageSize={15}
               />
             </div>
           </section>

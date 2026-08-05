@@ -28,6 +28,19 @@ export default function ScanRuns() {
   });
 
   const [expandedScan, setExpandedScan] = useState<string | null>(null);
+  const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
+
+  const deleteScan = useMutation({
+    mutationFn: (id: string) => scansApi.remove(id),
+    onSuccess: (_data, id) => {
+      toast.success('Scan run deleted');
+      if (expandedScan === id) setExpandedScan(null);
+      qc.invalidateQueries({ queryKey: ['scans'] });
+      qc.invalidateQueries({ queryKey: ['orgs'] });
+    },
+    onError: (err: Error) => toast.error(err.message ?? 'Failed to delete scan run'),
+    onSettled: () => setConfirmingDeleteId(null),
+  });
 
   const { data: scanDetail } = useQuery({
     queryKey: ['scan-detail', expandedScan],
@@ -59,7 +72,7 @@ export default function ScanRuns() {
       render: (s) => (
         <div className="space-y-1">
           <ScanStatusBadge status={s.status} />
-          {s.error && <div className="text-xs text-red-600 max-w-xs truncate">Error: {s.error}</div>}
+          {s.error && <div className="text-xs text-red-400 max-w-xs truncate">Error: {s.error}</div>}
         </div>
       ),
     },
@@ -89,17 +102,54 @@ export default function ScanRuns() {
     {
       key: 'actions',
       header: '',
-      render: (s) => (
-        <button
-          className="btn-secondary text-xs"
-          onClick={(e) => {
-            e.stopPropagation();
-            setExpandedScan(expandedScan === s.id ? null : s.id);
-          }}
-        >
-          {expandedScan === s.id ? 'Collapse' : 'Details'}
-        </button>
-      ),
+      render: (s) => {
+        const isRunning = s.status === 'running' || s.status === 'pending';
+        if (confirmingDeleteId === s.id) {
+          return (
+            <div className="flex items-center gap-1.5 animate-fade-in" onClick={(e) => e.stopPropagation()}>
+              <span className="text-xs text-red-400">Delete?</span>
+              <button
+                className="btn-danger text-xs"
+                disabled={deleteScan.isPending}
+                onClick={() => deleteScan.mutate(s.id)}
+              >
+                {deleteScan.isPending ? '...' : 'Confirm'}
+              </button>
+              <button
+                className="btn-ghost text-xs"
+                disabled={deleteScan.isPending}
+                onClick={() => setConfirmingDeleteId(null)}
+              >
+                Cancel
+              </button>
+            </div>
+          );
+        }
+        return (
+          <div className="flex items-center gap-1.5">
+            <button
+              className="btn-secondary text-xs"
+              onClick={(e) => {
+                e.stopPropagation();
+                setExpandedScan(expandedScan === s.id ? null : s.id);
+              }}
+            >
+              {expandedScan === s.id ? 'Collapse' : 'Details'}
+            </button>
+            <button
+              className="p-1.5 rounded text-ink-faint hover:text-red-400 hover:bg-red-500/10 disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-ink-faint"
+              disabled={isRunning}
+              title={isRunning ? "Can't delete a scan that's still running" : 'Delete this scan run'}
+              onClick={(e) => {
+                e.stopPropagation();
+                setConfirmingDeleteId(s.id);
+              }}
+            >
+              🗑
+            </button>
+          </div>
+        );
+      },
     },
   ];
 
@@ -149,6 +199,8 @@ export default function ScanRuns() {
             data={allScans}
             rowKey={(scan) => scan.id}
             onRowClick={(scan) => setExpandedScan(expandedScan === scan.id ? null : scan.id)}
+            searchable
+            pageSize={10}
           />
 
           {expandedScanRun && scanDetail && (
@@ -158,17 +210,41 @@ export default function ScanRuns() {
               </h4>
               <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
                 {(scanDetail.collectorResults ?? []).map((r) => (
-                  <div key={r.collector} className="flex items-center gap-2 bg-surface-subtle rounded p-2">
+                  <div key={r.collector} className="flex items-start gap-2 bg-surface-subtle rounded p-2">
                     <CollectorStatusBadge status={r.status} />
-                    <div>
+                    <div className="min-w-0">
                       <div className="text-xs font-medium text-ink-muted capitalize">
                         {r.collector.replace(/_/g, ' ')}
                       </div>
                       <div className="text-xs text-ink-faint">
                         {r.itemCount} items
-                        {r.durationMs && ` · ${r.durationMs}ms`}
+                        {r.durationMs !== undefined && ` · ${r.durationMs}ms`}
                       </div>
-                      {r.error && <div className="text-xs text-red-600 truncate">{r.error}</div>}
+                      {r.endpoint && (
+                        <div className="text-xs text-ink-faint font-mono truncate" title={r.endpoint}>
+                          GET {r.endpoint}
+                        </div>
+                      )}
+                      {(r.requestCount !== undefined || r.pageCount !== undefined) && (
+                        <div className="text-xs text-ink-faint">
+                          {r.requestCount ?? '—'} request{r.requestCount === 1 ? '' : 's'}
+                          {r.pageCount !== undefined && r.pageCount > 1 && ` · ${r.pageCount} pages`}
+                        </div>
+                      )}
+                      {r.rateLimitRemaining !== undefined && (
+                        <div className="text-xs text-ink-faint">
+                          Rate limit: {r.rateLimitRemaining} remaining
+                        </div>
+                      )}
+                      {r.truncated && (
+                        <div
+                          className="text-xs text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded px-1.5 py-0.5 mt-1 inline-block font-medium"
+                          title="Collection stopped at the configured page cap while more data was still available. Raise DATADOG_MAX_PAGES_HOSTS / DATADOG_MAX_PAGES_SERVICES on the backend if this org's inventory exceeds the current limit."
+                        >
+                          ⚠ Truncated — page cap reached
+                        </div>
+                      )}
+                      {r.error && <div className="text-xs text-red-400 truncate">{r.error}</div>}
                     </div>
                   </div>
                 ))}

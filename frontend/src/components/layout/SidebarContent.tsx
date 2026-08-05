@@ -39,7 +39,7 @@ function PinnedRow({ path, onUnpin, onNavigate }: PinnedRowProps) {
       style={{ transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.5 : 1 }}
       className="group flex items-center gap-1"
     >
-      <span {...attributes} {...listeners} className="cursor-grab active:cursor-grabbing text-gray-500 px-1 text-xs" aria-label={`Drag to reorder ${item.label}`}>
+      <span {...attributes} {...listeners} className="cursor-grab active:cursor-grabbing text-ink-faint px-1 text-xs" aria-label={`Drag to reorder ${item.label}`}>
         ⠿
       </span>
       <NavLink
@@ -58,7 +58,7 @@ function PinnedRow({ path, onUnpin, onNavigate }: PinnedRowProps) {
       <button
         onClick={onUnpin}
         aria-label={`Unpin ${item.label}`}
-        className="opacity-0 group-hover:opacity-100 text-gray-500 hover:text-white px-1 text-xs"
+        className="opacity-0 group-hover:opacity-100 text-ink-faint hover:text-white px-1 text-xs"
       >
         ✕
       </button>
@@ -110,12 +110,12 @@ export default function SidebarContent({ onNavigate }: { onNavigate?: () => void
       {/* Logo */}
       <div className="px-4 py-5 border-b border-gray-800 shrink-0">
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 bg-dd-purple rounded flex items-center justify-center text-white font-bold text-sm shrink-0">
+          <div className="w-8 h-8 rounded-lg bg-dd-purple flex items-center justify-center text-white font-display font-black text-sm shrink-0">
             DD
           </div>
           <div className="min-w-0">
-            <div className="font-semibold text-sm leading-none text-white truncate">Architecture</div>
-            <div className="text-gray-400 text-xs mt-0.5 truncate">Health Check</div>
+            <div className="font-display font-bold text-sm leading-none text-white truncate">Architecture</div>
+            <div className="text-ink-faint text-xs mt-0.5 truncate tracking-wide">Health Check</div>
           </div>
         </div>
       </div>
@@ -130,7 +130,7 @@ export default function SidebarContent({ onNavigate }: { onNavigate?: () => void
             placeholder="Search pages…"
             className="w-full bg-gray-800 text-gray-200 placeholder-gray-500 text-sm rounded pl-7 pr-2 py-1.5 outline-none focus:ring-1 focus:ring-dd-purple-light"
           />
-          <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-500 text-xs">⌕</span>
+          <span className="absolute left-2 top-1/2 -translate-y-1/2 text-ink-faint text-xs">⌕</span>
         </div>
       </div>
 
@@ -138,7 +138,7 @@ export default function SidebarContent({ onNavigate }: { onNavigate?: () => void
         {/* Pinned */}
         {pinned.length > 0 && (
           <div className="mb-4">
-            <div className="px-3 py-1 text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Pinned</div>
+            <div className="px-3 py-1 text-xs font-semibold text-ink-faint uppercase tracking-wider mb-1">Pinned</div>
             <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handlePinDragEnd}>
               <SortableContext items={pinned} strategy={verticalListSortingStrategy}>
                 <div className="space-y-0.5">
@@ -154,13 +154,13 @@ export default function SidebarContent({ onNavigate }: { onNavigate?: () => void
         {/* Recently viewed */}
         {!search && recentItems.length > 0 && (
           <div className="mb-4">
-            <div className="px-3 py-1 text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Recently viewed</div>
+            <div className="px-3 py-1 text-xs font-semibold text-ink-faint uppercase tracking-wider mb-1">Recently viewed</div>
             {recentItems.map((item) => (
               <NavLink
                 key={item.path}
                 to={item.path}
                 onClick={onNavigate}
-                className="flex items-center gap-2.5 px-3 py-1.5 rounded text-sm text-gray-400 hover:bg-gray-800 hover:text-white transition-colors"
+                className="flex items-center gap-2.5 px-3 py-1.5 rounded text-sm text-ink-faint hover:bg-gray-800 hover:text-white transition-colors"
               >
                 <span className="text-sm w-4 text-center shrink-0">{item.icon}</span>
                 <span className="truncate">{item.label}</span>
@@ -176,7 +176,7 @@ export default function SidebarContent({ onNavigate }: { onNavigate?: () => void
             <div key={hub.id} className="mb-2">
               <button
                 onClick={() => toggleGroup(hub.id)}
-                className="w-full flex items-center justify-between px-3 py-1 text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1 hover:text-gray-300"
+                className="w-full flex items-center justify-between px-3 py-1 text-xs font-semibold text-ink-faint uppercase tracking-wider mb-1 hover:text-gray-300"
               >
                 <span>{hub.label}</span>
                 <span className={clsx('transition-transform text-[10px]', isCollapsed && '-rotate-90')}>▾</span>
@@ -203,7 +203,7 @@ export default function SidebarContent({ onNavigate }: { onNavigate?: () => void
                         aria-label={isPinned(item.path) ? `Unpin ${item.label}` : `Pin ${item.label}`}
                         className={clsx(
                           'px-2 text-xs shrink-0',
-                          isPinned(item.path) ? 'text-amber-400' : 'text-gray-600 opacity-0 group-hover:opacity-100 hover:text-white'
+                          isPinned(item.path) ? 'text-amber-400' : 'text-ink-muted opacity-0 group-hover:opacity-100 hover:text-white'
                         )}
                       >
                         {isPinned(item.path) ? '★' : '☆'}
@@ -217,7 +217,7 @@ export default function SidebarContent({ onNavigate }: { onNavigate?: () => void
         })}
       </nav>
 
-      <div className="px-4 py-3 border-t border-gray-800 text-xs text-gray-500 shrink-0">
+      <div className="px-4 py-3 border-t border-gray-800 text-xs text-ink-faint shrink-0">
         <div>Read-only Datadog API</div>
         <div>Local SQLite storage</div>
       </div>

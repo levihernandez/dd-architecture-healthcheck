@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { OrgRepository } from '../../db/repositories/org.repository';
+import { ScorecardRepository } from '../../db/repositories/scorecard.repository';
 import { createClient } from '../../datadog/client';
 import { AppError } from '../middleware/error.middleware';
 import { logger } from '../../utils/logger';
@@ -34,6 +35,22 @@ router.get('/', (req, res) => {
   res.json(orgs);
 });
 
+// GET /api/orgs/overview — every org plus its latest completed-scan scorecard, for
+// multi-org rollup views. Must be registered before GET /:id or "overview" would be
+// treated as an org id.
+router.get('/overview', (req, res, next) => {
+  try {
+    const orgs = OrgRepository.findAll();
+    const scorecards = ScorecardRepository.findAllLatest();
+    const scorecardByOrg = new Map(scorecards.map((sc) => [sc.orgId, sc]));
+    const overview = orgs.map((org) => ({
+      ...org,
+      scorecard: scorecardByOrg.get(org.id) ?? null,
+    }));
+    res.json(overview);
+  } catch (err) { next(err); }
+});
+
 // GET /api/orgs/:id
 router.get('/:id', (req, res, next) => {
   try {
@@ -60,9 +77,20 @@ router.post('/', async (req, res, next) => {
       throw new AppError(`Invalid Datadog credentials: ${validation.error ?? 'Unknown error'}`, 400);
     }
 
-    const org = OrgRepository.create(body);
+    // This Datadog org is already connected (its detected org ID is the row's primary
+    // key) — treat this as a key rotation instead of creating a duplicate, empty-history org.
+    if (validation.orgId) {
+      const existing = OrgRepository.findById(validation.orgId);
+      if (existing) {
+        const updated = OrgRepository.update(existing.id, { apiKey: body.apiKey, appKey: body.appKey })!;
+        logger.info(`Reconnected existing org: ${updated.name} (${updated.id}) — keys rotated, DD org: ${validation.orgName}`);
+        res.status(200).json({ ...updated, ddOrgName: validation.orgName, ddOrgId: validation.orgId, reconnected: true });
+        return;
+      }
+    }
 
-    // Update with DD org info from validation
+    const org = OrgRepository.create({ ...body, ddOrgId: validation.orgId, ddOrgName: validation.orgName });
+
     if (validation.orgName || validation.orgId) {
       OrgRepository.updateScanStatus(org.id, 'pending', validation.orgName, validation.orgId);
     }

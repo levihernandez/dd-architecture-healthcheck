@@ -5,6 +5,7 @@ import Breadcrumbs from '../ui/Breadcrumbs';
 import { PopoverRoot, PopoverTrigger, PopoverContent } from '../ui/Popover';
 import { DrawerRoot, DrawerTrigger, DrawerContent } from '../ui/Drawer';
 import SidebarContent from './SidebarContent';
+import TemplateBadge from './TemplateBadge';
 
 export default function Header() {
   const { data: orgs = [] } = useOrgs();
@@ -38,7 +39,7 @@ export default function Header() {
   const selectedScan = completedScans.find((s) => s.id === effectiveScanId);
 
   return (
-    <header className="bg-white border-b border-border px-4 md:px-6 py-2.5 flex items-center justify-between shrink-0 z-30 gap-3">
+    <header className="bg-surface-subtle border-b border-border px-4 md:px-6 py-2.5 flex items-center justify-between shrink-0 z-30 gap-3">
       <div className="flex items-center gap-3 min-w-0">
         <DrawerRoot open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
           <DrawerTrigger className="md:hidden btn-ghost !p-1.5" aria-label="Open navigation">
@@ -53,7 +54,7 @@ export default function Header() {
 
       <div className="flex items-center gap-2 shrink-0">
         {runningScans > 0 && (
-          <div className="hidden sm:flex items-center gap-1.5 text-xs text-amber-700 bg-amber-50 px-2.5 py-1 rounded-full border border-amber-200">
+          <div className="hidden sm:flex items-center gap-1.5 text-xs text-amber-400 bg-amber-500/10 px-2.5 py-1 rounded-full border border-amber-500/25">
             <span className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-pulse" />
             {runningScans} scan{runningScans > 1 ? 's' : ''} running
           </div>
@@ -105,6 +106,8 @@ export default function Header() {
             )}
           </PopoverContent>
         </PopoverRoot>
+
+        <TemplateBadge orgId={effectiveOrgId} scanId={effectiveScanId} />
 
         <button
           onClick={() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', metaKey: true }))}

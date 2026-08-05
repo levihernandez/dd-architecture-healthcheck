@@ -10,17 +10,17 @@ import DataTable, { type Column } from '../components/common/DataTable';
 import type { CloudAlignmentRow } from '../types';
 
 const STATUS_CONFIG = {
-  aligned: { label: '✓ Aligned', color: 'bg-green-100 text-green-700', border: 'border-green-300' },
-  missing_in_dd: { label: '✗ Missing in DD', color: 'bg-red-100 text-red-700', border: 'border-red-300' },
-  key_drift: { label: '⚠ Key Drift', color: 'bg-amber-100 text-amber-700', border: 'border-amber-300' },
-  value_drift: { label: '⚡ Value Drift', color: 'bg-orange-100 text-orange-700', border: 'border-orange-300' },
-  dd_only: { label: 'DD Only', color: 'bg-blue-100 text-blue-700', border: 'border-blue-300' },
+  aligned: { label: '✓ Aligned', color: 'bg-green-500/15 text-green-400', border: 'border-green-500/30' },
+  missing_in_dd: { label: '✗ Missing in DD', color: 'bg-red-500/15 text-red-400', border: 'border-red-500/30' },
+  key_drift: { label: '⚠ Key Drift', color: 'bg-amber-500/15 text-amber-400', border: 'border-amber-500/30' },
+  value_drift: { label: '⚡ Value Drift', color: 'bg-orange-500/15 text-orange-400', border: 'border-orange-500/30' },
+  dd_only: { label: 'DD Only', color: 'bg-blue-500/15 text-blue-400', border: 'border-blue-500/30' },
 };
 
 const PROVIDER_COLORS: Record<string, string> = {
-  aws: 'bg-orange-100 text-orange-800',
-  azure: 'bg-blue-100 text-blue-800',
-  gcp: 'bg-green-100 text-green-800',
+  aws: 'bg-orange-500/15 text-orange-400',
+  azure: 'bg-blue-500/15 text-blue-400',
+  gcp: 'bg-green-500/15 text-green-400',
 };
 
 export default function CloudTagComparison() {
@@ -66,7 +66,7 @@ export default function CloudTagComparison() {
       render: (row) => (
         <div className="flex flex-wrap gap-1">
           {row.cloudTagValues.slice(0, 3).map((v) => (
-            <code key={v} className="text-xs bg-orange-50 border border-orange-200 text-orange-700 px-1 rounded">{v}</code>
+            <code key={v} className="text-xs bg-orange-500/10 border border-orange-500/30 text-orange-400 px-1 rounded">{v}</code>
           ))}
           {row.cloudTagValues.length > 3 && <span className="text-xs text-ink-faint">+{row.cloudTagValues.length - 3}</span>}
         </div>
@@ -79,7 +79,7 @@ export default function CloudTagComparison() {
       sortAccessor: (row) => row.ddTagKey ?? '',
       render: (row) =>
         row.ddTagKey
-          ? <code className="text-xs font-mono text-violet-700">{row.ddTagKey}</code>
+          ? <code className="text-xs font-mono text-violet-400">{row.ddTagKey}</code>
           : <span className="text-xs text-ink-faint">—</span>,
     },
     {
@@ -116,11 +116,11 @@ export default function CloudTagComparison() {
             {/* Summary cards */}
             <div className="grid grid-cols-5 gap-3">
               {[
-                { label: 'Alignment Score', value: alignment.alignmentScore, color: 'text-violet-700', suffix: '/100' },
-                { label: 'Aligned', value: alignment.alignedCount, color: 'text-green-700', suffix: '' },
-                { label: 'Missing in DD', value: alignment.cloudOnlyCount, color: 'text-red-600', suffix: '' },
-                { label: 'Key Drift', value: alignment.keyDriftCount, color: 'text-amber-700', suffix: '' },
-                { label: 'Value Drift', value: alignment.valueDriftCount, color: 'text-orange-700', suffix: '' },
+                { label: 'Alignment Score', value: alignment.alignmentScore, color: 'text-violet-400', suffix: '/100' },
+                { label: 'Aligned', value: alignment.alignedCount, color: 'text-green-400', suffix: '' },
+                { label: 'Missing in DD', value: alignment.cloudOnlyCount, color: 'text-red-400', suffix: '' },
+                { label: 'Key Drift', value: alignment.keyDriftCount, color: 'text-amber-400', suffix: '' },
+                { label: 'Value Drift', value: alignment.valueDriftCount, color: 'text-orange-400', suffix: '' },
               ].map((c) => (
                 <div key={c.label} className="card text-center">
                   <div className={`text-2xl font-bold ${c.color}`}>{c.value}{c.suffix}</div>
@@ -155,20 +155,20 @@ export default function CloudTagComparison() {
                       <div className="flex items-start justify-between gap-4">
                         <div className="flex-1">
                           <div className="flex items-center gap-2 mb-1">
-                            <code className="text-sm font-mono text-orange-700 bg-orange-50 px-1.5 py-0.5 rounded border border-orange-200">{gap.cloudKey}</code>
+                            <code className="text-sm font-mono text-orange-400 bg-orange-500/10 px-1.5 py-0.5 rounded border border-orange-500/30">{gap.cloudKey}</code>
                             <span className="text-ink-faint">→</span>
-                            <code className="text-sm font-mono text-violet-700 bg-violet-50 px-1.5 py-0.5 rounded border border-violet-200">{gap.ddKey}</code>
+                            <code className="text-sm font-mono text-violet-400 bg-violet-500/10 px-1.5 py-0.5 rounded border border-violet-500/30">{gap.ddKey}</code>
                           </div>
                           <p className="text-xs text-ink-muted mb-2">
                             Present on {gap.presentOnCloudResources} cloud resources — {gap.missingInDd} not yet in Datadog
                           </p>
                           <div className="text-xs">
-                            <span className="font-semibold text-blue-600 uppercase tracking-wide">How: </span>
+                            <span className="font-semibold text-blue-400 uppercase tracking-wide">How: </span>
                             <span className="text-ink-muted">{gap.fixRecommendation}</span>
                           </div>
                         </div>
                         <div className="text-right shrink-0">
-                          <div className="text-xl font-bold text-red-600">{gap.missingInDd}</div>
+                          <div className="text-xl font-bold text-red-400">{gap.missingInDd}</div>
                           <div className="text-xs text-ink-faint">resources missing</div>
                         </div>
                       </div>
@@ -196,6 +196,8 @@ export default function CloudTagComparison() {
                 data={filtered}
                 rowKey={(row) => `${row.cloudProvider}-${row.cloudTagKey}`}
                 emptyMessage="No cloud tags detected. Ensure the Datadog AWS/Azure/GCP integration is enabled and tag collection is turned on."
+                searchable
+                pageSize={15}
               />
             </section>
           </>

@@ -167,7 +167,7 @@ export const TAG_DICTIONARY: TagDefinition[] = [
     why: 'Important for understanding network security posture, traffic patterns, and potential vulnerabilities. Enables network security teams to filter dashboards by segment and detect unexpected cross-segment communication. Required for zero-trust network architecture visibility.',
     how: 'Add network:<segment> to host extra_tags or cloud provider subnet tags (which sync via integration). For containers, add as a pod annotation or Kubernetes namespace label.',
     when: 'Apply at host provisioning time. Update if the host is moved to a different network segment.',
-    where: 'Infrastructure hosts, cloud instances, containers. Correlates with NPM/CNM for network flow analysis.',
+    where: 'Infrastructure hosts, cloud instances, containers. Correlates with CNM (Cloud Network Monitor) for network flow analysis.',
   },
   {
     key: 'compliance',
@@ -222,7 +222,7 @@ export const TAG_DICTIONARY: TagDefinition[] = [
     exampleValues: ['10.0.1.0/24', 'subnet-prod-web', 'subnet-db-tier'],
     what: 'Identifies the logical IP subnet or network subdivision where the resource resides.',
     why: 'Makes it easier to quickly identify which subnet an issue is occurring in during network troubleshooting — significantly reducing MTTD and MTTR. Essential for CNM container flow analysis and NDM device segmentation.',
-    how: 'For CNM, the Datadog Network Performance Monitoring agent auto-populates subnet from the host\'s network configuration. For NDM, add subnet:<cidr> to SNMP device tags. For DBM, add as a host-level tag on database hosts.',
+    how: 'For CNM, the Datadog Cloud Network Monitor agent auto-populates subnet from the host\'s network configuration. For NDM, add subnet:<cidr> to SNMP device tags. For DBM, add as a host-level tag on database hosts.',
     when: 'Apply at provisioning time for network devices and database hosts. For CNM, this is typically auto-detected.',
     where: 'Network devices (NDM), container flows (CNM), database hosts (DBM).',
   },

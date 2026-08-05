@@ -13,7 +13,7 @@ export function PopoverContent({ children, className, sideOffset = 8, ...props }
       <RadixPopover.Content
         sideOffset={sideOffset}
         className={clsx(
-          'z-50 rounded-lg border border-border bg-white shadow-popover animate-scale-in origin-top-right',
+          'z-50 rounded-lg border border-border bg-surface-subtle shadow-popover animate-scale-in origin-top-right',
           className
         )}
         {...props}

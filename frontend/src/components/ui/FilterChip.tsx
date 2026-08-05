@@ -17,7 +17,7 @@ function FilterChip({ label, active, count, onClick, onRemove }: FilterChipProps
         'inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors',
         active
           ? 'bg-dd-purple/10 border-dd-purple/30 text-dd-purple'
-          : 'bg-white border-border-strong text-ink-muted hover:bg-surface-subtle'
+          : 'bg-surface-subtle border-border-strong text-ink-muted hover:bg-surface-subtle'
       )}
     >
       <span>{label}</span>

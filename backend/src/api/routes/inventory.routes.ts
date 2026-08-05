@@ -1,6 +1,8 @@
 import { Router } from 'express';
 import { getDatabase } from '../../db/database';
 import { AppError } from '../middleware/error.middleware';
+import { analyzeHostGaps } from '../../assessment/host-gaps';
+import { parseHostRawJson, recommendProductsForHost } from '../../assessment/host-enrichment';
 
 const router = Router();
 
@@ -32,9 +34,37 @@ router.get('/hosts', (req, res, next) => {
     const hosts = db.prepare(
       `SELECT * FROM hosts WHERE org_id = ? AND scan_run_id = ? ${searchClause}
        ORDER BY has_env_tag ASC, host_name LIMIT ? OFFSET ?`
-    ).all(...params, pageSize, offset);
+    ).all(...params, pageSize, offset) as Array<Record<string, unknown>>;
 
-    res.json({ data: hosts, total, page, pageSize, totalPages: Math.ceil(total / pageSize) });
+    // (env, service) → service_name, for cross-referencing APM presence per host
+    // the same way the Instrumentation Gaps analysis does.
+    const serviceRows = db.prepare(
+      `SELECT service_name, env FROM services WHERE org_id = ? AND scan_run_id = ?`
+    ).all(orgId, scanRunId) as Array<{ service_name: string; env: string | null }>;
+    const serviceByEnvService = new Set(
+      serviceRows.map((s) => `${(s.env ?? '').toLowerCase()}|${s.service_name.toLowerCase()}`)
+    );
+
+    const enriched = hosts.map((h) => {
+      const { raw_json, ...rest } = h;
+      const meta = parseHostRawJson(raw_json as string | null);
+      const matched = meta.envTag && meta.serviceTag
+        && serviceByEnvService.has(`${meta.envTag.toLowerCase()}|${meta.serviceTag.toLowerCase()}`);
+      const hasApm = Boolean(matched) || meta.installedChecks.includes('trace');
+      const isBlindSpot = !hasApm && !h.has_env_tag && !h.has_service_tag;
+      return {
+        ...rest,
+        cloud_provider: meta.cloudProvider,
+        region: meta.region,
+        availability_zone: meta.availabilityZone,
+        instance_type: meta.instanceType,
+        installed_checks: meta.installedChecks,
+        has_apm: hasApm,
+        recommended_products: recommendProductsForHost(hasApm, isBlindSpot),
+      };
+    });
+
+    res.json({ data: enriched, total, page, pageSize, totalPages: Math.ceil(total / pageSize) });
   } catch (err) { next(err); }
 });
 
@@ -87,6 +117,81 @@ router.get('/monitors', (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// GET /api/inventory/dashboards
+router.get('/dashboards', (req, res, next) => {
+  try {
+    const { orgId, scanRunId, page, pageSize, search } = parseQuery(req as Parameters<typeof parseQuery>[0]);
+    if (!orgId) throw new AppError('orgId required', 400);
+    if (!scanRunId) throw new AppError('scanRunId required', 400);
+
+    const db = getDatabase();
+    const offset = (page - 1) * pageSize;
+    const searchClause = search ? 'AND title LIKE ?' : '';
+    const params: unknown[] = [orgId, scanRunId, ...(search ? [`%${search}%`] : [])];
+
+    const total = (db.prepare(
+      `SELECT COUNT(*) as c FROM dashboards WHERE org_id = ? AND scan_run_id = ? ${searchClause}`
+    ).get(...params) as { c: number })?.c ?? 0;
+
+    const dashboards = db.prepare(
+      `SELECT * FROM dashboards WHERE org_id = ? AND scan_run_id = ? ${searchClause}
+       ORDER BY widget_count DESC, title LIMIT ? OFFSET ?`
+    ).all(...params, pageSize, offset);
+
+    res.json({ data: dashboards, total, page, pageSize, totalPages: Math.ceil(total / pageSize) });
+  } catch (err) { next(err); }
+});
+
+// GET /api/inventory/synthetics
+router.get('/synthetics', (req, res, next) => {
+  try {
+    const { orgId, scanRunId, page, pageSize, search } = parseQuery(req as Parameters<typeof parseQuery>[0]);
+    if (!orgId) throw new AppError('orgId required', 400);
+    if (!scanRunId) throw new AppError('scanRunId required', 400);
+
+    const db = getDatabase();
+    const offset = (page - 1) * pageSize;
+    const searchClause = search ? 'AND test_name LIKE ?' : '';
+    const params: unknown[] = [orgId, scanRunId, ...(search ? [`%${search}%`] : [])];
+
+    const total = (db.prepare(
+      `SELECT COUNT(*) as c FROM synthetics_tests WHERE org_id = ? AND scan_run_id = ? ${searchClause}`
+    ).get(...params) as { c: number })?.c ?? 0;
+
+    const tests = db.prepare(
+      `SELECT * FROM synthetics_tests WHERE org_id = ? AND scan_run_id = ? ${searchClause}
+       ORDER BY has_notification ASC, test_name LIMIT ? OFFSET ?`
+    ).all(...params, pageSize, offset);
+
+    res.json({ data: tests, total, page, pageSize, totalPages: Math.ceil(total / pageSize) });
+  } catch (err) { next(err); }
+});
+
+// GET /api/inventory/slos
+router.get('/slos', (req, res, next) => {
+  try {
+    const { orgId, scanRunId, page, pageSize, search } = parseQuery(req as Parameters<typeof parseQuery>[0]);
+    if (!orgId) throw new AppError('orgId required', 400);
+    if (!scanRunId) throw new AppError('scanRunId required', 400);
+
+    const db = getDatabase();
+    const offset = (page - 1) * pageSize;
+    const searchClause = search ? 'AND slo_name LIKE ?' : '';
+    const params: unknown[] = [orgId, scanRunId, ...(search ? [`%${search}%`] : [])];
+
+    const total = (db.prepare(
+      `SELECT COUNT(*) as c FROM slos WHERE org_id = ? AND scan_run_id = ? ${searchClause}`
+    ).get(...params) as { c: number })?.c ?? 0;
+
+    const slos = db.prepare(
+      `SELECT * FROM slos WHERE org_id = ? AND scan_run_id = ? ${searchClause}
+       ORDER BY slo_name LIMIT ? OFFSET ?`
+    ).all(...params, pageSize, offset);
+
+    res.json({ data: slos, total, page, pageSize, totalPages: Math.ceil(total / pageSize) });
+  } catch (err) { next(err); }
+});
+
 // GET /api/inventory/tags
 router.get('/tags', (req, res, next) => {
   try {
@@ -136,6 +241,9 @@ router.get('/summary', (req, res, next) => {
       'SELECT COUNT(*) as c FROM hosts WHERE org_id = ? AND scan_run_id = ? AND has_env_tag = 1'
     ).get(orgId, scanRunId) as { c: number })?.c ?? 0;
     const totalHosts = count('hosts');
+    const openIncidents = (db.prepare(
+      "SELECT COUNT(*) as c FROM incidents WHERE org_id = ? AND scan_run_id = ? AND (state IS NULL OR state != 'resolved')"
+    ).get(orgId, scanRunId) as { c: number })?.c ?? 0;
 
     res.json({
       hosts: totalHosts,
@@ -150,6 +258,8 @@ router.get('/summary', (req, res, next) => {
       slos: count('slos'),
       tagKeys: count('tag_analysis'),
       envTagCoverage: totalHosts > 0 ? Math.round((hostEnvCoverage / totalHosts) * 100) : 0,
+      securityFindings: count('security_findings'),
+      openIncidents,
     });
   } catch (err) { next(err); }
 });
@@ -450,6 +560,17 @@ router.get('/cloud', (req, res, next) => {
       mappingGaps.push({ ddKey, cloudVariants: variants, found });
     }
 
+    // Cloud Cost Management config per provider
+    const costManagementRows = db.prepare(`
+      SELECT provider, configured, account_count FROM cost_management_config
+      WHERE org_id = ? AND scan_run_id = ?
+    `).all(orgId, scanRunId) as Array<{ provider: string; configured: number; account_count: number }>;
+    const costManagement = costManagementRows.map(r => ({
+      provider: r.provider,
+      configured: Boolean(r.configured),
+      accountCount: r.account_count,
+    }));
+
     res.json({
       accounts: accounts.map(a => ({
         provider: a.provider,
@@ -467,7 +588,21 @@ router.get('/cloud', (req, res, next) => {
       tagsBySource: bySource,
       mappingGaps,
       usingFallback: cloudTagRows.length === 0 && effectiveCloudTags.length > 0,
+      costManagement,
     });
+  } catch (err) { next(err); }
+});
+
+// GET /api/inventory/host-gaps — per-host instrumentation blind-spot analysis:
+// cloud placement, tag compliance, APM/CSPM/CWS/NPM coverage gaps with
+// why/what/how/cost/impact, service catalog maturity, and host-vs-serverless
+// app breakdown. See backend/src/assessment/host-gaps.ts.
+router.get('/host-gaps', (req, res, next) => {
+  try {
+    const { orgId, scanRunId } = parseQuery(req as Parameters<typeof parseQuery>[0]);
+    if (!orgId) throw new AppError('orgId required', 400);
+    if (!scanRunId) throw new AppError('scanRunId required', 400);
+    res.json(analyzeHostGaps(orgId, scanRunId));
   } catch (err) { next(err); }
 });
 

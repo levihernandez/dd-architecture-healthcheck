@@ -1,11 +1,21 @@
 import { getDatabase } from '../db/database';
 import { getOrgContextBlock } from '../api/routes/org-context.routes';
+import { resolvePageContext } from './page-context-map';
+import { maturityForPercentage } from './maturity';
+import { redactPII, redactOrgName } from './redact-context';
+import type { FindingCategory } from '../types/assessment.types';
 
-export function buildChatContext(orgId: string, scanId?: string): string {
+/** Builds the full context string handed to the AI provider. Never includes the
+ * org's real name/id — the org row is used only to look up its data, and any
+ * free-text field a human typed (org profile) gets scrubbed of the org's own
+ * name plus a generic PII sweep (emails, key-shaped tokens) before it's
+ * concatenated in. See redact-context.ts. */
+export function buildChatContext(orgId: string, scanId?: string, page?: string): string {
   const db = getDatabase();
 
   const org = db.prepare('SELECT * FROM orgs WHERE id = ?').get(orgId) as Record<string, unknown> | undefined;
   if (!org) return 'No organization data found.';
+  const orgName = org.name as string;
 
   let scan: Record<string, unknown> | undefined;
   if (scanId) {
@@ -15,7 +25,7 @@ export function buildChatContext(orgId: string, scanId?: string): string {
       "SELECT * FROM scan_runs WHERE org_id = ? AND status = 'completed' ORDER BY completed_at DESC LIMIT 1"
     ).get(orgId) as Record<string, unknown>;
   }
-  if (!scan) return `Organization: ${org.name} (${org.site}). No completed scans found — run a scan first.`;
+  if (!scan) return `This organization (site: ${org.site}) has no completed scans yet — run a scan first.`;
 
   const sid = scan.id as string;
 
@@ -120,6 +130,50 @@ export function buildChatContext(orgId: string, scanId?: string): string {
     'SELECT provider, COUNT(*) as c FROM cloud_accounts WHERE org_id=? AND scan_run_id=? GROUP BY provider'
   ).all(orgId, sid) as Array<{ provider: string; c: number }>;
 
+  // Integrations detail
+  const integRows = db.prepare(
+    'SELECT integration_name, integration_type, is_configured, is_enabled FROM integrations WHERE org_id=? AND scan_run_id=?'
+  ).all(orgId, sid) as Array<{ integration_name: string; integration_type: string | null; is_configured: number; is_enabled: number }>;
+  const integConfigured = integRows.filter(r => r.is_configured).length;
+  const integEnabled = integRows.filter(r => r.is_enabled).length;
+  const integByType: Record<string, number> = {};
+  integRows.forEach(r => { const t = r.integration_type ?? 'other'; integByType[t] = (integByType[t] ?? 0) + 1; });
+  const integNameHit = (kws: string[]) => integRows.filter(r => kws.some(k => r.integration_name.toLowerCase().includes(k))).length;
+
+  // Dashboards detail
+  const dashRows = db.prepare(
+    'SELECT widget_count, has_template_variables FROM dashboards WHERE org_id=? AND scan_run_id=?'
+  ).all(orgId, sid) as Array<{ widget_count: number | null; has_template_variables: number }>;
+  const emptyDash = dashRows.filter(d => (d.widget_count ?? 0) === 0).length;
+  const dashWithVars = dashRows.filter(d => d.has_template_variables).length;
+
+  // Network & Cloud detail
+  const ccmRows = db.prepare(
+    'SELECT provider, configured FROM cost_management_config WHERE org_id=? AND scan_run_id=?'
+  ).all(orgId, sid) as Array<{ provider: string; configured: number }>;
+  const npmProxy = integNameHit(['network']);
+  const ndmProxy = integNameHit(['snmp', 'ndm', 'cisco', 'juniper', 'palo_alto']);
+  const dbmProxy = integNameHit(['postgres', 'mysql', 'sqlserver', 'oracle', 'mongodb']);
+
+  // Security & incidents detail
+  const secBySev = db.prepare(
+    "SELECT severity, COUNT(*) as c FROM security_findings WHERE org_id=? AND scan_run_id=? GROUP BY severity"
+  ).all(orgId, sid) as Array<{ severity: string; c: number }>;
+  const secByCat = db.prepare(
+    "SELECT category, COUNT(*) as c FROM security_findings WHERE org_id=? AND scan_run_id=? GROUP BY category"
+  ).all(orgId, sid) as Array<{ category: string; c: number }>;
+  const secTotal = secBySev.reduce((s, r) => s + r.c, 0);
+  const secUnresolvedCritical = (db.prepare(
+    "SELECT COUNT(*) as c FROM security_findings WHERE org_id=? AND scan_run_id=? AND severity IN ('critical','high') AND (status IS NULL OR status NOT IN ('resolved','muted','skipped'))"
+  ).get(orgId, sid) as { c: number })?.c ?? 0;
+  const incBySev = db.prepare(
+    "SELECT severity, COUNT(*) as c FROM incidents WHERE org_id=? AND scan_run_id=? GROUP BY severity"
+  ).all(orgId, sid) as Array<{ severity: string; c: number }>;
+  const incOpen = (db.prepare(
+    "SELECT COUNT(*) as c FROM incidents WHERE org_id=? AND scan_run_id=? AND (state IS NULL OR state != 'resolved')"
+  ).get(orgId, sid) as { c: number })?.c ?? 0;
+  const incTotal = incBySev.reduce((s, r) => s + r.c, 0);
+
   // Scorecard
   const sc = db.prepare('SELECT * FROM scorecards WHERE org_id=? AND scan_run_id=?').get(orgId, sid) as Record<string, unknown> | undefined;
   const catScores: Record<string, number> = {};
@@ -130,13 +184,24 @@ export function buildChatContext(orgId: string, scanId?: string): string {
     } catch { /* ignore */ }
   }
 
-  // Top findings
-  const findings = db.prepare(`
-    SELECT severity, category, title, affected_count, total_count, percentage
-    FROM findings WHERE org_id=? AND scan_run_id=?
-    ORDER BY CASE severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
-             percentage DESC LIMIT 12
-  `).all(orgId, sid) as Array<{
+  // Page focus: if the caller told us which page/category the user is looking at,
+  // scope findings to that category and lead with an explicit maturity statement.
+  const pageContext = resolvePageContext(page);
+
+  const findings = pageContext
+    ? db.prepare(`
+        SELECT severity, category, title, affected_count, total_count, percentage
+        FROM findings WHERE org_id=? AND scan_run_id=? AND category=?
+        ORDER BY CASE severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
+                 percentage DESC LIMIT 10
+      `).all(orgId, sid, pageContext.category)
+    : db.prepare(`
+        SELECT severity, category, title, affected_count, total_count, percentage
+        FROM findings WHERE org_id=? AND scan_run_id=?
+        ORDER BY CASE severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
+                 percentage DESC LIMIT 12
+      `).all(orgId, sid);
+  const typedFindings = findings as Array<{
     severity: string; category: string; title: string;
     affected_count: number; total_count: number; percentage: number;
   }>;
@@ -144,33 +209,21 @@ export function buildChatContext(orgId: string, scanId?: string): string {
   const pct = (n: number, d: number) => d > 0 ? Math.round((n / d) * 100) : 0;
   const tier = hosts < 50 ? 'Startup (<50)' : hosts < 250 ? 'Growth (50-250)' : hosts < 1000 ? 'Mid-Market (250-999)' : 'Enterprise (1000+)';
 
-  const orgProfileBlock = getOrgContextBlock(orgId);
+  const orgProfileBlock = redactPII(redactOrgName(getOrgContextBlock(orgId), orgName));
 
-  return `${orgProfileBlock ? orgProfileBlock + '\n\n' : ''}=== DATADOG ORG CONTEXT ===
-Org Name: ${org.name} | Site: ${org.site}
-Scan Date: ${scan.completed_at ?? scan.started_at}
-Cloud Accounts: ${cloudRows.map(r => `${r.provider}(${r.c})`).join(', ') || 'none detected'}
-
-=== INFRASTRUCTURE INVENTORY ===
-Infrastructure Hosts: ${hosts}  (tier: ${tier})
-APM Services (active): ${services}
-Monitors: ${monitors}
-Dashboards: ${dashboards}
-Synthetics Tests: ${synthTests} total (${apiTests} API / ${browserTests} browser)
-Log Indexes: ${logsIndexes}
-SLOs: ${slos}
-Integrations configured: ${integrations}
-
-=== UNIFIED SERVICE TAGGING (UST) COVERAGE — ALL HOSTS ===
+  // Existing per-domain detail blocks, keyed by category — computed unconditionally
+  // above (cheap), assembled conditionally below based on the page focus.
+  const detailBlocks: Partial<Record<FindingCategory, string>> = {
+    unified_tagging: `=== UNIFIED SERVICE TAGGING (UST) COVERAGE — ALL HOSTS ===
   env:     ${envCov}%  ${envCov >= 80 ? '✓ Good' : envCov >= 50 ? '△ Partial' : '✗ Critical gap'}
   service: ${svcCov}%  ${svcCov >= 80 ? '✓ Good' : svcCov >= 50 ? '△ Partial' : '✗ Critical gap'}
   version: ${verCov}%  ${verCov >= 80 ? '✓ Good' : verCov >= 50 ? '△ Partial' : '✗ Critical gap'}
   team:    ${teamCov}%  ${teamCov >= 80 ? '✓ Good' : teamCov >= 50 ? '△ Partial' : '✗ Critical gap'}
 Total unique tag keys in org: ${tagRows.length}
 High-cardinality keys (>50 unique values): ${highCard.length}
-Top keys by cardinality: ${topByCard.join(', ') || 'none'}
+Top keys by cardinality: ${topByCard.join(', ') || 'none'}`,
 
-=== CUSTOM METRICS ASSESSMENT ===
+    cost_optimization: `=== CUSTOM METRICS ASSESSMENT ===
 Estimated custom metric volume: ~${estCM.toLocaleString()}
 Typical standard allotment (150/host): ~${standardAllotment.toLocaleString()}
 On-demand risk level: ${cmRisk}
@@ -185,9 +238,9 @@ At 100/host standard allotment: ~${hosts * 100} custom metrics included
 At 200/host (higher tier): ~${hosts * 200} custom metrics included
 APM hosts may be billed separately if on a dedicated APM SKU
 Container hosts: typically billed at a fraction of infra host rate (0.05–0.25× per container)
-Note: Untagged hosts cannot be attributed to teams or services — they inflate costs without accountability.
+Note: Untagged hosts cannot be attributed to teams or services — they inflate costs without accountability.`,
 
-=== LOG INDEXING ANALYSIS ===
+    logs_health: `=== LOG INDEXING ANALYSIS ===
 Total log indexes: ${logsIndexes}
 Total daily limit configured: ${totalDailyLimit > 0 ? `${totalDailyLimit.toLocaleString()} events/day across all indexes` : 'NO LIMITS SET — all ingested logs are indexed (major cost risk)'}
 Rate-limited indexes (hitting daily cap): ${rateLimited.length > 0 ? rateLimited.join(', ') : 'none'}
@@ -195,9 +248,9 @@ Total exclusion filters across all indexes: ${totalExclFilters}${totalExclFilter
 Retention distribution: ${Object.entries(retDist).map(([d, n]) => `${n}× ${d}`).join(', ') || 'unknown'}
 Retention range: ${retentions.length ? `${Math.min(...retentions)}d – ${Math.max(...retentions)}d` : 'unknown'}
 Flex Logs indexes detected: 0 (all logs on standard indexed tier — opportunity for cold-tier cost reduction)
-Key cost levers: (1) exclusion filters on noisy indexes, (2) Flex Logs for low-query data, (3) retention reduction, (4) log-to-metric conversion for high-volume debug logs
+Key cost levers: (1) exclusion filters on noisy indexes, (2) Flex Logs for low-query data, (3) retention reduction, (4) log-to-metric conversion for high-volume debug logs`,
 
-=== APM / TRACE INTELLIGENCE ===
+    service_architecture: `=== APM / TRACE INTELLIGENCE ===
 APM services: ${services}
   env tag:     ${sWithEnv}/${services} (${pct(sWithEnv, services)}%)
   version tag: ${sWithVer}/${services} (${pct(sWithVer, services)}%)
@@ -205,24 +258,98 @@ APM services: ${services}
   in Service Catalog: ${sInCatalog}/${services} (${pct(sInCatalog, services)}%)
 Default trace ingestion: all spans from DD Agent; default retention filter keeps 1 span/resource/endpoint/operation per minute
 Default indexing: 15% of ingested spans (Datadog Intelligent Sampling)
-Key cost levers: (1) head-based sampling client-side, (2) retention filter tuning per service, (3) exclude health-check spans, (4) Span Summary (Metrics from Spans) for aggregate visibility without indexing
+Key cost levers: (1) head-based sampling client-side, (2) retention filter tuning per service, (3) exclude health-check spans, (4) Span Summary (Metrics from Spans) for aggregate visibility without indexing`,
 
-=== SYNTHETICS ANALYSIS ===
+    synthetics_health: `=== SYNTHETICS ANALYSIS ===
 API tests: ${apiTests}
 Browser tests: ${browserTests}
 Average locations per test: ${avgLocs}
 Estimated monthly test runs: ~${estMonthlyRuns.toLocaleString()}
   (API: 288 runs/day × locations; Browser: 96 runs/day × locations, estimated at 15-min interval)
 Cost note: Browser test ≈ 4–10× API test cost per run. Each additional location multiplies cost linearly.
-Key levers: (1) reduce browser → API where no UI assertion needed, (2) lower frequency for non-critical tests, (3) reduce locations for internal services, (4) remove deprecated test duplicate runs
+Key levers: (1) reduce browser → API where no UI assertion needed, (2) lower frequency for non-critical tests, (3) reduce locations for internal services, (4) remove deprecated test duplicate runs`,
 
-=== MONITORS HEALTH ===
+    monitors_health: `=== MONITORS HEALTH ===
 Total monitors: ${monitors}
   with env tag:     ${mWithEnv}/${monitors} (${pct(mWithEnv, monitors)}%)
   with service tag: ${mWithSvc}/${monitors} (${pct(mWithSvc, monitors)}%)
   with team tag:    ${mWithTeam}/${monitors} (${pct(mWithTeam, monitors)}%)
 Currently alerting: ${alerting}
-Muted monitors: ${muted}${muted > monitors * 0.2 ? ' ← HIGH — >20% of monitors muted, indicates alert fatigue' : ''}
+Muted monitors: ${muted}${muted > monitors * 0.2 ? ' ← HIGH — >20% of monitors muted, indicates alert fatigue' : ''}`,
+
+    integration_hygiene: `=== INTEGRATION HYGIENE ===
+Total integrations detected: ${integrations}
+  Configured: ${integConfigured}/${integrations} (${pct(integConfigured, integrations)}%)
+  Enabled:    ${integEnabled}/${integrations} (${pct(integEnabled, integrations)}%)
+By type: ${Object.entries(integByType).sort((a, b) => b[1] - a[1]).map(([t, n]) => `${t}(${n})`).join(', ') || 'none'}
+Configured-but-not-enabled integrations represent silent data gaps — metrics/logs stop flowing without an obvious error.
+Cloud accounts detected: ${cloudRows.map(r => `${r.provider}(${r.c})`).join(', ') || 'none'} — verify each has a matching cloud integration configured and enabled here.
+Key levers: (1) enable configured-but-disabled integrations, (2) add missing integrations for detected cloud providers/databases, (3) remove stale/unused integrations that add noise without value.`,
+
+    dashboards_health: `=== DASHBOARDS ===
+Total dashboards: ${dashboards}
+Empty dashboards (0 widgets): ${emptyDash}${emptyDash > 0 ? ' ← candidates for cleanup, they add clutter without value' : ''}
+Dashboards using template variables: ${dashWithVars}/${dashboards} (${pct(dashWithVars, dashboards)}%) — template variables (env/service/etc.) let one dashboard serve many teams instead of duplicating per-team copies.
+Key levers: (1) delete or populate empty dashboards, (2) convert single-team dashboards to templated ones with variables, (3) standardize on Service Catalog-linked dashboards over ad hoc ones.`,
+
+    network_cloud: `=== NETWORK & CLOUD ===
+Cloud accounts: ${cloudRows.map(r => `${r.provider}(${r.c})`).join(', ') || 'none detected'}
+Cloud Cost Management configured: ${ccmRows.filter(r => r.configured).map(r => r.provider).join(', ') || 'none'} / detected providers: ${ccmRows.map(r => r.provider).join(', ') || 'none'}
+CNM (Cloud Network Monitor, formerly Network Performance Monitoring/NPM) — proxy-detected via integration name match: ${npmProxy} integration(s) matched
+NDM (Network Device Monitoring) — proxy-detected via SNMP/vendor integration name match: ${ndmProxy} integration(s) matched
+DBM (Database Monitoring) — proxy-detected via Postgres/MySQL/Oracle/MongoDB/SQL Server integration name match: ${dbmProxy} integration(s) matched
+Caveat: CNM/NDM/DBM have no dedicated collector in this tool yet — these are heuristic signals from integration names, not confirmed product usage. A 0 count may mean "not in use" or "not detectable by this heuristic" — advise the user to verify directly in Datadog if it matters for their decision.
+Key levers: (1) enable Cloud Cost Management for every connected cloud provider, (2) confirm CNM/NDM/DBM usage manually if this org runs databases or network infra, (3) ensure cloud tags propagate to hosts for cost attribution.`,
+
+    governance: `=== GOVERNANCE & ACCESS ===
+Users: ${signals.find(s => s.product === 'governance' && s.signal === 'user_count')?.value ?? 'unknown'}
+Roles: ${signals.find(s => s.product === 'governance' && s.signal === 'role_count')?.value ?? 'unknown'}
+Unified tagging (ownership signal — see UST block above): env ${envCov}%, service ${svcCov}%, team ${teamCov}%
+Team tag coverage on hosts is the primary proxy for "is there a clear owning team" — low team-tag coverage means alerts/dashboards/services can't be reliably routed to the right humans.
+Key levers: (1) define a Datadog Team per engineering team and assign service ownership in the Service Catalog, (2) enforce team: tag at ingestion via Agent config or admission controllers, (3) review roles/permissions for least-privilege access, especially for API/App keys with broad scopes.`,
+
+    security_posture: `=== SECURITY POSTURE & INCIDENTS ===
+Security findings: ${secTotal}
+  By severity: ${secBySev.map(r => `${r.severity ?? 'unknown'}(${r.c})`).join(', ') || 'none'}
+  By product/category (CSPM/CWS/ASM/etc.): ${secByCat.map(r => `${r.category ?? 'unknown'}(${r.c})`).join(', ') || 'none'}
+  Unresolved critical/high: ${secUnresolvedCritical}${secUnresolvedCritical > 0 ? ' ← prioritize these first' : ''}
+Incidents: ${incTotal} total, ${incOpen} currently open
+  By severity: ${incBySev.map(r => `${r.severity ?? 'unknown'}(${r.c})`).join(', ') || 'none'}
+Cloud Cost Management configured: ${ccmRows.filter(r => r.configured).length}/${ccmRows.length || 0} providers — unrelated to security directly, but flagged here since it's collected alongside security/cost posture data.
+Key levers: (1) triage unresolved critical/high findings first, (2) ensure every open incident has an assigned owner and postmortem plan, (3) close the loop on stale open incidents.`,
+  };
+
+  const pageFocusBlock = pageContext ? (() => {
+    const catPct = catScores[pageContext.category];
+    const maturity = catPct !== undefined ? maturityForPercentage(catPct) : 'Unknown (no score yet)';
+    return `=== CURRENT PAGE FOCUS ===
+The user is viewing: ${pageContext.label}
+Domain: ${pageContext.category.replace(/_/g, ' ')}
+Maturity: ${maturity}${catPct !== undefined ? ` (${catPct}%)` : ''}
+Prioritize assessing THIS domain's maturity, biggest gap, and next steps — see the findings and detail block below for this domain specifically.
+`;
+  })() : '';
+
+  const detailSection = pageContext
+    ? (detailBlocks[pageContext.category] ?? `(No dedicated deep-dive block for ${pageContext.category.replace(/_/g, ' ')} yet — use the scorecard and findings below.)`)
+    : Object.values(detailBlocks).join('\n\n');
+
+  const assembled = `${orgProfileBlock ? orgProfileBlock + '\n\n' : ''}${pageFocusBlock ? pageFocusBlock + '\n' : ''}=== DATADOG ORG CONTEXT ===
+Site: ${org.site} (org name/id withheld from AI context by design — refer to "this organization")
+Scan Date: ${scan.completed_at ?? scan.started_at}
+Cloud Accounts: ${cloudRows.map(r => `${r.provider}(${r.c})`).join(', ') || 'none detected'}
+
+=== INFRASTRUCTURE INVENTORY ===
+Infrastructure Hosts: ${hosts}  (tier: ${tier})
+APM Services (active): ${services}
+Monitors: ${monitors}
+Dashboards: ${dashboards}
+Synthetics Tests: ${synthTests} total (${apiTests} API / ${browserTests} browser)
+Log Indexes: ${logsIndexes}
+SLOs: ${slos}
+Integrations configured: ${integrations}
+
+${detailSection}
 
 === PRODUCT USAGE SIGNALS ===
 ${signals.length > 0
@@ -233,7 +360,11 @@ ${signals.length > 0
 Overall Score: ${sc?.overall_score ?? 'N/A'}/100  Grade: ${sc?.overall_grade ?? 'N/A'}
 ${Object.entries(catScores).map(([cat, pct]) => `  ${cat.replace(/_/g, ' ')}: ${pct}%`).join('\n')}
 
-=== TOP FINDINGS (prioritized by severity) ===
-${findings.map(f => `  [${f.severity.toUpperCase()}] ${f.title} — ${f.affected_count}/${f.total_count} (${Math.round(f.percentage)}%)`).join('\n') || '  No findings recorded'}
+=== ${pageContext ? `${pageContext.label.toUpperCase()} FINDINGS` : 'TOP FINDINGS (prioritized by severity)'} ===
+${typedFindings.map(f => `  [${f.severity.toUpperCase()}] ${f.title} — ${f.affected_count}/${f.total_count} (${Math.round(f.percentage)}%)`).join('\n') || '  No findings recorded'}
 `.trim();
+
+  // Final defense-in-depth sweep — catches anything identifier-shaped that
+  // slipped through a free-text or raw-string-column field above.
+  return redactPII(redactOrgName(assembled, orgName));
 }

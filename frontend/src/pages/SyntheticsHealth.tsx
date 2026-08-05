@@ -15,7 +15,7 @@ import type { FindingSeverity } from '../types';
 function DDLink({ href, label = 'Open in Datadog' }: { href: string; label?: string }) {
   return (
     <a href={href} target="_blank" rel="noopener noreferrer"
-      className="inline-flex items-center gap-1 text-xs text-violet-600 hover:text-violet-800 font-medium shrink-0">
+      className="inline-flex items-center gap-1 text-xs text-violet-400 hover:text-violet-400 font-medium shrink-0">
       {label} ↗
     </a>
   );
@@ -103,11 +103,11 @@ export default function SyntheticsHealth() {
             <div className="space-y-2">
               <h2 className="text-sm font-semibold text-ink-muted uppercase tracking-wide">Active Signals</h2>
               {alertTests.length > 0 && (
-                <div className="flex items-start gap-3 p-3 rounded-lg border bg-red-50 border-red-200">
+                <div className="flex items-start gap-3 p-3 rounded-lg border bg-red-500/10 border-red-500/30">
                   <span className="text-lg">🚨</span>
                   <div className="flex-1">
-                    <div className="text-sm font-semibold text-red-800">{alertTests.length} test{alertTests.length > 1 ? 's' : ''} currently alerting</div>
-                    <div className="text-xs text-red-600 mt-0.5">
+                    <div className="text-sm font-semibold text-red-400">{alertTests.length} test{alertTests.length > 1 ? 's' : ''} currently alerting</div>
+                    <div className="text-xs text-red-400 mt-0.5">
                       {alertTests.slice(0, 3).map(t => t.name).join(', ')}{alertTests.length > 3 ? ` +${alertTests.length - 3} more` : ''}
                     </div>
                   </div>
@@ -115,11 +115,11 @@ export default function SyntheticsHealth() {
                 </div>
               )}
               {pausedTests.length > 0 && (
-                <div className="flex items-start gap-3 p-3 rounded-lg border bg-amber-50 border-amber-200">
+                <div className="flex items-start gap-3 p-3 rounded-lg border bg-amber-500/10 border-amber-500/30">
                   <span className="text-lg">⏸</span>
                   <div className="flex-1">
-                    <div className="text-sm font-semibold text-amber-800">{pausedTests.length} test{pausedTests.length > 1 ? 's' : ''} paused</div>
-                    <div className="text-xs text-amber-600 mt-0.5">Paused tests provide no monitoring coverage. Review and resume or delete.
+                    <div className="text-sm font-semibold text-amber-400">{pausedTests.length} test{pausedTests.length > 1 ? 's' : ''} paused</div>
+                    <div className="text-xs text-amber-400 mt-0.5">Paused tests provide no monitoring coverage. Review and resume or delete.
                       <br />{pausedTests.slice(0, 4).map(t => t.name).join(', ')}{pausedTests.length > 4 ? ` +${pausedTests.length - 4}` : ''}
                     </div>
                   </div>
@@ -127,11 +127,11 @@ export default function SyntheticsHealth() {
                 </div>
               )}
               {singleLocationTests.length > 0 && (
-                <div className="flex items-start gap-3 p-3 rounded-lg border bg-blue-50 border-blue-100">
+                <div className="flex items-start gap-3 p-3 rounded-lg border bg-blue-500/10 border-blue-100">
                   <span className="text-lg">📍</span>
                   <div className="flex-1">
-                    <div className="text-sm font-medium text-blue-800">{singleLocationTests.length} test{singleLocationTests.length > 1 ? 's' : ''} running from a single location</div>
-                    <div className="text-xs text-blue-600 mt-0.5">Single-location tests can't distinguish regional outages from global ones. Use 3+ locations for critical paths.</div>
+                    <div className="text-sm font-medium text-blue-400">{singleLocationTests.length} test{singleLocationTests.length > 1 ? 's' : ''} running from a single location</div>
+                    <div className="text-xs text-blue-400 mt-0.5">Single-location tests can't distinguish regional outages from global ones. Use 3+ locations for critical paths.</div>
                   </div>
                   <DDLink href={ddUrl.syntheticsTests(base)} label="Edit tests" />
                 </div>
@@ -172,7 +172,7 @@ export default function SyntheticsHealth() {
                     { label: '6+ locations', count: details.filter(t => t.locations >= 6).length, risk: false },
                   ].filter(r => r.count > 0).map(row => (
                     <div key={row.label} className="flex items-center gap-3">
-                      <span className={`w-24 text-xs ${row.risk ? 'text-amber-600 font-medium' : 'text-ink-muted'}`}>{row.label}</span>
+                      <span className={`w-24 text-xs ${row.risk ? 'text-amber-400 font-medium' : 'text-ink-muted'}`}>{row.label}</span>
                       <div className="flex-1 bg-surface-sunken rounded-full h-2">
                         <div className={`h-2 rounded-full ${row.risk ? 'bg-amber-400' : 'bg-green-400'}`}
                           style={{ width: `${totalTests > 0 ? (row.count / totalTests) * 100 : 0}%` }} />
@@ -202,34 +202,30 @@ export default function SyntheticsHealth() {
                     <span className="text-sm text-ink max-w-[220px] truncate inline-block" title={t.name}>{t.name}</span>
                   ) },
                   { key: 'type', header: 'Type', sortable: true, render: (t) => (
-                    <span className="text-xs px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded capitalize">{t.type}</span>
+                    <span className="text-xs px-1.5 py-0.5 bg-surface-sunken text-ink-muted rounded capitalize">{t.type}</span>
                   ) },
                   { key: 'status', header: 'Status', sortable: true, render: (t) => (
                     <span className={`text-xs px-1.5 py-0.5 rounded font-medium capitalize ${
-                      t.status === 'alert' ? 'bg-red-100 text-red-700'
-                      : t.status === 'paused' ? 'bg-gray-200 text-gray-600'
-                      : t.status === 'ok' ? 'bg-green-100 text-green-700'
-                      : 'bg-gray-100 text-gray-500'}`}>
+                      t.status === 'alert' ? 'bg-red-500/15 text-red-400'
+                      : t.status === 'paused' ? 'bg-surface-sunken text-ink-muted'
+                      : t.status === 'ok' ? 'bg-green-500/15 text-green-400'
+                      : 'bg-surface-sunken text-ink-faint'}`}>
                       {t.status}
                     </span>
                   ) },
                   { key: 'locations', header: 'Locations', sortable: true, render: (t) => (
-                    <span className={`text-xs font-mono ${t.locations <= 1 ? 'text-amber-600 font-semibold' : 'text-ink'}`}>{t.locations}</span>
+                    <span className={`text-xs font-mono ${t.locations <= 1 ? 'text-amber-400 font-semibold' : 'text-ink'}`}>{t.locations}</span>
                   ) },
                   { key: 'estimatedMonthlyRuns', header: 'Est. Runs/mo', sortable: true, render: (t) => (
                     <span className="text-xs text-ink-muted font-mono">{fmtNum(t.estimatedMonthlyRuns)}</span>
                   ) },
                 ]}
-                data={details.slice(0, 30)}
+                data={details}
                 rowKey={(t) => t.name}
                 emptyMessage="No synthetic tests found"
+                searchable
+                pageSize={15}
               />
-              {details.length > 30 && (
-                <div className="px-4 py-2 text-xs text-ink-faint border-t border-border bg-surface-subtle flex items-center justify-between">
-                  <span>Showing 30 of {details.length} tests</span>
-                  <DDLink href={ddUrl.syntheticsTests(base)} label="View all in Datadog" />
-                </div>
-              )}
             </div>
           )}
 
@@ -272,8 +268,8 @@ export default function SyntheticsHealth() {
                 { label: 'Private locations', href: `${base}/synthetics/settings/private-locations` },
               ].map(({ label, href }) => (
                 <a key={label} href={href} target="_blank" rel="noopener noreferrer"
-                  className="flex items-center justify-between px-3 py-2.5 rounded-lg border border-border hover:border-violet-300 hover:bg-violet-50/30 transition-colors group">
-                  <span className="text-sm text-ink-muted group-hover:text-violet-700">{label}</span>
+                  className="flex items-center justify-between px-3 py-2.5 rounded-lg border border-border hover:border-violet-500/30 hover:bg-violet-500/30 transition-colors group">
+                  <span className="text-sm text-ink-muted group-hover:text-violet-400">{label}</span>
                   <span className="text-ink-faint group-hover:text-violet-500">↗</span>
                 </a>
               ))}

@@ -1,6 +1,14 @@
 import { Router } from 'express';
 import { getDatabase } from '../../db/database';
 import { AppError } from '../middleware/error.middleware';
+import { parseUsageSummary, parseCostJson, buildProductBreakdown } from '../../assessment/cost-data';
+import {
+  domainCost, PRICING_ESTIMATES,
+  infrastructureRecommendations, customMetricsRecommendations, logsRecommendations,
+  syntheticsRecommendations, apmRecommendations, integrationsRecommendations,
+  monitorsRecommendations, sloRecommendations, governanceRecommendations,
+  rumRecommendations, fleetRecommendations, securityRecommendations, proxyRecommendations,
+} from '../../assessment/analytics-insights';
 
 const router = Router();
 
@@ -16,6 +24,15 @@ router.get('/', (req, res, next) => {
     const c = (table: string, where = '') =>
       (db.prepare(`SELECT COUNT(*) as n FROM ${table} WHERE org_id=? AND scan_run_id=? ${where}`)
         .get(orgId, scanRunId) as { n: number }).n;
+
+    // Real billing data, when this scan collected it — used to prefer actual cost
+    // over list-price estimates per domain below (falls back to null if absent).
+    const usageRow = db.prepare(
+      'SELECT usage_json, cost_json FROM usage_summary WHERE org_id=? AND scan_run_id=?'
+    ).get(orgId, scanRunId) as { usage_json: string; cost_json: string | null } | undefined;
+    const { latestUsage } = usageRow ? parseUsageSummary(usageRow.usage_json) : { latestUsage: {} };
+    const costCharges = usageRow ? parseCostJson(usageRow.cost_json) : [];
+    const products = buildProductBreakdown(latestUsage, costCharges);
 
     // ── Infrastructure ─────────────────────────────────────────────────────────
     const totalHosts = c('hosts');
@@ -118,6 +135,18 @@ router.get('/', (req, res, next) => {
       integByType[t] = (integByType[t] ?? 0) + 1;
     }
 
+    // Four mutually-exclusive status buckets (sum to integRows.length):
+    // installed = actively enabled/receiving data; broken = the probe itself hit
+    // an error or permission problem; idle = configured but not enabled, with no
+    // error — a silent gap rather than a technical failure; notInstalled = nothing
+    // configured at all. "status" here is this app's own probe outcome string
+    // (see integrations.collector.ts), not a field Datadog's API returns directly.
+    const ERROR_STATUSES = new Set(['error', 'permission_denied']);
+    const integInstalled = integRows.filter(r => r.is_enabled).length;
+    const integBroken = integRows.filter(r => !r.is_enabled && ERROR_STATUSES.has(r.status ?? '')).length;
+    const integIdle = integRows.filter(r => !r.is_enabled && r.is_configured && !ERROR_STATUSES.has(r.status ?? '')).length;
+    const integNotInstalled = integRows.length - integInstalled - integBroken - integIdle;
+
     // ── Synthetics ─────────────────────────────────────────────────────────────
     const synthRows = db.prepare(`
       SELECT test_name, test_type, status, location_count, tags
@@ -150,6 +179,12 @@ router.get('/', (req, res, next) => {
     const slos = c('slos');
     const monitors = c('monitors');
     const dashboards = c('dashboards');
+    const dashboardsOotb = c('dashboards', 'AND is_read_only=1');
+    const dashboardsByAuthor = db.prepare(`
+      SELECT COALESCE(author_handle, 'Unknown') as author, COUNT(*) as n
+      FROM dashboards WHERE org_id=? AND scan_run_id=? AND is_read_only=0
+      GROUP BY author ORDER BY n DESC
+    `).all(orgId, scanRunId) as Array<{ author: string; n: number }>;
 
     // ── RUM ─────────────────────────────────────────────────────────────────────
     const rumApps = db.prepare(`
@@ -187,6 +222,40 @@ router.get('/', (req, res, next) => {
       versionBuckets[bucket] = (versionBuckets[bucket] ?? 0) + (cnt as number);
     }
 
+    // ── Security findings ───────────────────────────────────────────────────────
+    const totalSecurityFindings = c('security_findings');
+    const securityBySeverity = db.prepare(
+      "SELECT severity, COUNT(*) as n FROM security_findings WHERE org_id=? AND scan_run_id=? GROUP BY severity"
+    ).all(orgId, scanRunId) as Array<{ severity: string; n: number }>;
+    const securityByCategory = db.prepare(
+      "SELECT category, COUNT(*) as n FROM security_findings WHERE org_id=? AND scan_run_id=? GROUP BY category"
+    ).all(orgId, scanRunId) as Array<{ category: string; n: number }>;
+    const unresolvedCritical = (db.prepare(
+      "SELECT COUNT(*) as n FROM security_findings WHERE org_id=? AND scan_run_id=? AND severity IN ('critical','high') AND (status IS NULL OR status NOT IN ('resolved','muted','skipped'))"
+    ).get(orgId, scanRunId) as { n: number }).n;
+
+    // ── Product proxy detection (DBM/NPM/NDM have no dedicated collector yet —
+    // infer presence from matching integration names, same heuristic as Product Usage) ──
+    const integNameHit = (keywords: string[]) =>
+      integRows.filter(r => keywords.some(k => r.integration_name.toLowerCase().includes(k))).length;
+    const productProxies = {
+      npm: integNameHit(['network']),
+      ndm: integNameHit(['snmp', 'ndm', 'cisco', 'juniper', 'palo_alto']),
+      dbm: integNameHit(['postgres', 'mysql', 'sqlserver', 'oracle', 'mongodb']),
+    };
+
+    // ── Incidents ────────────────────────────────────────────────────────────────
+    const totalIncidents = c('incidents');
+    const openIncidentsCount = c('incidents', "AND (state IS NULL OR state != 'resolved')");
+    const incidentsBySeverity = db.prepare(
+      "SELECT severity, COUNT(*) as n FROM incidents WHERE org_id=? AND scan_run_id=? GROUP BY severity"
+    ).all(orgId, scanRunId) as Array<{ severity: string; n: number }>;
+
+    // ── Cloud Cost Management ───────────────────────────────────────────────────
+    const ccmConfig = db.prepare(
+      'SELECT provider, configured FROM cost_management_config WHERE org_id=? AND scan_run_id=?'
+    ).all(orgId, scanRunId) as Array<{ provider: string; configured: number }>;
+
     res.json({
       scannedAt: (db.prepare('SELECT completed_at FROM scan_runs WHERE id=?').get(scanRunId) as { completed_at: string | null } | undefined)?.completed_at,
       infrastructure: {
@@ -200,6 +269,18 @@ router.get('/', (req, res, next) => {
         },
         cloudAccounts: cloudRows,
         containers: containerSignal?.value ? parseInt(containerSignal.value) : null,
+        cost: domainCost(products, ['agent_host', 'infra_host'], {
+          volume: totalHosts, unitPrice: PRICING_ESTIMATES.infraHostMonthly, unit: 'hosts',
+        }),
+        recommendations: infrastructureRecommendations({
+          totalHosts,
+          tagCoverage: {
+            env: totalHosts > 0 ? Math.round(hostsWithEnv / totalHosts * 100) : 0,
+            service: totalHosts > 0 ? Math.round(hostsWithService / totalHosts * 100) : 0,
+            version: totalHosts > 0 ? Math.round(hostsWithVersion / totalHosts * 100) : 0,
+            team: totalHosts > 0 ? Math.round(hostsWithTeam / totalHosts * 100) : 0,
+          },
+        }),
       },
       customMetrics: {
         estimated: estCM,
@@ -212,6 +293,13 @@ router.get('/', (req, res, next) => {
           uniqueValues: t.unique_value_count,
           estimatedMetrics: Math.min(t.unique_value_count * 2, 500),
         })),
+        cost: domainCost(products, ['custom_ts', 'custom_metric'], {
+          volume: Math.ceil(estCM / 100), unitPrice: PRICING_ESTIMATES.customMetricsPer100Monthly, unit: '×100 custom metrics',
+        }),
+        recommendations: customMetricsRecommendations({
+          risk: cmRisk as 'low' | 'medium' | 'high', utilizationPct: cmPct100,
+          topDrivers: tagRows.filter(t => t.unique_value_count > 10).slice(0, 10).map(t => ({ key: t.tag_key, uniqueValues: t.unique_value_count })),
+        }),
       },
       logs: {
         totalIndexes: logRows.length,
@@ -223,11 +311,20 @@ router.get('/', (req, res, next) => {
         retentionDistribution: retentionDist,
         flexIndexCount: archiveSuggestions,
         indexDetails,
+        cost: domainCost(products, ['logs_ingested', 'indexed_events', 'logs_']),
+        recommendations: logsRecommendations({
+          totalIndexes: logRows.length, totalExclusionFilters, rateLimitedCount,
+          flexIndexCount: archiveSuggestions, totalDailyLimitEvents: totalDailyLimit,
+        }),
       },
       integrations: {
         total: integRows.length,
         configured: integRows.filter(r => r.is_configured).length,
         enabled: integRows.filter(r => r.is_enabled).length,
+        installed: integInstalled,
+        broken: integBroken,
+        idle: integIdle,
+        notInstalled: integNotInstalled,
         byType: Object.entries(integByType).map(([type, count]) => ({ type, count })).sort((a, b) => b.count - a.count),
         list: integRows.map(r => ({
           name: r.integration_name,
@@ -236,12 +333,21 @@ router.get('/', (req, res, next) => {
           isConfigured: Boolean(r.is_configured),
           isEnabled: Boolean(r.is_enabled),
         })),
+        recommendations: integrationsRecommendations({
+          total: integRows.length, configured: integRows.filter(r => r.is_configured).length, enabled: integRows.filter(r => r.is_enabled).length,
+        }),
       },
       synthetics: {
         apiTests,
         browserTests,
         estimatedMonthlyRuns,
         details: synthDetails,
+        cost: domainCost(products, ['synthetics_'], {
+          amount: (apiTests * 288 * 30 / 10000) * PRICING_ESTIMATES.syntheticsApiPer10k
+            + (browserTests * 96 * 30 / 1000) * PRICING_ESTIMATES.syntheticsBrowserPer1k,
+          note: `${apiTests} API + ${browserTests} browser tests at default run frequency, list price`,
+        }),
+        recommendations: syntheticsRecommendations({ apiTests, browserTests, details: synthDetails }),
       },
       apm: {
         totalServices,
@@ -249,10 +355,18 @@ router.get('/', (req, res, next) => {
         svcWithMonitor,
         svcWithSLO,
         slos,
+        cost: domainCost(products, ['apm_host'], {
+          volume: totalServices > 0 ? Math.max(1, Math.round(totalHosts * 0.3)) : 0, unitPrice: PRICING_ESTIMATES.apmHostMonthly, unit: 'APM hosts (est.)',
+        }),
+        recommendations: apmRecommendations({ totalServices, svcInCatalog, svcWithMonitor, svcWithSLO }),
       },
       observability: {
         monitors,
         dashboards,
+        dashboardBreakdown: {
+          ootb: dashboardsOotb,
+          byAuthor: dashboardsByAuthor.map((r) => ({ author: r.author, count: r.n })),
+        },
       },
       rum: {
         total: rumApps.length,
@@ -264,6 +378,8 @@ router.get('/', (req, res, next) => {
           framework: a.framework,
           createdAt: a.created_at_dd,
         })),
+        cost: domainCost(products, ['rum_']),
+        recommendations: rumRecommendations({ total: rumApps.length, byType: rumByType }),
       },
       fleet: {
         agentVersions: versionBuckets,
@@ -271,6 +387,32 @@ router.get('/', (req, res, next) => {
         installedChecks: Object.entries(installedChecks)
           .slice(0, 20)
           .map(([name, count]) => ({ name, count: count as number })),
+        recommendations: fleetRecommendations({ agentVersions: versionBuckets }),
+      },
+      security: {
+        total: totalSecurityFindings,
+        unresolvedCritical,
+        bySeverity: Object.fromEntries(securityBySeverity.map((r) => [r.severity ?? 'unknown', r.n])),
+        byCategory: Object.fromEntries(securityByCategory.map((r) => [r.category ?? 'unknown', r.n])),
+        cost: domainCost(products, ['cspm', 'cws', 'appsec'], {
+          volume: totalHosts, unitPrice: PRICING_ESTIMATES.cspmHostMonthly, unit: 'hosts (CSPM est.)',
+        }),
+        recommendations: securityRecommendations({
+          total: totalSecurityFindings, unresolvedCritical, openIncidents: openIncidentsCount, totalIncidents,
+        }),
+      },
+      productProxies: {
+        ...productProxies,
+        cost: domainCost(products, ['npm_', 'ndm_', 'dbm_']),
+        recommendations: proxyRecommendations(productProxies),
+      },
+      incidents: {
+        total: totalIncidents,
+        open: openIncidentsCount,
+        bySeverity: Object.fromEntries(incidentsBySeverity.map((r) => [r.severity ?? 'unknown', r.n])),
+      },
+      costManagement: {
+        providers: ccmConfig.map((r) => ({ provider: r.provider, configured: Boolean(r.configured) })),
       },
 
       // ── Monitor breakdown ──────────────────────────────────────────────────
@@ -302,7 +444,10 @@ router.get('/', (req, res, next) => {
           if (!r.has_team_tag) withoutTeamTag++;
         }
 
-        return { total: rows.length, byState, byType, mutedCount, withoutNotification, withoutEnvTag, withoutServiceTag, withoutTeamTag };
+        return {
+          total: rows.length, byState, byType, mutedCount, withoutNotification, withoutEnvTag, withoutServiceTag, withoutTeamTag,
+          recommendations: monitorsRecommendations({ total: rows.length, mutedCount, withoutNotification, withoutEnvTag, withoutServiceTag, withoutTeamTag }),
+        };
       })(),
 
       // ── SLO breakdown ──────────────────────────────────────────────────────
@@ -320,7 +465,10 @@ router.get('/', (req, res, next) => {
           if (r.has_service_tag) withServiceTag++;
         }
 
-        return { total: rows.length, byType, withEnvTag, withServiceTag };
+        return {
+          total: rows.length, byType, withEnvTag, withServiceTag,
+          recommendations: sloRecommendations({ total: rows.length, svcWithSLO, totalServices }),
+        };
       })(),
 
       // ── Governance ─────────────────────────────────────────────────────────
@@ -341,6 +489,7 @@ router.get('/', (req, res, next) => {
           affected_count: number; total_count: number; recommendation: string | null;
         }>;
 
+        const teamTagCoveragePct = totalHosts > 0 ? Math.round(hostsWithTeam / totalHosts * 100) : 0;
         return {
           userCount: userCount ? parseInt(userCount) : null,
           roleCount: roleCount ? parseInt(roleCount) : null,
@@ -349,6 +498,12 @@ router.get('/', (req, res, next) => {
             description: r.description, affectedCount: r.affected_count,
             totalCount: r.total_count, recommendation: r.recommendation,
           })),
+          recommendations: governanceRecommendations({
+            userCount: userCount ? parseInt(userCount) : null,
+            roleCount: roleCount ? parseInt(roleCount) : null,
+            findingsCount: findingRows.length,
+            teamTagCoveragePct,
+          }),
         };
       })(),
 

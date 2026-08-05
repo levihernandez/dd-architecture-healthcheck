@@ -16,6 +16,14 @@ export const orgContextApi = {
   put: (orgId: string, data: OrgContextData) => api.put<OrgContextData>(`/orgs/${orgId}/context`, data).then(r => r.data),
 };
 
+// Org's selected tagging template — used across the app once selected.
+export const tagTemplateApi = {
+  get: (orgId: string) =>
+    api.get<import('../types').OrgTagTemplateSelection | null>(`/orgs/${orgId}/tag-template`).then((r) => r.data),
+  set: (orgId: string, templateId: string) =>
+    api.put<import('../types').OrgTagTemplateSelection>(`/orgs/${orgId}/tag-template`, { templateId }).then((r) => r.data),
+};
+
 // Orgs
 export const orgsApi = {
   list: () => api.get<Org[]>('/orgs').then((r) => r.data),
@@ -26,6 +34,7 @@ export const orgsApi = {
     api.put<Org>(`/orgs/${id}`, data).then((r) => r.data),
   delete: (id: string) => api.delete(`/orgs/${id}`).then((r) => r.data),
   validate: (id: string) => api.post<{ valid: boolean; orgName?: string; error?: string }>(`/orgs/${id}/validate`).then((r) => r.data),
+  overview: () => api.get<Array<Org & { scorecard: OrgScorecard | null }>>('/orgs/overview').then((r) => r.data),
 };
 
 // Scans
@@ -39,6 +48,7 @@ export const scansApi = {
     api.get<Finding[]>(`/scans/${scanRunId}/findings`, { params }).then((r) => r.data),
   getPermissions: (scanRunId: string) =>
     api.get<Array<{ endpoint: string; status: string; error?: string; tested_at: string }>>(`/scans/${scanRunId}/permissions`).then((r) => r.data),
+  remove: (id: string) => api.delete<void>(`/scans/${id}`).then((r) => r.data),
 };
 
 // Inventory
@@ -51,6 +61,12 @@ export const inventoryApi = {
     api.get<PaginatedResponse<Record<string, unknown>>>('/inventory/services', { params: { orgId, scanRunId, ...params } }).then((r) => r.data),
   monitors: (orgId: string, scanRunId: string, params?: { page?: number; pageSize?: number }) =>
     api.get<PaginatedResponse<Record<string, unknown>>>('/inventory/monitors', { params: { orgId, scanRunId, ...params } }).then((r) => r.data),
+  dashboards: (orgId: string, scanRunId: string, params?: { page?: number; pageSize?: number; search?: string }) =>
+    api.get<PaginatedResponse<Record<string, unknown>>>('/inventory/dashboards', { params: { orgId, scanRunId, ...params } }).then((r) => r.data),
+  synthetics: (orgId: string, scanRunId: string, params?: { page?: number; pageSize?: number; search?: string }) =>
+    api.get<PaginatedResponse<Record<string, unknown>>>('/inventory/synthetics', { params: { orgId, scanRunId, ...params } }).then((r) => r.data),
+  slos: (orgId: string, scanRunId: string, params?: { page?: number; pageSize?: number; search?: string }) =>
+    api.get<PaginatedResponse<Record<string, unknown>>>('/inventory/slos', { params: { orgId, scanRunId, ...params } }).then((r) => r.data),
   tags: (orgId: string, scanRunId: string) =>
     api.get<TagAnalysisRow[]>('/inventory/tags', { params: { orgId, scanRunId } }).then((r) => r.data),
   cloud: (orgId: string, scanRunId: string) =>
@@ -67,6 +83,8 @@ export const inventoryApi = {
       };
       detectedTagKeys: string[];
     }>('/inventory/tag-coverage', { params: { orgId, scanRunId } }).then((r) => r.data),
+  hostGaps: (orgId: string, scanRunId: string) =>
+    api.get<import('../types').HostGapAnalysis>('/inventory/host-gaps', { params: { orgId, scanRunId } }).then((r) => r.data),
 };
 
 // Tagging Intelligence
@@ -81,6 +99,8 @@ export const taggingApi = {
     api.get<import('../types').PropagationResult>('/tagging/propagation', { params: { orgId, scanRunId } }).then((r) => r.data),
   templates: () =>
     api.get<import('../types').TemplateSummary[]>('/tagging/templates').then((r) => r.data),
+  templateDetail: (templateId: string) =>
+    api.get<import('../types').IndustryTemplateDetail>(`/tagging/templates/${templateId}`).then((r) => r.data),
   score: (orgId: string, scanRunId: string, templateId: string) =>
     api.get<import('../types').TemplateScore>('/tagging/score', { params: { orgId, scanRunId, templateId } }).then((r) => r.data),
   detectTemplate: (orgId: string, scanRunId: string) =>
@@ -89,6 +109,12 @@ export const taggingApi = {
     api.get<import('../types').GovernanceResult>('/tagging/governance').then((r) => r.data),
   costReadiness: (orgId: string, scanRunId: string) =>
     api.get<import('../types').CostReadinessResult>('/tagging/cost-readiness', { params: { orgId, scanRunId } }).then((r) => r.data),
+  policyGuidance: () =>
+    api.get<import('../types').TagPolicyLayer[]>('/tagging/policy-guidance').then((r) => r.data),
+  tagEnforcement: () =>
+    api.get<import('../types').TagEnforcementRow[]>('/tagging/tag-enforcement').then((r) => r.data),
+  policyResources: () =>
+    api.get<import('../types').TagPolicyResource[]>('/tagging/policy-resources').then((r) => r.data),
 };
 
 // Analytics
@@ -103,6 +129,24 @@ export const analyticsApi = {
 export const usageApi = {
   get: (orgId: string, scanRunId?: string) =>
     api.get<import('../types').UsageData | null>('/usage', { params: { orgId, ...(scanRunId ? { scanRunId } : {}) } }).then(r => r.data),
+};
+
+export const pricingSnapshotsApi = {
+  latest: () => api.get<import('../types').PricingSnapshot[]>('/pricing-snapshots/latest').then(r => r.data),
+  all: () => api.get<import('../types').PricingSnapshot[]>('/pricing-snapshots').then(r => r.data),
+  history: (product: string) =>
+    api.get<import('../types').PricingSnapshot[]>(`/pricing-snapshots/history/${encodeURIComponent(product)}`).then(r => r.data),
+};
+
+export const sizingSnapshotsApi = {
+  list: () => api.get<import('../types').SizingSnapshotSummary[]>('/sizing-snapshots').then(r => r.data),
+  get: (id: string) => api.get<import('../types').SizingSnapshotRecord>(`/sizing-snapshots/${id}`).then(r => r.data),
+  create: (data: {
+    name: string; mode: string; orgId?: string; orgName?: string;
+    totalListPrice: number; totalRealCost?: number; categoryCount: number;
+    cart: import('../types').SizingSnapshotCartItem[]; state: Record<string, unknown>;
+  }) => api.post<import('../types').SizingSnapshotRecord>('/sizing-snapshots', data).then(r => r.data),
+  remove: (id: string) => api.delete(`/sizing-snapshots/${id}`).then(r => r.data),
 };
 
 // AI Settings

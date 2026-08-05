@@ -14,7 +14,7 @@ import type { FindingSeverity } from '../types';
 function DDLink({ href, label = 'Open in Datadog' }: { href: string; label?: string }) {
   return (
     <a href={href} target="_blank" rel="noopener noreferrer"
-      className="inline-flex items-center gap-1 text-xs text-violet-600 hover:text-violet-800 font-medium shrink-0">
+      className="inline-flex items-center gap-1 text-xs text-violet-400 hover:text-violet-400 font-medium shrink-0">
       {label} ↗
     </a>
   );
@@ -115,10 +115,10 @@ export default function GovernanceSSOSummary() {
                 ].map(({ key, label, good }) => {
                   const val = Boolean(ssoStatus[key]);
                   return (
-                    <div key={key} className={`rounded-lg p-3 border ${val ? 'bg-green-50 border-green-200' : 'bg-surface-subtle border-border'}`}>
+                    <div key={key} className={`rounded-lg p-3 border ${val ? 'bg-green-500/10 border-green-500/30' : 'bg-surface-subtle border-border'}`}>
                       <div className="flex items-center justify-between">
                         <span className="text-xs text-ink-muted">{label}</span>
-                        <span className={`text-sm font-bold ${val ? 'text-green-700' : 'text-ink-faint'}`}>{val ? '✓ On' : '✗ Off'}</span>
+                        <span className={`text-sm font-bold ${val ? 'text-green-400' : 'text-ink-faint'}`}>{val ? '✓ On' : '✗ Off'}</span>
                       </div>
                     </div>
                   );
@@ -126,16 +126,16 @@ export default function GovernanceSSOSummary() {
               </div>
 
               {!samlEnabled && (
-                <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-lg">
-                  <div className="text-sm font-medium text-red-800">SAML SSO is not enabled</div>
-                  <div className="text-xs text-red-600 mt-0.5">Without SSO, users authenticate with local passwords. This increases risk from credential compromise and makes offboarding harder.</div>
+                <div className="mt-3 p-3 bg-red-500/10 border border-red-500/30 rounded-lg">
+                  <div className="text-sm font-medium text-red-400">SAML SSO is not enabled</div>
+                  <div className="text-xs text-red-400 mt-0.5">Without SSO, users authenticate with local passwords. This increases risk from credential compromise and makes offboarding harder.</div>
                   <div className="mt-2"><DDLink href={ddUrl.samlConfig(base)} label="Configure SAML SSO" /></div>
                 </div>
               )}
               {samlEnabled && !strictMode && (
-                <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg">
-                  <div className="text-sm font-medium text-amber-800">SSO Strict Mode is off</div>
-                  <div className="text-xs text-amber-600 mt-0.5">Users can bypass SSO and log in with local credentials. Enable strict mode to require SSO for all authentication.</div>
+                <div className="mt-3 p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg">
+                  <div className="text-sm font-medium text-amber-400">SSO Strict Mode is off</div>
+                  <div className="text-xs text-amber-400 mt-0.5">Users can bypass SSO and log in with local credentials. Enable strict mode to require SSO for all authentication.</div>
                   <div className="mt-2"><DDLink href={ddUrl.samlConfig(base)} label="Enable Strict Mode" /></div>
                 </div>
               )}
@@ -151,15 +151,15 @@ export default function GovernanceSSOSummary() {
               <div className="flex items-center justify-between mb-3">
                 <h2 className="text-base font-semibold text-ink">Governance Findings</h2>
                 <div className="flex items-center gap-2">
-                  {criticalCount > 0 && <span className="text-xs px-2 py-0.5 bg-red-100 text-red-700 rounded font-medium">{criticalCount} critical</span>}
-                  {highCount > 0 && <span className="text-xs px-2 py-0.5 bg-orange-100 text-orange-700 rounded font-medium">{highCount} high</span>}
+                  {criticalCount > 0 && <span className="text-xs px-2 py-0.5 bg-red-500/15 text-red-400 rounded font-medium">{criticalCount} critical</span>}
+                  {highCount > 0 && <span className="text-xs px-2 py-0.5 bg-orange-500/15 text-orange-400 rounded font-medium">{highCount} high</span>}
                 </div>
               </div>
               <div className="space-y-3">
                 {govFindings.map((f, i) => (
-                  <div key={i} className={`rounded-lg border p-3 ${f.severity === 'critical' ? 'bg-red-50 border-red-200' : f.severity === 'high' ? 'bg-orange-50 border-orange-200' : 'bg-amber-50 border-amber-200'}`}>
+                  <div key={i} className={`rounded-lg border p-3 ${f.severity === 'critical' ? 'bg-red-500/10 border-red-500/30' : f.severity === 'high' ? 'bg-orange-500/10 border-orange-500/30' : 'bg-amber-500/10 border-amber-500/30'}`}>
                     <div className="flex items-start gap-3">
-                      <span className={`text-xs px-1.5 py-0.5 rounded font-bold uppercase ${f.severity === 'critical' ? 'bg-red-200 text-red-800' : f.severity === 'high' ? 'bg-orange-200 text-orange-800' : 'bg-amber-200 text-amber-800'}`}>
+                      <span className={`text-xs px-1.5 py-0.5 rounded font-bold uppercase ${f.severity === 'critical' ? 'bg-red-200 text-red-400' : f.severity === 'high' ? 'bg-orange-200 text-orange-400' : 'bg-amber-200 text-amber-400'}`}>
                         {f.severity}
                       </span>
                       <div className="flex-1">
@@ -169,7 +169,7 @@ export default function GovernanceSSOSummary() {
                           <div className="text-xs text-ink-muted mt-1">{f.affectedCount} of {f.totalCount} affected</div>
                         )}
                         {f.recommendation && (
-                          <div className="text-xs text-blue-700 mt-1.5 font-medium">→ {f.recommendation}</div>
+                          <div className="text-xs text-blue-400 mt-1.5 font-medium">→ {f.recommendation}</div>
                         )}
                       </div>
                     </div>
@@ -218,8 +218,8 @@ export default function GovernanceSSOSummary() {
                 { label: 'Organization Settings', href: `${base}/organization-settings` },
               ].map(({ label, href }) => (
                 <a key={label} href={href} target="_blank" rel="noopener noreferrer"
-                  className="flex items-center justify-between px-3 py-2.5 rounded-lg border border-border hover:border-violet-300 hover:bg-violet-50/30 transition-colors group">
-                  <span className="text-sm text-ink-muted group-hover:text-violet-700">{label}</span>
+                  className="flex items-center justify-between px-3 py-2.5 rounded-lg border border-border hover:border-violet-500/30 hover:bg-violet-500/30 transition-colors group">
+                  <span className="text-sm text-ink-muted group-hover:text-violet-400">{label}</span>
                   <span className="text-ink-faint group-hover:text-violet-500">↗</span>
                 </a>
               ))}

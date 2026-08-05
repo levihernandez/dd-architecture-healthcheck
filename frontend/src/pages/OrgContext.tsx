@@ -33,7 +33,7 @@ function ChipGroup({ options, selected, onChange, allowCustom = false }: {
           className={`text-xs px-3 py-1.5 rounded-full border transition-all font-medium ${
             selected.includes(opt)
               ? 'bg-dd-purple text-white border-dd-purple'
-              : 'bg-white text-ink-muted border-border-strong hover:border-dd-purple/50 hover:text-dd-purple'
+              : 'bg-surface-subtle text-ink-muted border-border-strong hover:border-dd-purple/50 hover:text-dd-purple'
           }`}
         >
           {opt}
@@ -208,9 +208,9 @@ export default function OrgContext() {
 
   const saveStatusBadge = (
     <div className={`text-xs px-3 py-1.5 rounded-full font-medium transition-all whitespace-nowrap ${
-      saveStatus === 'saved' ? 'bg-green-100 text-green-700'
-      : saveStatus === 'saving' ? 'bg-amber-50 text-amber-600'
-      : saveStatus === 'error' ? 'bg-red-100 text-red-700'
+      saveStatus === 'saved' ? 'bg-green-500/15 text-green-400'
+      : saveStatus === 'saving' ? 'bg-amber-500/10 text-amber-400'
+      : saveStatus === 'error' ? 'bg-red-500/15 text-red-400'
       : 'bg-surface-sunken text-ink-faint'
     }`}>
       {saveStatus === 'saved' ? '✓ Saved' : saveStatus === 'saving' ? 'Saving…' : saveStatus === 'error' ? 'Save failed' : 'Auto-saves as you type'}
@@ -285,7 +285,7 @@ export default function OrgContext() {
                 { tier: '2', label: 'Tier 2 — Supporting Services', placeholder: 'e.g. Admin tools, Internal dashboards, Batch jobs — limited user impact, longer acceptable downtime', uptimeKey: null, descKey: 'tier2Description' as const },
               ] as const).map(({ tier, label, placeholder, uptimeKey, descKey }) => (
                 <div key={tier} className={`rounded-xl p-4 border space-y-3 ${
-                  tier === '0' ? 'bg-red-50 border-red-200' : tier === '1' ? 'bg-amber-50 border-amber-200' : 'bg-surface-subtle border-border'
+                  tier === '0' ? 'bg-red-500/10 border-red-500/30' : tier === '1' ? 'bg-amber-500/10 border-amber-500/30' : 'bg-surface-subtle border-border'
                 }`}>
                   <div className="font-semibold text-sm text-ink">{label}</div>
                   <input className="input text-sm w-full" placeholder={placeholder}
@@ -298,7 +298,7 @@ export default function OrgContext() {
                         {UPTIME_TARGETS.map(t => (
                           <button key={t} type="button" onClick={() => update(uptimeKey, t)}
                             className={`text-xs px-2.5 py-1 rounded-full border font-medium transition-all ${
-                              form[uptimeKey] === t ? 'bg-dd-purple text-white border-dd-purple' : 'bg-white text-ink-muted border-border-strong hover:border-dd-purple/50'
+                              form[uptimeKey] === t ? 'bg-dd-purple text-white border-dd-purple' : 'bg-surface-subtle text-ink-muted border-border-strong hover:border-dd-purple/50'
                             }`}>{t}</button>
                         ))}
                       </div>
@@ -316,7 +316,7 @@ export default function OrgContext() {
                 {REVENUE_IMPACT.map(r => (
                   <button key={r} type="button" onClick={() => update('revenueImpactPerHour', r)}
                     className={`text-xs px-3 py-1.5 rounded-full border font-medium transition-all ${
-                      form.revenueImpactPerHour === r ? 'bg-dd-purple text-white border-dd-purple' : 'bg-white text-ink-muted border-border-strong hover:border-dd-purple/50'
+                      form.revenueImpactPerHour === r ? 'bg-dd-purple text-white border-dd-purple' : 'bg-surface-subtle text-ink-muted border-border-strong hover:border-dd-purple/50'
                     }`}>{r}</button>
                 ))}
               </div>
@@ -349,7 +349,7 @@ export default function OrgContext() {
                   {['Yes', 'No'].map(v => (
                     <button key={v} type="button" onClick={() => update('hasDedicatedSRE', v === 'Yes')}
                       className={`flex-1 text-sm px-3 py-2 rounded-lg border font-medium transition-all ${
-                        (form.hasDedicatedSRE ? 'Yes' : 'No') === v ? 'bg-dd-purple text-white border-dd-purple' : 'bg-white text-ink-muted border-border-strong hover:border-dd-purple/50'
+                        (form.hasDedicatedSRE ? 'Yes' : 'No') === v ? 'bg-dd-purple text-white border-dd-purple' : 'bg-surface-subtle text-ink-muted border-border-strong hover:border-dd-purple/50'
                       }`}>{v}</button>
                   ))}
                 </div>

@@ -23,6 +23,11 @@ export async function collectSLOs(
       itemCount: 0,
       error: result.error,
       durationMs: Date.now() - start,
+      endpoint: result.endpoint,
+      requestCount: result.requestCount,
+      pageCount: result.pageCount,
+      truncated: result.truncated,
+      rateLimitRemaining: result.rateLimitRemaining,
     };
   }
 
@@ -76,5 +81,10 @@ export async function collectSLOs(
     status: 'success',
     itemCount: result.itemCount,
     durationMs: Date.now() - start,
+    endpoint: result.endpoint,
+    requestCount: result.requestCount,
+    pageCount: result.pageCount,
+    truncated: result.truncated,
+    rateLimitRemaining: result.rateLimitRemaining,
   };
 }

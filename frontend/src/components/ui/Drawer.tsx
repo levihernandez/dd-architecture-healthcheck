@@ -15,10 +15,10 @@ interface DrawerContentProps {
 export function DrawerContent({ children, title, side = 'right', widthClassName = 'w-[420px]' }: DrawerContentProps) {
   return (
     <RadixDialog.Portal>
-      <RadixDialog.Overlay className="fixed inset-0 z-40 bg-ink/30 animate-fade-in" />
+      <RadixDialog.Overlay className="fixed inset-0 z-40 bg-black/50 animate-fade-in" />
       <RadixDialog.Content
         className={clsx(
-          'fixed inset-y-0 z-50 flex flex-col bg-white shadow-lg',
+          'fixed inset-y-0 z-50 flex flex-col bg-surface-subtle shadow-lg',
           side === 'right' ? 'right-0 animate-slide-in-right' : 'left-0 animate-slide-in-left',
           widthClassName
         )}

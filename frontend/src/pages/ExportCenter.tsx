@@ -5,10 +5,10 @@ import { EmptyState } from '../components/common/LoadingState';
 import PageHeader from '../components/ui/PageHeader';
 
 const EXPORT_FORMATS = [
-  { format: 'json' as const, label: 'JSON', icon: '{ }', description: 'Complete structured export including all findings, scorecard, and AI assessment', color: 'border-blue-200 hover:border-blue-400' },
-  { format: 'csv' as const, label: 'CSV', icon: '⊞', description: 'Findings table in CSV format for import into Excel or Google Sheets', color: 'border-green-200 hover:border-green-400' },
-  { format: 'markdown' as const, label: 'Markdown', icon: '#', description: 'Markdown report suitable for Confluence, GitHub, or Notion', color: 'border-purple-200 hover:border-purple-400' },
-  { format: 'html' as const, label: 'HTML Report', icon: '🖨', description: 'Printable executive report with scores, findings, and recommendations', color: 'border-amber-200 hover:border-amber-400' },
+  { format: 'json' as const, label: 'JSON', icon: '{ }', description: 'Complete structured export including all findings, scorecard, and AI assessment', color: 'border-blue-500/30 hover:border-blue-400' },
+  { format: 'csv' as const, label: 'CSV', icon: '⊞', description: 'Findings table in CSV format for import into Excel or Google Sheets', color: 'border-green-500/30 hover:border-green-400' },
+  { format: 'markdown' as const, label: 'Markdown', icon: '#', description: 'Markdown report suitable for Confluence, GitHub, or Notion', color: 'border-emerald-500/30 hover:border-emerald-400' },
+  { format: 'html' as const, label: 'HTML Report', icon: '🖨', description: 'Printable executive report with scores, findings, and recommendations', color: 'border-amber-500/30 hover:border-amber-400' },
 ];
 
 export default function ExportCenter() {
@@ -57,9 +57,9 @@ export default function ExportCenter() {
             ))}
           </div>
 
-          <div className="card bg-amber-50 border-amber-200">
-            <h3 className="text-sm font-semibold text-amber-800 mb-2">Export Security Notice</h3>
-            <ul className="text-sm text-amber-700 space-y-1 list-disc list-inside">
+          <div className="card bg-amber-500/10 border-amber-500/30">
+            <h3 className="text-sm font-semibold text-amber-400 mb-2">Export Security Notice</h3>
+            <ul className="text-sm text-amber-400 space-y-1 list-disc list-inside">
               <li>API keys and App keys are never included in any export</li>
               <li>All exports contain only collected metadata and assessment findings</li>
               <li>Raw JSON snapshots have credentials redacted before storage</li>

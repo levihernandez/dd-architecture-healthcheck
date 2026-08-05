@@ -4,6 +4,7 @@ import Overview from './pages/Overview';
 import OrgConnections from './pages/OrgConnections';
 import ScanRuns from './pages/ScanRuns';
 import InventoryExplorer from './pages/InventoryExplorer';
+import HostInstrumentationGaps from './pages/HostInstrumentationGaps';
 import ProductUsage from './pages/ProductUsage';
 import TagExplorer from './pages/TagExplorer';
 import UnifiedTaggingScorecard from './pages/UnifiedTaggingScorecard';
@@ -40,6 +41,7 @@ export default function App() {
           <Route path="orgs" element={<OrgConnections />} />
           <Route path="scans" element={<ScanRuns />} />
           <Route path="inventory" element={<InventoryExplorer />} />
+          <Route path="host-gaps" element={<HostInstrumentationGaps />} />
           <Route path="products" element={<ProductUsage />} />
           <Route path="tags" element={<TagExplorer />} />
           <Route path="tagging-scorecard" element={<UnifiedTaggingScorecard />} />
