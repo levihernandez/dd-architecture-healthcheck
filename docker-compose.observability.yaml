@@ -1,0 +1,61 @@
+version: "3.8"
+
+# Overlay: adds the Datadog Agent and points the backend's APM/DogStatsD at
+# it. Apply with -f docker-compose.yaml -f docker-compose.observability.yaml
+# (scripts/compose.sh does this when `npm run init` enables observability).
+#
+# Monitors both containers via Docker/Podman socket autodiscovery (APM,
+# DogStatsD/runtime metrics, and per-container log collection driven by the
+# com.datadoghq.ad.logs labels already on the backend/frontend services).
+#
+# Assumes DD_API_KEY/DD_APP_KEY in .env are plain values. If you also enable
+# the OpenBao overlay, use docker-compose.observability-openbao.yaml instead
+# of this file so the Agent can decrypt ENC[] ciphertext before it starts.
+services:
+  datadog-agent:
+    image: gcr.io/datadoghq/agent:7
+    container_name: dd-api-ai-agent
+    # Needed under Podman + SELinux(Enforcing): bind-mounting the socket file
+    # itself doesn't get relabeled the way a directory would with :z/:Z, so
+    # the confined container domain gets denied even as root. Docker Desktop/
+    # unconfined hosts don't need this — harmless there either way.
+    security_opt:
+      - label=disable
+    environment:
+      DD_API_KEY: ${DD_API_KEY}
+      DD_APP_KEY: ${DD_APP_KEY}
+      DD_SITE: ${DD_SITE:-datadoghq.com}
+      DD_HOSTNAME: dd-api-ai-local
+      DD_APM_ENABLED: "true"
+      DD_APM_NON_LOCAL_TRAFFIC: "true"
+      DD_APM_RECEIVER_PORT: ${DD_AGENT_PORT:-8136}
+      DD_DOGSTATSD_NON_LOCAL_TRAFFIC: "true"
+      DD_LOGS_ENABLED: "true"
+      # Container log collection is driven by com.datadoghq.ad.logs labels on
+      # the backend/frontend services, not a blanket collect-all.
+      DD_PROCESS_AGENT_ENABLED: "true"
+      # This host runs Podman, not dockerd — the Agent's docker workloadmeta
+      # collector self-disables without this because it can't find the
+      # Docker-specific /.dockerenv marker. The socket is still Docker-API
+      # compatible (Podman aliases it), so forcing this on is safe.
+      DD_DOCKER_ENABLED: "true"
+      DD_TAGS: "app:dd-api-ai env:${DD_ENV:-development}"
+    ports:
+      - "${DD_AGENT_PORT:-8136}:8136" # APM trace intake
+      - "8125:8125/udp" # DogStatsD (runtime metrics, custom metrics)
+    volumes:
+      - /proc/:/host/proc/:ro
+      - /sys/fs/cgroup/:/host/sys/fs/cgroup:ro
+      # Docker/Podman socket — enables autodiscovery of the backend/frontend
+      # containers: per-container cpu/mem/network metrics, and log collection
+      # for any container carrying a com.datadoghq.ad.logs label.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+  backend:
+    environment:
+      # Backend talks to the Agent over the container network by service
+      # name, not localhost.
+      DD_AGENT_HOST: datadog-agent
+      DD_DOGSTATSD_PORT: "8125"
+    depends_on:
+      - datadog-agent

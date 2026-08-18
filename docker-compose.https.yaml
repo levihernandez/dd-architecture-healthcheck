@@ -1,0 +1,31 @@
+version: "3.8"
+
+# Overlay: terminates TLS at the frontend nginx container instead of plain
+# HTTP. Apply with -f docker-compose.yaml -f docker-compose.https.yaml
+# (scripts/compose.sh does this when `npm run init` enables HTTPS).
+#
+# nginx listens on 443 and proxies /api to the backend over plain HTTP on
+# the internal docker network — the backend itself stays HTTP-only here.
+# (Standalone/non-Docker runs can still turn on backend HTTPS directly via
+# HTTPS_ENABLED in .env — see backend/src/server.ts.)
+#
+# No cert supplied by default: frontend/docker-entrypoint.sh generates a
+# self-signed one on first start into the dd-api-ai-certs volume below, so
+# it persists across restarts instead of regenerating (and re-triggering
+# browser trust warnings) every time. Mount your own cert/key at
+# /etc/nginx/certs/{cert,key}.pem instead if you have one from a real CA.
+services:
+  frontend:
+    environment:
+      HTTPS_ENABLED: "true"
+    ports:
+      # Overlays replace the base ports list rather than merge it, so the
+      # plain-HTTP mapping has to be repeated here — nginx.https.conf listens
+      # on 80 purely to 301 redirect to the TLS port below.
+      - "5173:80"
+      - "8443:443"
+    volumes:
+      - dd-api-ai-certs:/etc/nginx/certs
+
+volumes:
+  dd-api-ai-certs:

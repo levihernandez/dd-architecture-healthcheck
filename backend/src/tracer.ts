@@ -10,6 +10,10 @@ tracer.init({
   logInjection: true,
   runtimeMetrics: true,
   plugins: true,
+  dogstatsd: {
+    hostname: process.env.DD_AGENT_HOST ?? 'localhost',
+    port: parseInt(process.env.DD_DOGSTATSD_PORT ?? '8125'),
+  },
 });
 
 export default tracer;

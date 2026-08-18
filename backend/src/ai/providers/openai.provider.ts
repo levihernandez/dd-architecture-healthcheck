@@ -1,5 +1,7 @@
 import OpenAI from 'openai';
 import { logger } from '../../utils/logger';
+import { getGroundingInstructions } from '../grounding';
+import { getPrompt } from '../prompt-store';
 import type { AIAssessmentResponse } from '../../types/assessment.types';
 
 export async function runOpenAIAssessment(
@@ -16,11 +18,11 @@ export async function runOpenAIAssessment(
     messages: [
       {
         role: 'system',
-        content: 'You are a Datadog Solutions Engineer expert. Respond only with valid JSON matching the requested schema. Do not include any text outside the JSON object.',
+        content: `${getGroundingInstructions()}\n\n${getPrompt('openai-system')}`,
       },
       { role: 'user', content: prompt },
     ],
-    temperature: 0.2,
+    temperature: 0.1,
     response_format: { type: 'json_object' },
     max_tokens: 4096,
   });

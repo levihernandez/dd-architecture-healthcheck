@@ -120,14 +120,25 @@ router.get('/', (req, res, next) => {
     const archiveSuggestions = indexDetails.filter(i => i.isFlex).length;
 
     // ── Integrations ────────────────────────────────────────────────────────────
+    // integration_type='agent_check' rows (postgres, nginx, trace, etc.) come from
+    // infrastructure.collector.ts matching Agent-reported host checks against the
+    // full Datadog Integrations catalog (app.datadoghq.com/integrations) — raw_json
+    // carries the host_count, which is the actual evidence a check is receiving
+    // data rather than just configured. Account/notification integrations (aws,
+    // slack, pagerduty, etc.) have no per-host signal, so hostCount is null there.
     const integRows = db.prepare(`
-      SELECT integration_name, integration_type, status, is_configured, is_enabled
+      SELECT integration_name, integration_type, status, is_configured, is_enabled, raw_json
       FROM integrations WHERE org_id=? AND scan_run_id=?
       ORDER BY is_enabled DESC, is_configured DESC, integration_name
     `).all(orgId, scanRunId) as Array<{
       integration_name: string; integration_type: string | null;
-      status: string | null; is_configured: number; is_enabled: number;
+      status: string | null; is_configured: number; is_enabled: number; raw_json: string | null;
     }>;
+
+    const integHostCount = (raw: string | null): number | null => {
+      if (!raw) return null;
+      try { return (JSON.parse(raw) as { host_count?: number }).host_count ?? null; } catch { return null; }
+    };
 
     const integByType: Record<string, number> = {};
     for (const r of integRows) {
@@ -325,14 +336,27 @@ router.get('/', (req, res, next) => {
         broken: integBroken,
         idle: integIdle,
         notInstalled: integNotInstalled,
+        // Confirmed via host-level check evidence (host_count > 0) — the strongest
+        // signal this app has for "actually receiving data" vs. merely enabled.
+        // Account/notification integrations have no per-host signal, so they fall
+        // back to isEnabled (no way here to confirm live data flow for those).
+        receivingData: integRows.filter(r => {
+          const hostCount = integHostCount(r.raw_json);
+          return hostCount != null ? hostCount > 0 : Boolean(r.is_enabled);
+        }).length,
         byType: Object.entries(integByType).map(([type, count]) => ({ type, count })).sort((a, b) => b.count - a.count),
-        list: integRows.map(r => ({
-          name: r.integration_name,
-          type: r.integration_type,
-          status: r.status,
-          isConfigured: Boolean(r.is_configured),
-          isEnabled: Boolean(r.is_enabled),
-        })),
+        list: integRows.map(r => {
+          const hostCount = integHostCount(r.raw_json);
+          return {
+            name: r.integration_name,
+            type: r.integration_type,
+            status: r.status,
+            isConfigured: Boolean(r.is_configured),
+            isEnabled: Boolean(r.is_enabled),
+            hostCount,
+            receivingData: hostCount != null ? hostCount > 0 : Boolean(r.is_enabled),
+          };
+        }),
         recommendations: integrationsRecommendations({
           total: integRows.length, configured: integRows.filter(r => r.is_configured).length, enabled: integRows.filter(r => r.is_enabled).length,
         }),

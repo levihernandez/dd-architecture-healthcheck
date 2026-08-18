@@ -39,9 +39,9 @@ export const TAG_DICTIONARY: TagDefinition[] = [
     exampleValues: ['auth-server', 'middleware', 'api-gateway', 'payment-processor'],
     what: 'Defines the specific service or function being monitored. Should be descriptive, concise, and consistent across all telemetry.',
     why: 'Core UST tag — powers the Service Map, service-level SLOs, Deployment Tracking, and APM error attribution. Without it, you cannot connect infrastructure metrics to application traces, or route alerts to the correct team.',
-    how: 'Set DD_SERVICE environment variable in all app runtimes. For hosts running a single service, add service:<name> to extra_tags. For Kubernetes, use pod annotations (tags.datadoghq.com/service) or the Admission Controller. For logs, use a remapper processor to set service from the application\'s log field.',
+    how: 'Set DD_SERVICE environment variable in the app runtime/container, not on the host. For Kubernetes, use pod annotations (tags.datadoghq.com/service) or the Admission Controller. For logs, use a remapper processor to set service from the application\'s log field. Do not blanket-tag hosts or VMs with service — most hosts run multiple services, and a host-level service tag misattributes shared host metrics (CPU, disk, network) to whichever service happens to be tagged.',
     when: 'Apply at service creation time in the service registry. Enforce via CI/CD — the service name in Datadog must match the service catalog name exactly. Never change the service name without a migration plan, as it breaks historical continuity.',
-    where: 'APM spans and traces, hosts, containers, monitors, synthetics, logs, RUM sessions, service catalog. Must be identical across all surfaces for the Service Map to connect them.',
+    where: 'APM spans and traces, containers/pods running the service, monitors, synthetics, logs, RUM sessions, service catalog. Deliberately not hosts/VMs/k8s nodes in general — those get env (and team/role) instead; service is a workload-level identity, not an infrastructure-level one.',
     aliases: ['app', 'application', 'service_name', 'svc', 'microservice', 'app_name'],
   },
   {
@@ -53,7 +53,7 @@ export const TAG_DICTIONARY: TagDefinition[] = [
     why: 'Essential for Deployment Tracking — enables automatic comparison of error rates and latency between the current and previous version. Without it, you cannot determine whether a new release introduced a regression. Critical for compliance with release management practices.',
     how: 'Set DD_VERSION environment variable in the application runtime. For containers, inject the image tag or git SHA at build time via the CI/CD pipeline. For Kubernetes, use pod annotations (tags.datadoghq.com/version). Never hardcode — it must change with every deployment.',
     when: 'Apply at build time and inject during deployment. The version must be updated with every release — including hotfixes and canary deployments. Use the same value across DD_VERSION, Docker image tag, and git tag.',
-    where: 'APM services (required for Deployment Tracking), hosts running the application, monitors that alert on release-specific issues. Also useful in RUM for correlating frontend errors to backend releases.',
+    where: 'APM services (required for Deployment Tracking), containers/pods running the application, monitors that alert on release-specific issues. Also useful in RUM for correlating frontend errors to backend releases. Not a host/VM/k8s-node-level tag — like service, version identifies a workload build, not the infrastructure under it.',
     aliases: ['ver', 'release', 'app_version', 'release_version', 'deploy_version', 'image_tag'],
   },
   {

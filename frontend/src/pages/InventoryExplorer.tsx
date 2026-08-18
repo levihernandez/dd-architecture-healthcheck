@@ -1,7 +1,8 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { inventoryApi } from '../services/api';
+import { inventoryApi, scansApi } from '../services/api';
 import { useOrgAndScanFilters } from '../hooks/useFilters';
+import { useFeatureFlags } from '../hooks/useFeatureFlags';
 import { ddBaseUrl, ddUrl } from '../utils/ddUrl';
 import DataTable, { Pagination } from '../components/common/DataTable';
 import { EmptyState } from '../components/common/LoadingState';
@@ -9,6 +10,9 @@ import MetricCard from '../components/common/MetricCard';
 import PageHeader from '../components/ui/PageHeader';
 import { SkeletonTable } from '../components/ui/Skeleton';
 import FilterChip, { FilterChipRow } from '../components/ui/FilterChip';
+import SectionGate from '../components/SectionGate';
+import ResourceFindingCard from '../components/tagging/ResourceFindingCard';
+import type { Finding } from '../types';
 
 type ResourceTab = 'hosts' | 'services' | 'monitors' | 'dashboards' | 'synthetics' | 'slos';
 type HostRow = Record<string, unknown>;
@@ -18,10 +22,45 @@ const TAB_LABELS: Record<ResourceTab, string> = {
   dashboards: 'Dashboards', synthetics: 'Synthetics', slos: 'SLOs',
 };
 
+const ALL_TABS: ResourceTab[] = ['hosts', 'services', 'monitors', 'dashboards', 'synthetics', 'slos'];
+
+const TAB_FLAG_KEYS: Record<ResourceTab, string> = {
+  hosts: 'section.inventory.hosts',
+  services: 'section.inventory.services',
+  monitors: 'section.inventory.monitors',
+  dashboards: 'section.inventory.dashboards',
+  synthetics: 'section.inventory.synthetics',
+  slos: 'section.inventory.slos',
+};
+
+// Rule categories whose findings are relevant to each tab's resource type —
+// drives the per-resource "Findings" drill-down. Dashboards/SLOs have no rule
+// category producing per-resource affectedResources today, so they're omitted
+// rather than showing an always-empty findings column.
+const TAB_FINDING_CATEGORIES: Partial<Record<ResourceTab, string[]>> = {
+  hosts: ['unified_tagging'],
+  services: ['unified_tagging', 'service_architecture'],
+  monitors: ['unified_tagging', 'monitors_health'],
+  synthetics: ['unified_tagging', 'synthetics_health'],
+};
+
+// affectedResources[].type value used by the rules engine for this tab's
+// resource kind (see backend/src/assessment/rules/*.ts).
+const TAB_RESOURCE_TYPE: Partial<Record<ResourceTab, string>> = {
+  hosts: 'host', services: 'service', monitors: 'monitor', synthetics: 'synthetics_test',
+};
+
+// Row field holding the resource's display name — matched against
+// affectedResources[].name (findings don't consistently expose the same id
+// shape across rules, but always expose a human-readable name).
+const TAB_NAME_FIELD: Record<ResourceTab, string> = {
+  hosts: 'host_name', services: 'service_name', monitors: 'monitor_name',
+  dashboards: 'title', synthetics: 'test_name', slos: 'slo_name',
+};
+
 const QUICK_FILTERS: Record<ResourceTab, Array<{ id: string; label: string; test: (r: HostRow) => boolean }>> = {
   hosts: [
     { id: 'missing-env', label: 'Missing env tag', test: (r) => !r.has_env_tag },
-    { id: 'missing-service', label: 'Missing service tag', test: (r) => !r.has_service_tag },
     { id: 'missing-team', label: 'Missing team tag', test: (r) => !r.has_team_tag },
   ],
   services: [
@@ -55,16 +94,56 @@ export default function InventoryExplorer() {
   const { orgs, selectedOrgId, selectedScanId } = useOrgAndScanFilters();
   const selectedOrg = orgs.find(o => o.id === selectedOrgId);
   const base = ddBaseUrl(selectedOrg?.site ?? 'datadoghq.com');
+  const { isPageEnabled } = useFeatureFlags();
+  const enabledTabs = useMemo(
+    () => ALL_TABS.filter((t) => isPageEnabled(TAB_FLAG_KEYS[t])),
+    [isPageEnabled]
+  );
   const [tab, setTab] = useState<ResourceTab>('hosts');
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
   const [activeFilters, setActiveFilters] = useState<Set<string>>(new Set());
+
+  // If the currently-selected tab becomes disabled (flag flipped off while
+  // active), fall back to the first still-enabled tab instead of showing a
+  // dead/gated panel.
+  useEffect(() => {
+    if (enabledTabs.length > 0 && !enabledTabs.includes(tab)) {
+      switchTab(enabledTabs[0]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enabledTabs, tab]);
 
   const { data: summary } = useQuery({
     queryKey: ['inventory-summary', selectedOrgId, selectedScanId],
     queryFn: () => inventoryApi.summary(selectedOrgId, selectedScanId),
     enabled: Boolean(selectedOrgId && selectedScanId),
   });
+
+  const { data: allFindings = [] } = useQuery({
+    queryKey: ['findings-all', selectedScanId],
+    queryFn: () => scansApi.getFindings(selectedScanId),
+    enabled: Boolean(selectedScanId),
+  });
+
+  // Per-resource findings for the active tab, keyed by the resource's display
+  // name (see TAB_NAME_FIELD/TAB_RESOURCE_TYPE above).
+  const findingsByResourceName = useMemo(() => {
+    const map = new Map<string, Finding[]>();
+    const categories = TAB_FINDING_CATEGORIES[tab];
+    const resourceType = TAB_RESOURCE_TYPE[tab];
+    if (!categories || !resourceType) return map;
+    for (const finding of allFindings) {
+      if (!categories.includes(finding.category)) continue;
+      for (const resource of finding.affectedResources ?? []) {
+        if (resource.type !== resourceType) continue;
+        const list = map.get(resource.name) ?? [];
+        list.push(finding);
+        map.set(resource.name, list);
+      }
+    }
+    return map;
+  }, [allFindings, tab]);
 
   const { data: hosts, isLoading: hostsLoading } = useQuery({
     queryKey: ['hosts', selectedOrgId, selectedScanId, page, search],
@@ -144,7 +223,6 @@ export default function InventoryExplorer() {
       </span>
     ) },
     { key: 'env', header: 'env', sortable: true, sortAccessor: (r: HostRow) => (r.has_env_tag ? 1 : 0), render: (r: HostRow) => <CheckMark ok={Boolean(r.has_env_tag)} /> },
-    { key: 'service', header: 'service', sortable: true, sortAccessor: (r: HostRow) => (r.has_service_tag ? 1 : 0), render: (r: HostRow) => <CheckMark ok={Boolean(r.has_service_tag)} /> },
     { key: 'version', header: 'version', sortable: true, sortAccessor: (r: HostRow) => (r.has_version_tag ? 1 : 0), render: (r: HostRow) => <CheckMark ok={Boolean(r.has_version_tag)} /> },
     { key: 'team', header: 'team', sortable: true, sortAccessor: (r: HostRow) => (r.has_team_tag ? 1 : 0), render: (r: HostRow) => <CheckMark ok={Boolean(r.has_team_tag)} /> },
     { key: 'tag_count', header: 'Tags', sortable: true, sortAccessor: (r: HostRow) => Number(r.tag_count ?? 0), render: (r: HostRow) => String(r.tag_count ?? 0) },
@@ -230,10 +308,27 @@ export default function InventoryExplorer() {
     { key: 'service', header: 'service', sortable: true, sortAccessor: (r: HostRow) => (r.has_service_tag ? 1 : 0), render: (r: HostRow) => <CheckMark ok={Boolean(r.has_service_tag)} /> },
   ];
 
-  const columns = {
+  const baseColumns = {
     hosts: hostColumns, services: serviceColumns, monitors: monitorColumns,
     dashboards: dashboardColumns, synthetics: syntheticsColumns, slos: sloColumns,
   }[tab];
+  const nameField = TAB_NAME_FIELD[tab];
+  const rowFindings = (row: HostRow): Finding[] => findingsByResourceName.get(String(row[nameField] ?? '')) ?? [];
+  const columns = TAB_RESOURCE_TYPE[tab]
+    ? [
+        ...baseColumns,
+        {
+          key: 'findings',
+          header: 'Findings',
+          render: (r: HostRow) => {
+            const count = rowFindings(r).length;
+            return count > 0
+              ? <span className="badge bg-amber-500/15 text-amber-400">{count}</span>
+              : <span className="text-ink-faint">—</span>;
+          },
+        },
+      ]
+    : baseColumns;
   const quickFilters = QUICK_FILTERS[tab];
 
   return (
@@ -261,7 +356,7 @@ export default function InventoryExplorer() {
 
       <div className="card p-0 overflow-hidden">
         <div className="flex items-center border-b border-border flex-wrap">
-          {(['hosts', 'services', 'monitors', 'dashboards', 'synthetics', 'slos'] as ResourceTab[]).map((t) => (
+          {enabledTabs.map((t) => (
             <button
               key={t}
               className={`px-6 py-3 text-sm font-medium border-b-2 transition-colors ${
@@ -285,44 +380,65 @@ export default function InventoryExplorer() {
           </div>
         </div>
 
-        {quickFilters.length > 0 && (
-          <div className="px-4 py-3 border-b border-border bg-surface-subtle">
-            <FilterChipRow>
-              {quickFilters.map(f => (
-                <FilterChip
-                  key={f.id}
-                  label={f.label}
-                  active={activeFilters.has(f.id)}
-                  count={tabData.filter(f.test).length}
-                  onClick={() => toggleFilter(f.id)}
-                />
-              ))}
-            </FilterChipRow>
-          </div>
-        )}
-
-        {isLoading ? (
-          <div className="p-4"><SkeletonTable rows={8} cols={columns.length} /></div>
-        ) : !selectedScanId ? (
-          <div className="py-12"><EmptyState message="Select a scan to view inventory" /></div>
-        ) : (
+        <SectionGate featureKey={TAB_FLAG_KEYS[tab]}>
           <>
-            <DataTable
-              columns={columns}
-              data={filteredData}
-              rowKey={(r) => String((r as Record<string, unknown>).id ?? Math.random())}
-              emptyMessage={activeFilters.size > 0 ? `No ${tab} match the selected filters` : `No ${tab} found`}
-              tableId={`inventory-${tab}`}
-            />
-            {tabMeta && tabMeta.totalPages > 1 && activeFilters.size === 0 && (
-              <Pagination
-                page={page} totalPages={tabMeta.totalPages}
-                total={tabMeta.total} pageSize={tabMeta.pageSize}
-                onPageChange={setPage}
-              />
+            {quickFilters.length > 0 && (
+              <div className="px-4 py-3 border-b border-border bg-surface-subtle">
+                <FilterChipRow>
+                  {quickFilters.map(f => (
+                    <FilterChip
+                      key={f.id}
+                      label={f.label}
+                      active={activeFilters.has(f.id)}
+                      count={tabData.filter(f.test).length}
+                      onClick={() => toggleFilter(f.id)}
+                    />
+                  ))}
+                </FilterChipRow>
+              </div>
+            )}
+
+            {isLoading ? (
+              <div className="p-4"><SkeletonTable rows={8} cols={columns.length} /></div>
+            ) : !selectedScanId ? (
+              <div className="py-12"><EmptyState message="Select a scan to view inventory" /></div>
+            ) : (
+              <>
+                <DataTable
+                  columns={columns}
+                  data={filteredData}
+                  rowKey={(r) => String((r as Record<string, unknown>).id ?? Math.random())}
+                  emptyMessage={activeFilters.size > 0 ? `No ${tab} match the selected filters` : `No ${tab} found`}
+                  tableId={`inventory-${tab}`}
+                  expandable={(r) => rowFindings(r as HostRow).length > 0}
+                  expandedRowRender={(r) => (
+                    <div className="p-3 space-y-2 bg-surface-subtle">
+                      {rowFindings(r as HostRow).map((f) => (
+                        <ResourceFindingCard
+                          key={f.id}
+                          title={f.title}
+                          description={f.description}
+                          tagKey={f.tagKey}
+                          severity={f.severity}
+                          recommendation={f.recommendation}
+                          bestPractice={f.bestPractice}
+                          affectedResources={[]}
+                        />
+                      ))}
+                    </div>
+                  )}
+                />
+                {tabMeta && tabMeta.totalPages > 1 && activeFilters.size === 0 && (
+                  <Pagination
+                    page={page} totalPages={tabMeta.totalPages}
+                    total={tabMeta.total} pageSize={tabMeta.pageSize}
+                    onPageChange={setPage}
+                  />
+                )}
+              </>
             )}
           </>
-        )}
+        </SectionGate>
       </div>
     </div>
   );

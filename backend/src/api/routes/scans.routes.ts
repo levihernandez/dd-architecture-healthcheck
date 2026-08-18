@@ -5,6 +5,7 @@ import { OrgRepository } from '../../db/repositories/org.repository';
 import { ScorecardRepository } from '../../db/repositories/scorecard.repository';
 import { FindingRepository } from '../../db/repositories/finding.repository';
 import { runScan } from '../../datadog/scan-orchestrator';
+import { compareScans } from '../../assessment/scan-comparison';
 import { AppError } from '../middleware/error.middleware';
 import { logger } from '../../utils/logger';
 
@@ -89,6 +90,29 @@ router.get('/:id/scorecard', (req, res, next) => {
     if (!scorecard) throw new AppError('Scorecard not yet available', 404);
 
     res.json(scorecard);
+  } catch (err) { next(err); }
+});
+
+// GET /api/scans/:id/compare?against=<scanId> — diffs this scan against
+// `against`, or the org's immediately-previous completed scan if omitted.
+router.get('/:id/compare', (req, res, next) => {
+  try {
+    const currentScan = ScanRepository.findById(req.params.id);
+    if (!currentScan) throw new AppError('Scan not found', 404);
+
+    const against = req.query.against as string | undefined;
+    const previousScan = against
+      ? ScanRepository.findById(against)
+      : ScanRepository.findPreviousCompleted(currentScan.orgId, currentScan.id);
+    if (!previousScan) {
+      throw new AppError(
+        against ? 'Comparison scan not found' : 'No earlier completed scan exists for this org yet',
+        404
+      );
+    }
+
+    const result = compareScans(currentScan.orgId, previousScan.id, currentScan.id);
+    res.json(result);
   } catch (err) { next(err); }
 });
 

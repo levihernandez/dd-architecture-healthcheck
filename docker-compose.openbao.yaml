@@ -1,0 +1,34 @@
+version: "3.8"
+
+# Overlay: lets the backend resolve ENC[vault:v1:...] transit ciphertext
+# (OpenBao) in its own env vars at startup — see backend/src/utils/secrets.ts.
+# Apply with -f docker-compose.yaml -f docker-compose.openbao.yaml.
+#
+# Assumes OpenBao is run separately (e.g. from ~/openbao via
+# `docker compose up`), naming its network <project-dir>_default. Adjust
+# the external network name below if yours differs.
+#
+# If you also enable the observability overlay, use
+# docker-compose.observability-openbao.yaml as well so the Agent can decrypt
+# DD_API_KEY/DD_APP_KEY before it starts.
+services:
+  backend:
+    environment:
+      # Host-side .env points BAO_ADDR at 127.0.0.1; from inside the
+      # container that must resolve to the actual OpenBao container instead.
+      # Joining its network (below) gives us the "openbao" DNS alias, which
+      # also matches the server cert's SAN — so TLS hostname verification
+      # stays on.
+      BAO_ADDR: "https://openbao:8200"
+      BAO_CACERT: /etc/openbao/ca.pem
+    networks:
+      - default
+      - openbao
+    volumes:
+      - ${BAO_CACERT}:/etc/openbao/ca.pem:ro
+
+networks:
+  default: {}
+  openbao:
+    name: openbao_default
+    external: true

@@ -2,7 +2,7 @@ import axios from 'axios';
 import type {
   Org, ScanRun, OrgScorecard, Finding, AIAssessment,
   InventorySummary, TagAnalysisRow, PaginatedResponse, FindingCategory, FindingSeverity,
-  OrgContextData
+  OrgContextData, ScanComparisonResult
 } from '../types';
 
 const api = axios.create({
@@ -49,6 +49,8 @@ export const scansApi = {
   getPermissions: (scanRunId: string) =>
     api.get<Array<{ endpoint: string; status: string; error?: string; tested_at: string }>>(`/scans/${scanRunId}/permissions`).then((r) => r.data),
   remove: (id: string) => api.delete<void>(`/scans/${id}`).then((r) => r.data),
+  compare: (scanRunId: string, against?: string) =>
+    api.get<ScanComparisonResult>(`/scans/${scanRunId}/compare`, { params: against ? { against } : undefined }).then((r) => r.data),
 };
 
 // Inventory
@@ -115,6 +117,8 @@ export const taggingApi = {
     api.get<import('../types').TagEnforcementRow[]>('/tagging/tag-enforcement').then((r) => r.data),
   policyResources: () =>
     api.get<import('../types').TagPolicyResource[]>('/tagging/policy-resources').then((r) => r.data),
+  implementationGuide: (orgId: string, scanRunId: string, mode: import('../types').TaggingMode, mechanism?: import('../types').HardMechanism) =>
+    api.get<import('../types').ImplementationGuideResult>('/tagging/implementation-guide', { params: { orgId, scanRunId, mode, mechanism } }).then((r) => r.data),
 };
 
 // Analytics
@@ -129,6 +133,18 @@ export const analyticsApi = {
 export const usageApi = {
   get: (orgId: string, scanRunId?: string) =>
     api.get<import('../types').UsageData | null>('/usage', { params: { orgId, ...(scanRunId ? { scanRunId } : {}) } }).then(r => r.data),
+};
+
+export const eventsApi = {
+  stats: (orgId: string, scanRunId?: string) =>
+    api.get<import('../types').EventStatsData | null>('/events/stats', { params: { orgId, ...(scanRunId ? { scanRunId } : {}) } }).then(r => r.data),
+};
+
+// Feature flags (Scan -> Collector -> Rule/Page admin toggles)
+export const featureFlagsApi = {
+  getTree: () => api.get<import('../types').FeatureFlagState[]>('/feature-flags').then(r => r.data),
+  setEnabled: (key: string, enabled: boolean) =>
+    api.patch<import('../types').FeatureFlagState[]>(`/feature-flags/${encodeURIComponent(key)}`, { enabled }).then(r => r.data),
 };
 
 export const pricingSnapshotsApi = {
@@ -158,6 +174,10 @@ export const aiSettingsApi = {
     api.get<{ models: string[]; error?: string }>(`/ai-settings/models?${qs}`).then(r => r.data),
   test: () =>
     api.post<{ ok: boolean; message: string }>('/ai-settings/test').then(r => r.data),
+  getPrompts: () =>
+    api.get<import('../types').AIPromptDescriptor[]>('/ai-settings/prompts').then(r => r.data),
+  savePrompt: (key: string, content: string) =>
+    api.put<import('../types').AIPromptDescriptor>(`/ai-settings/prompts/${encodeURIComponent(key)}`, { content }).then(r => r.data),
 };
 
 // AI

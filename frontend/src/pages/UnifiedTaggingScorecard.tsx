@@ -12,6 +12,7 @@ import FilterChip, { FilterChipRow } from '../components/ui/FilterChip';
 import { SkeletonCard, SkeletonText } from '../components/ui/Skeleton';
 import type { FindingSeverity } from '../types';
 import { STATUS, CHART_INK } from '../lib/chartColors';
+import SectionGate from '../components/SectionGate';
 
 export default function UnifiedTaggingScorecard() {
   const { selectedOrgId, selectedScanId } = useOrgAndScanFilters();
@@ -95,118 +96,126 @@ export default function UnifiedTaggingScorecard() {
       ) : (
         <>
           {/* Tag coverage chart */}
-          <div className="card">
-            <h2 className="text-lg font-semibold text-ink mb-4">Tag Coverage by Key</h2>
-            <div style={{ height: Math.max(192, tagCoverageData.length * 32) }}>
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={tagCoverageData} layout="vertical" margin={{ top: 4, right: 36, bottom: 4, left: 0 }} barCategoryGap="30%">
-                  <CartesianGrid horizontal={false} stroke={CHART_INK.gridline} />
-                  <XAxis type="number" domain={[0, 100]} tickFormatter={(v) => `${v}%`} tick={{ fontSize: 11, fill: CHART_INK.muted }} axisLine={false} tickLine={false} />
-                  <YAxis type="category" dataKey="key" width={100} tick={{ fontSize: 12, fontFamily: 'monospace', fill: CHART_INK.secondary }} axisLine={false} tickLine={false} />
-                  <Tooltip
-                    cursor={{ fill: 'rgba(15, 23, 42, 0.04)' }}
-                    content={({ active, payload }) => {
-                      if (!active || !payload?.length) return null;
-                      const p = payload[0].payload as { key: string; coverage: number };
-                      return (
-                        <div className="bg-gray-800 text-white border border-gray-700 text-xs px-2 py-1 rounded shadow-popover whitespace-nowrap">
-                          {p.key}: <span className="font-semibold">{p.coverage}%</span>
-                        </div>
-                      );
-                    }}
-                  />
-                  <Bar dataKey="coverage" radius={[0, 4, 4, 0]} maxBarSize={22}>
-                    {tagCoverageData.map((entry) => (
-                      <Cell
-                        key={entry.key}
-                        fill={entry.coverage >= 90 ? STATUS.good : entry.coverage >= 70 ? STATUS.warning : STATUS.critical}
-                      />
-                    ))}
-                    <LabelList
-                      dataKey="coverage"
-                      position="right"
-                      formatter={(v: number) => `${v}%`}
-                      style={{ fontSize: 12, fontWeight: 600, fill: CHART_INK.primary }}
+          <SectionGate featureKey="section.tagging_scorecard.coverage_by_key">
+            <div className="card">
+              <h2 className="text-lg font-semibold text-ink mb-4">Tag Coverage by Key</h2>
+              <div style={{ height: Math.max(192, tagCoverageData.length * 32) }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={tagCoverageData} layout="vertical" margin={{ top: 4, right: 36, bottom: 4, left: 0 }} barCategoryGap="30%">
+                    <CartesianGrid horizontal={false} stroke={CHART_INK.gridline} />
+                    <XAxis type="number" domain={[0, 100]} tickFormatter={(v) => `${v}%`} tick={{ fontSize: 11, fill: CHART_INK.muted }} axisLine={false} tickLine={false} />
+                    <YAxis type="category" dataKey="key" width={100} tick={{ fontSize: 12, fontFamily: 'monospace', fill: CHART_INK.secondary }} axisLine={false} tickLine={false} />
+                    <Tooltip
+                      cursor={{ fill: 'rgba(15, 23, 42, 0.04)' }}
+                      content={({ active, payload }) => {
+                        if (!active || !payload?.length) return null;
+                        const p = payload[0].payload as { key: string; coverage: number };
+                        return (
+                          <div className="bg-gray-800 text-white border border-gray-700 text-xs px-2 py-1 rounded shadow-popover whitespace-nowrap">
+                            {p.key}: <span className="font-semibold">{p.coverage}%</span>
+                          </div>
+                        );
+                      }}
                     />
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
+                    <Bar dataKey="coverage" radius={[0, 4, 4, 0]} maxBarSize={22}>
+                      {tagCoverageData.map((entry) => (
+                        <Cell
+                          key={entry.key}
+                          fill={entry.coverage >= 90 ? STATUS.good : entry.coverage >= 70 ? STATUS.warning : STATUS.critical}
+                        />
+                      ))}
+                      <LabelList
+                        dataKey="coverage"
+                        position="right"
+                        formatter={(v: number) => `${v}%`}
+                        style={{ fontSize: 12, fontWeight: 600, fill: CHART_INK.primary }}
+                      />
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
             </div>
-          </div>
+          </SectionGate>
 
           {/* Tag standard compliance */}
-          <div className="card">
-            <h2 className="text-lg font-semibold text-ink mb-3">Unified Service Tagging Compliance</h2>
-            <div className="space-y-3">
-              <div>
-                <h3 className="text-sm font-semibold text-ink-muted mb-2">Required Tags</h3>
-                <div className="flex flex-wrap gap-2">
-                  {requiredTags.map((t) => (
-                    t.found
-                      ? <span key={t.key} className="badge bg-green-500/15 text-green-400">✓ {t.key}</span>
-                      : <MissingTagPill key={t.key} tagKey={t.key} />
-                  ))}
+          <SectionGate featureKey="section.tagging_scorecard.ust_compliance">
+            <div className="card">
+              <h2 className="text-lg font-semibold text-ink mb-3">Unified Service Tagging Compliance</h2>
+              <div className="space-y-3">
+                <div>
+                  <h3 className="text-sm font-semibold text-ink-muted mb-2">Required Tags</h3>
+                  <div className="flex flex-wrap gap-2">
+                    {requiredTags.map((t) => (
+                      t.found
+                        ? <span key={t.key} className="badge bg-green-500/15 text-green-400">✓ {t.key}</span>
+                        : <MissingTagPill key={t.key} tagKey={t.key} />
+                    ))}
+                  </div>
                 </div>
-              </div>
-              <div>
-                <h3 className="text-sm font-semibold text-ink-muted mb-2">Recommended Tags</h3>
-                <div className="flex flex-wrap gap-2">
-                  {recommendedTags.map((t) => (
-                    t.found
-                      ? <span key={t.key} className="badge bg-blue-500/15 text-blue-400">✓ {t.key}</span>
-                      : <MissingTagPill key={t.key} tagKey={t.key} />
-                  ))}
+                <div>
+                  <h3 className="text-sm font-semibold text-ink-muted mb-2">Recommended Tags</h3>
+                  <div className="flex flex-wrap gap-2">
+                    {recommendedTags.map((t) => (
+                      t.found
+                        ? <span key={t.key} className="badge bg-blue-500/15 text-blue-400">✓ {t.key}</span>
+                        : <MissingTagPill key={t.key} tagKey={t.key} />
+                    ))}
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
+          </SectionGate>
 
           {/* Tag mapping suggestions */}
           {tagMappings.length > 0 && (
-            <div className="card">
-              <h2 className="text-lg font-semibold text-ink mb-3">Tag Mapping Suggestions</h2>
-              <p className="text-sm text-ink-muted mb-3">
-                These existing tags may correspond to standard tag keys. Review and remap as needed.
-              </p>
-              <div className="space-y-2">
-                {tagMappings.map((t) => (
-                  <div key={t.tag_key} className="flex items-center gap-3 bg-amber-500/10 border border-amber-500/30 rounded p-3">
-                    <code className="text-sm text-amber-400 bg-amber-500/15 px-2 py-0.5 rounded">{t.tag_key}</code>
-                    <span className="text-ink-muted">→</span>
-                    <code className="text-sm text-green-400 bg-green-500/15 px-2 py-0.5 rounded">{t.suggested_mapping}</code>
-                    <span className="text-xs text-ink-muted">
-                      ({t.host_occurrence_count} hosts)
-                    </span>
-                  </div>
-                ))}
+            <SectionGate featureKey="section.tagging_scorecard.mapping_suggestions">
+              <div className="card">
+                <h2 className="text-lg font-semibold text-ink mb-3">Tag Mapping Suggestions</h2>
+                <p className="text-sm text-ink-muted mb-3">
+                  These existing tags may correspond to standard tag keys. Review and remap as needed.
+                </p>
+                <div className="space-y-2">
+                  {tagMappings.map((t) => (
+                    <div key={t.tag_key} className="flex items-center gap-3 bg-amber-500/10 border border-amber-500/30 rounded p-3">
+                      <code className="text-sm text-amber-400 bg-amber-500/15 px-2 py-0.5 rounded">{t.tag_key}</code>
+                      <span className="text-ink-muted">→</span>
+                      <code className="text-sm text-green-400 bg-green-500/15 px-2 py-0.5 rounded">{t.suggested_mapping}</code>
+                      <span className="text-xs text-ink-muted">
+                        ({t.host_occurrence_count} hosts)
+                      </span>
+                    </div>
+                  ))}
+                </div>
               </div>
-            </div>
+            </SectionGate>
           )}
 
           {/* Findings */}
           {findings.length > 0 && (
-            <div className="card">
-              <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-                <h2 className="text-lg font-semibold text-ink">
-                  Tagging Findings ({filteredFindings.length}{filteredFindings.length !== findings.length ? ` of ${findings.length}` : ''})
-                </h2>
-                <FilterChipRow>
-                  <FilterChip label="All" active={severityFilter === 'all'} count={findings.length} onClick={() => setSeverityFilter('all')} />
-                  {(['critical', 'high', 'medium', 'low', 'info'] as FindingSeverity[])
-                    .filter((s) => severityCounts[s] > 0)
-                    .map((s) => (
-                      <FilterChip
-                        key={s}
-                        label={s[0].toUpperCase() + s.slice(1)}
-                        active={severityFilter === s}
-                        count={severityCounts[s]}
-                        onClick={() => setSeverityFilter(s)}
-                      />
-                    ))}
-                </FilterChipRow>
+            <SectionGate featureKey="section.tagging_scorecard.findings">
+              <div className="card">
+                <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+                  <h2 className="text-lg font-semibold text-ink">
+                    Tagging Findings ({filteredFindings.length}{filteredFindings.length !== findings.length ? ` of ${findings.length}` : ''})
+                  </h2>
+                  <FilterChipRow>
+                    <FilterChip label="All" active={severityFilter === 'all'} count={findings.length} onClick={() => setSeverityFilter('all')} />
+                    {(['critical', 'high', 'medium', 'low', 'info'] as FindingSeverity[])
+                      .filter((s) => severityCounts[s] > 0)
+                      .map((s) => (
+                        <FilterChip
+                          key={s}
+                          label={s[0].toUpperCase() + s.slice(1)}
+                          active={severityFilter === s}
+                          count={severityCounts[s]}
+                          onClick={() => setSeverityFilter(s)}
+                        />
+                      ))}
+                  </FilterChipRow>
+                </div>
+                <EvidenceTable findings={filteredFindings} />
               </div>
-              <EvidenceTable findings={filteredFindings} />
-            </div>
+            </SectionGate>
           )}
         </>
       )}

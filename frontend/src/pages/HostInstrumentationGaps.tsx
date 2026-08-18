@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { inventoryApi } from '../services/api';
+import SectionGate from '../components/SectionGate';
 import { useOrgAndScanFilters } from '../hooks/useFilters';
 import { EmptyState } from '../components/common/LoadingState';
 import MetricCard from '../components/common/MetricCard';
@@ -100,6 +101,7 @@ export default function HostInstrumentationGaps() {
       ),
     },
     { key: 'platform', header: 'Platform', sortable: true, render: (h) => <span className="text-xs text-ink-muted">{h.platform ?? '—'}</span> },
+    { key: 'agentVersion', header: 'Agent', sortable: true, render: (h) => <span className="text-xs font-mono text-ink-faint">{h.agentVersion ?? '—'}</span> },
     {
       key: 'apm', header: 'APM', sortable: true, sortAccessor: (h) => (h.hasApm ? 1 : 0),
       render: (h) => (
@@ -191,86 +193,94 @@ export default function HostInstrumentationGaps() {
 
           {/* Product gaps */}
           {data.productGaps.length > 0 && (
-            <section>
-              <h2 className="text-lg font-bold text-ink mb-1">Product Coverage Gaps</h2>
-              <p className="text-sm text-ink-muted mb-3">
-                Where instrumenting more hosts would close a real visibility gap — click a card for why/what/how/cost/impact.
-              </p>
-              <div className="grid grid-cols-2 gap-3">
-                {data.productGaps.map((g) => <ProductGapCard key={g.product} gap={g} />)}
-              </div>
-            </section>
+            <SectionGate featureKey="section.host_gaps.coverage_gaps">
+              <section>
+                <h2 className="text-lg font-bold text-ink mb-1">Product Coverage Gaps</h2>
+                <p className="text-sm text-ink-muted mb-3">
+                  Where instrumenting more hosts would close a real visibility gap — click a card for why/what/how/cost/impact.
+                </p>
+                <div className="grid grid-cols-2 gap-3">
+                  {data.productGaps.map((g) => <ProductGapCard key={g.product} gap={g} />)}
+                </div>
+              </section>
+            </SectionGate>
           )}
 
           {/* App breakdown */}
           {data.appBreakdown.length > 0 && (
-            <section>
-              <h2 className="text-lg font-bold text-ink mb-1">App Breakdown</h2>
-              <p className="text-sm text-ink-muted mb-3">Hosts vs. serverless — tag coverage is only verifiable where there's a per-resource inventory today.</p>
-              <div className="grid grid-cols-3 gap-3">
-                {data.appBreakdown.map((a, i) => (
-                  <div key={a.type} className="card">
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="text-lg">{a.icon}</span>
-                      <span className="font-semibold text-ink text-sm">{a.label}</span>
-                    </div>
-                    <div className="text-2xl font-bold text-ink">{a.count.toLocaleString()}</div>
-                    {a.tagCoveragePct !== null ? (
-                      <div className="mt-1">
-                        <div className="h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: trackTint(CATEGORICAL[i % CATEGORICAL.length]) }}>
-                          <div className="h-full rounded-full" style={{ width: `${a.tagCoveragePct}%`, backgroundColor: CATEGORICAL[i % CATEGORICAL.length] }} />
-                        </div>
-                        <div className="text-xs text-ink-faint mt-1">{a.tagCoveragePct}% tag coverage</div>
+            <SectionGate featureKey="section.host_gaps.app_breakdown">
+              <section>
+                <h2 className="text-lg font-bold text-ink mb-1">App Breakdown</h2>
+                <p className="text-sm text-ink-muted mb-3">Hosts vs. serverless — tag coverage is only verifiable where there's a per-resource inventory today.</p>
+                <div className="grid grid-cols-3 gap-3">
+                  {data.appBreakdown.map((a, i) => (
+                    <div key={a.type} className="card">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-lg">{a.icon}</span>
+                        <span className="font-semibold text-ink text-sm">{a.label}</span>
                       </div>
-                    ) : (
-                      <div className="text-xs text-amber-400 mt-1">{a.tagCoverageNote}</div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </section>
+                      <div className="text-2xl font-bold text-ink">{a.count.toLocaleString()}</div>
+                      {a.tagCoveragePct !== null ? (
+                        <div className="mt-1">
+                          <div className="h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: trackTint(CATEGORICAL[i % CATEGORICAL.length]) }}>
+                            <div className="h-full rounded-full" style={{ width: `${a.tagCoveragePct}%`, backgroundColor: CATEGORICAL[i % CATEGORICAL.length] }} />
+                          </div>
+                          <div className="text-xs text-ink-faint mt-1">{a.tagCoveragePct}% tag coverage</div>
+                        </div>
+                      ) : (
+                        <div className="text-xs text-amber-400 mt-1">{a.tagCoverageNote}</div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </section>
+            </SectionGate>
           )}
 
           {/* Host inventory */}
-          <section>
-            <h2 className="text-lg font-bold text-ink mb-1">Host Inventory & Blind Spots</h2>
-            <p className="text-sm text-ink-muted mb-3">
-              Cloud placement, APM presence, and tag compliance per host — 🕳 marks hosts Datadog can see but nothing identifies.
-            </p>
-            <DataTable
-              tableId="host-gaps-inventory"
-              columns={hostColumns}
-              data={data.hosts}
-              rowKey={(h) => h.hostName}
-              searchable
-              pageSize={15}
-            />
-          </section>
-
-          {/* Service catalog maturity */}
-          {data.serviceMaturity.services.length > 0 && (
+          <SectionGate featureKey="section.host_gaps.host_inventory">
             <section>
-              <h2 className="text-lg font-bold text-ink mb-1">Service Catalog Maturity</h2>
+              <h2 className="text-lg font-bold text-ink mb-1">Host Inventory & Blind Spots</h2>
               <p className="text-sm text-ink-muted mb-3">
-                Composite score: catalog entry (30%) + monitor (30%) + SLO (20%) + version tag (10%) + owning team (10%).
+                Cloud placement, APM presence, and tag compliance per host — 🕳 marks hosts Datadog can see but nothing identifies.
               </p>
-              <div className="grid grid-cols-4 gap-3 mb-3">
-                {(['excellent', 'good', 'needs_attention', 'critical'] as const).map((g) => (
-                  <div key={g} className="card text-center py-3">
-                    <div className="text-xl font-bold text-ink">{data.serviceMaturity.distribution[g]}</div>
-                    <GradeBadge grade={g} />
-                  </div>
-                ))}
-              </div>
               <DataTable
-                tableId="service-maturity"
-                columns={serviceColumns}
-                data={data.serviceMaturity.services}
-                rowKey={(s) => `${s.serviceName}-${s.env ?? ''}`}
+                tableId="host-gaps-inventory"
+                columns={hostColumns}
+                data={data.hosts}
+                rowKey={(h) => h.hostName}
                 searchable
                 pageSize={15}
               />
             </section>
+          </SectionGate>
+
+          {/* Service catalog maturity */}
+          {data.serviceMaturity.services.length > 0 && (
+            <SectionGate featureKey="section.host_gaps.service_catalog_maturity">
+              <section>
+                <h2 className="text-lg font-bold text-ink mb-1">Service Catalog Maturity</h2>
+                <p className="text-sm text-ink-muted mb-3">
+                  Composite score: catalog entry (30%) + monitor (30%) + SLO (20%) + version tag (10%) + owning team (10%).
+                </p>
+                <div className="grid grid-cols-4 gap-3 mb-3">
+                  {(['excellent', 'good', 'needs_attention', 'critical'] as const).map((g) => (
+                    <div key={g} className="card text-center py-3">
+                      <div className="text-xl font-bold text-ink">{data.serviceMaturity.distribution[g]}</div>
+                      <GradeBadge grade={g} />
+                    </div>
+                  ))}
+                </div>
+                <DataTable
+                  tableId="service-maturity"
+                  columns={serviceColumns}
+                  data={data.serviceMaturity.services}
+                  rowKey={(s) => `${s.serviceName}-${s.env ?? ''}`}
+                  searchable
+                  pageSize={15}
+                />
+              </section>
+            </SectionGate>
           )}
         </>
       )}

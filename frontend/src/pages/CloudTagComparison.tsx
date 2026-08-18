@@ -8,6 +8,8 @@ import { SkeletonCards, SkeletonTable } from '../components/ui/Skeleton';
 import FilterChip, { FilterChipRow } from '../components/ui/FilterChip';
 import DataTable, { type Column } from '../components/common/DataTable';
 import type { CloudAlignmentRow } from '../types';
+import ResourceFindingCard from '../components/tagging/ResourceFindingCard';
+import SectionGate from '../components/SectionGate';
 
 const STATUS_CONFIG = {
   aligned: { label: '✓ Aligned', color: 'bg-green-500/15 text-green-400', border: 'border-green-500/30' },
@@ -114,6 +116,7 @@ export default function CloudTagComparison() {
         ) : !alignment ? <EmptyState message="No cloud tag data found. Ensure AWS/Azure/GCP integration is configured." /> : (
           <>
             {/* Summary cards */}
+            <SectionGate featureKey="section.cloud_tags.summary">
             <div className="grid grid-cols-5 gap-3">
               {[
                 { label: 'Alignment Score', value: alignment.alignmentScore, color: 'text-violet-400', suffix: '/100' },
@@ -140,9 +143,11 @@ export default function CloudTagComparison() {
                 ))}
               </div>
             )}
+            </SectionGate>
 
             {/* Propagation gaps — most actionable */}
             {alignment.propagationGaps.length > 0 && (
+              <SectionGate featureKey="section.cloud_tags.propagation_gaps">
               <section>
                 <h2 className="text-lg font-bold text-ink mb-1">Propagation Gaps</h2>
                 <p className="text-sm text-ink-muted mb-3">
@@ -176,9 +181,11 @@ export default function CloudTagComparison() {
                   ))}
                 </div>
               </section>
+              </SectionGate>
             )}
 
             {/* Full alignment table */}
+            <SectionGate featureKey="section.cloud_tags.comparison_table">
             <section>
               <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
                 <h2 className="text-lg font-bold text-ink">Full Tag Comparison</h2>
@@ -198,8 +205,22 @@ export default function CloudTagComparison() {
                 emptyMessage="No cloud tags detected. Ensure the Datadog AWS/Azure/GCP integration is enabled and tag collection is turned on."
                 searchable
                 pageSize={15}
+                expandable={(row) => row.affectedHosts.length > 0 || Boolean(row.bestPractice?.found)}
+                expandedRowRender={(row) => (
+                  <ResourceFindingCard
+                    title={`${row.cloudTagKey} → ${row.ddTagKey ?? '(no Datadog equivalent)'}`}
+                    description={row.mappingSuggestion ?? undefined}
+                    tagKey={row.ddTagKey ?? row.cloudTagKey}
+                    bestPractice={row.bestPractice}
+                    recommendation={row.mappingSuggestion ?? undefined}
+                    affectedResources={row.affectedHosts.map((h) => ({ type: 'host', id: h.id, name: h.name }))}
+                    affectedCount={row.affectedHostCount}
+                    totalCount={row.affectedHostCount}
+                  />
+                )}
               />
             </section>
+            </SectionGate>
           </>
         )}
     </div>

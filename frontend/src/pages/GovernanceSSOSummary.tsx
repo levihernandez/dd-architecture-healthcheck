@@ -9,6 +9,7 @@ import { EmptyState } from '../components/common/LoadingState';
 import PageHeader from '../components/ui/PageHeader';
 import FilterChip, { FilterChipRow } from '../components/ui/FilterChip';
 import { SkeletonCards, SkeletonCard } from '../components/ui/Skeleton';
+import SectionGate from '../components/SectionGate';
 import type { FindingSeverity } from '../types';
 
 function DDLink({ href, label = 'Open in Datadog' }: { href: string; label?: string }) {
@@ -86,6 +87,7 @@ export default function GovernanceSSOSummary() {
       ) : (
         <>
           {/* Top metrics */}
+          <SectionGate featureKey="section.governance.metric_tiles">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <MetricCard label="Active Users" value={userCount ?? '—'} icon="👥"
               subtitle="in this org" />
@@ -97,9 +99,11 @@ export default function GovernanceSSOSummary() {
               subtitle={strictMode ? 'SSO required for all' : 'local login allowed'}
               color={strictMode ? 'green' : samlEnabled ? 'amber' : 'default'} />
           </div>
+          </SectionGate>
 
           {/* SSO configuration detail */}
           {ssoSignal && (
+            <SectionGate featureKey="section.governance.sso_config">
             <div className="card">
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-base font-semibold text-ink">SSO Configuration</h2>
@@ -143,10 +147,12 @@ export default function GovernanceSSOSummary() {
                 Only high-level enablement signals are collected — no IdP metadata, certificates, or sensitive configuration.
               </p>
             </div>
+            </SectionGate>
           )}
 
           {/* Governance findings from analytics */}
           {govFindings.length > 0 && (
+            <SectionGate featureKey="section.governance.findings">
             <div className="card">
               <div className="flex items-center justify-between mb-3">
                 <h2 className="text-base font-semibold text-ink">Governance Findings</h2>
@@ -177,10 +183,12 @@ export default function GovernanceSSOSummary() {
                 ))}
               </div>
             </div>
+            </SectionGate>
           )}
 
           {/* Scan findings */}
           {findings.length > 0 && (
+            <SectionGate featureKey="section.governance.findings">
             <div className="card">
               <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
                 <h2 className="text-lg font-semibold text-ink">
@@ -203,6 +211,7 @@ export default function GovernanceSSOSummary() {
               </div>
               <EvidenceTable findings={filteredFindings} />
             </div>
+            </SectionGate>
           )}
 
           {/* Access management links */}

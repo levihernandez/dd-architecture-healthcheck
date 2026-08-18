@@ -1,0 +1,16 @@
+description = "Run a Datadog architecture health check via the Datadog API — no local server/app required."
+
+prompt = """
+Follow the instructions in `.claude/skills/dd-architecture-healthcheck/SKILL.md`
+in this repo — read it first. Then use its scripts (`scripts/collect.mjs`,
+`scripts/list-resources.mjs`, `scripts/status.mjs`, `scripts/snapshot-diff.mjs`)
+via the shell tool to collect Datadog resource data one domain at a time and
+produce findings from the results.
+
+Do not collect all 17 resource domains in one pass — the skill file explains
+why (context bloat, rate limits) and gives suggested default domains and
+sequencing. Confirm DD_API_KEY, DD_APP_KEY, and DD_SITE are already set in
+the environment before running anything; never ask for key values in chat.
+
+User's request: {{args}}
+"""

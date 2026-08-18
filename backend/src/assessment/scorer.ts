@@ -1,6 +1,7 @@
 import type {
   Finding, OrgScorecard, CategoryScore, ScoreGrade, FindingCategory
 } from '../types/assessment.types';
+import { FeatureFlagRepository } from '../feature-flags/repository';
 
 // Partial, not Record<FindingCategory, number>: categories absent here (e.g.
 // cost_optimization) are informational-only and never enter the weighted score.
@@ -43,6 +44,13 @@ export function computeScorecard(
     const catFindings = findings.filter((f) => f.category === category);
     const score = computeCategoryScore(category, catFindings);
     categoryScores.push(score);
+
+    // A disabled rule category never runs its rules (see engine.ts), so it
+    // always has zero findings here — which would otherwise look like a false
+    // "100% passing" score. Exclude it from the weighted rollup entirely
+    // rather than let an intentionally-skipped category inflate overall score.
+    if (!FeatureFlagRepository.isRuleCategoryEnabled(category)) continue;
+
     weightedTotal += score.percentage * weight;
     weightSum += weight;
   }

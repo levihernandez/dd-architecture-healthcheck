@@ -1,5 +1,7 @@
 // Assessment engine types
 
+import type { BestPracticeRecommendation } from '../tagging/recommendation';
+
 export type FindingSeverity = 'critical' | 'high' | 'medium' | 'low' | 'info';
 export type FindingCategory =
   | 'unified_tagging'
@@ -37,6 +39,10 @@ export interface Finding {
   evidence: Evidence[];
   tags?: string[];
   createdAt: string;
+  /** The primary tag-dictionary key this finding is about (e.g. 'env', 'team'). */
+  tagKey?: string;
+  /** Datadog best-practice guidance for tagKey, sourced from the tag dictionary. */
+  bestPractice?: BestPracticeRecommendation;
 }
 
 export interface AffectedResource {
@@ -113,8 +119,27 @@ export interface AIAssessmentRequest {
   tagAnalysis: TagAnalysis;
 }
 
+/** Minimal per-resource reference kept alongside a top finding so prompts/reports
+ * can cite something concrete instead of only a category-level percentage. Capped
+ * (see buildFindingSummary) to keep prompt size bounded. */
+export interface FindingResourceRef {
+  type: string;
+  id: string;
+  name: string;
+}
+
+export interface TopFindingSummary {
+  title: string;
+  affectedCount: number;
+  totalCount: number;
+  percentage: number;
+  /** Up to 3 concrete affected resources for this finding, plus how many more exist beyond that cap. */
+  resources: FindingResourceRef[];
+  totalResourceCount: number;
+}
+
 export interface FindingSummary {
-  byCategory: Record<FindingCategory, { count: number; topFindings: string[] }>;
+  byCategory: Record<FindingCategory, { count: number; topFindings: TopFindingSummary[] }>;
   bySeverity: Record<FindingSeverity, number>;
   totalFindings: number;
 }
@@ -161,6 +186,9 @@ export interface AIAssessmentResponse {
     impact: 'low' | 'medium' | 'high';
     category: FindingCategory;
     evidenceRefs: string[];
+    /** Set by post-generation validation (validate-assessment.ts) when none of this
+     * recommendation's evidenceRefs could be matched against known scan data. */
+    confidence?: 'low' | 'normal';
   }>;
   taggingStrategyProposal: {
     requiredTags: TagDefinition[];

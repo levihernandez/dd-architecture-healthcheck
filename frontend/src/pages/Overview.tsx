@@ -12,6 +12,8 @@ import PageHeader from '../components/ui/PageHeader';
 import DataTable, { type Column } from '../components/common/DataTable';
 import { SkeletonCards } from '../components/ui/Skeleton';
 import { useOrgs, useScans } from '../hooks/useOrgs';
+import { useFeatureFlags } from '../hooks/useFeatureFlags';
+import SectionGate from '../components/SectionGate';
 import { formatDistanceToNow } from 'date-fns';
 import type { Org, ScanRun, OrgScorecard } from '../types';
 
@@ -22,6 +24,8 @@ export default function Overview() {
   const qc = useQueryClient();
   const { data: orgs = [], isLoading: orgsLoading } = useOrgs();
   const [filterOrgId, setFilterOrgId] = useState<string | null>(null);
+  const { isPageEnabled } = useFeatureFlags();
+  const scanEnabled = isPageEnabled('scan');
 
   const { data: overview = [], isLoading: overviewLoading } = useQuery({
     queryKey: ['orgs-overview'],
@@ -140,8 +144,9 @@ export default function Overview() {
               </button>
               <button
                 className="btn-primary"
-                disabled={startScan.isPending || selectedOrg.lastScanStatus === 'running'}
+                disabled={startScan.isPending || selectedOrg.lastScanStatus === 'running' || !scanEnabled}
                 onClick={() => startScan.mutate(selectedOrg.id)}
+                title={scanEnabled ? undefined : 'Scanning is disabled by an admin in Feature Flags'}
               >
                 {selectedOrg.lastScanStatus === 'running' ? '⟳ Scanning...' : '▶ Run Scan'}
               </button>
@@ -168,6 +173,7 @@ export default function Overview() {
             selected={filterOrgId === org.id}
             onSelect={() => setFilterOrgId(org.id)}
             onScan={() => startScan.mutate(org.id)}
+            scanEnabled={scanEnabled}
           />
         ))}
       </div>
@@ -201,61 +207,69 @@ export default function Overview() {
           )}
 
           {/* Inventory summary */}
-          {inventoryLoading && Boolean(selectedOrg?.id && latestScan?.id) && (
-            <div>
-              <h2 className="text-lg font-semibold text-ink mb-3">Inventory</h2>
-              <SkeletonCards count={8} />
-            </div>
-          )}
-          {inventory && (
-            <div>
-              <h2 className="text-lg font-semibold text-ink mb-3">Inventory</h2>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <MetricCard label="Hosts" value={inventory.hosts} icon="🖥" onClick={() => navigate('/inventory')} />
-                <MetricCard label="APM Services" value={inventory.services} icon="⚡" onClick={() => navigate('/services')} />
-                <MetricCard label="Monitors" value={inventory.monitors} icon="🔔" onClick={() => navigate('/monitors')} />
-                <MetricCard label="Dashboards" value={inventory.dashboards} icon="📈" onClick={() => navigate('/dashboards')} />
-                <MetricCard label="Synthetics" value={inventory.syntheticsTests} icon="🌐" onClick={() => navigate('/synthetics')} />
-                <MetricCard label="Log Indexes" value={inventory.logsIndexes} icon="📋" onClick={() => navigate('/logs')} />
-                <MetricCard label="Cloud Accounts" value={inventory.cloudAccounts} icon="☁" onClick={() => navigate('/network')} />
-                <MetricCard
-                  label="env Tag Coverage"
-                  value={`${inventory.envTagCoverage}%`}
-                  icon="🏷"
-                  color={inventory.envTagCoverage >= 90 ? 'green' : inventory.envTagCoverage >= 70 ? 'amber' : 'red'}
-                  onClick={() => navigate('/tagging-scorecard')}
-                />
-                <MetricCard
-                  label="Security Findings" value={inventory.securityFindings} icon="🛡"
-                  color={inventory.securityFindings > 0 ? 'amber' : 'green'}
-                  onClick={() => navigate('/analytics')}
-                />
-                <MetricCard
-                  label="Open Incidents" value={inventory.openIncidents} icon="🚨"
-                  color={inventory.openIncidents > 0 ? 'red' : 'green'}
-                  onClick={() => navigate('/analytics')}
-                />
-              </div>
-            </div>
-          )}
+          <SectionGate featureKey="section.overview.inventory_summary">
+            <>
+              {inventoryLoading && Boolean(selectedOrg?.id && latestScan?.id) && (
+                <div>
+                  <h2 className="text-lg font-semibold text-ink mb-3">Inventory</h2>
+                  <SkeletonCards count={8} />
+                </div>
+              )}
+              {inventory && (
+                <div>
+                  <h2 className="text-lg font-semibold text-ink mb-3">Inventory</h2>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <MetricCard label="Hosts" value={inventory.hosts} icon="🖥" onClick={() => navigate('/inventory')} />
+                    <MetricCard label="APM Services" value={inventory.services} icon="⚡" onClick={() => navigate('/services')} />
+                    <MetricCard label="Monitors" value={inventory.monitors} icon="🔔" onClick={() => navigate('/monitors')} />
+                    <MetricCard label="Dashboards" value={inventory.dashboards} icon="📈" onClick={() => navigate('/dashboards')} />
+                    <MetricCard label="Synthetics" value={inventory.syntheticsTests} icon="🌐" onClick={() => navigate('/synthetics')} />
+                    <MetricCard label="Log Indexes" value={inventory.logsIndexes} icon="📋" onClick={() => navigate('/logs')} />
+                    <MetricCard label="Cloud Accounts" value={inventory.cloudAccounts} icon="☁" onClick={() => navigate('/network')} />
+                    <MetricCard
+                      label="env Tag Coverage"
+                      value={`${inventory.envTagCoverage}%`}
+                      icon="🏷"
+                      color={inventory.envTagCoverage >= 90 ? 'green' : inventory.envTagCoverage >= 70 ? 'amber' : 'red'}
+                      onClick={() => navigate('/tagging-scorecard')}
+                    />
+                    <MetricCard
+                      label="Security Findings" value={inventory.securityFindings} icon="🛡"
+                      color={inventory.securityFindings > 0 ? 'amber' : 'green'}
+                      onClick={() => navigate('/analytics')}
+                    />
+                    <MetricCard
+                      label="Open Incidents" value={inventory.openIncidents} icon="🚨"
+                      color={inventory.openIncidents > 0 ? 'red' : 'green'}
+                      onClick={() => navigate('/analytics')}
+                    />
+                  </div>
+                </div>
+              )}
+            </>
+          </SectionGate>
 
           {/* Recent scans */}
-          {scans.length > 0 && (
-            <div>
-              <div className="flex items-center justify-between mb-3">
-                <h2 className="text-lg font-semibold text-ink">Recent Scans</h2>
-                <button className="text-xs text-dd-purple hover:text-dd-purple-dark" onClick={() => navigate('/scans')}>
-                  View all →
-                </button>
-              </div>
-              <DataTable
-                columns={scanColumns}
-                data={scans.slice(0, 5)}
-                rowKey={(scan) => scan.id}
-                onRowClick={() => navigate('/scans')}
-              />
-            </div>
-          )}
+          <SectionGate featureKey="section.overview.recent_scans">
+            <>
+              {scans.length > 0 && (
+                <div>
+                  <div className="flex items-center justify-between mb-3">
+                    <h2 className="text-lg font-semibold text-ink">Recent Scans</h2>
+                    <button className="text-xs text-dd-purple hover:text-dd-purple-dark" onClick={() => navigate('/scans')}>
+                      View all →
+                    </button>
+                  </div>
+                  <DataTable
+                    columns={scanColumns}
+                    data={scans.slice(0, 5)}
+                    rowKey={(scan) => scan.id}
+                    onRowClick={() => navigate('/scans')}
+                  />
+                </div>
+              )}
+            </>
+          </SectionGate>
         </>
       )}
     </div>
@@ -279,21 +293,25 @@ function MultiOrgRollup({
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <MetricCard label="Avg. Health Score" value={avgScore ?? '—'} icon="📊" color={avgScore !== null && avgScore >= 90 ? 'green' : avgScore !== null && avgScore >= 70 ? 'amber' : 'default'} />
-        <MetricCard label="Orgs Needing Attention" value={needsAttention} icon="⚠" color={needsAttention > 0 ? 'red' : 'green'} />
-        <MetricCard label="Critical Findings" value={totalCritical} icon="🔴" color={totalCritical > 0 ? 'red' : 'green'} />
-        <MetricCard label="High Findings" value={totalHigh} icon="🟠" color={totalHigh > 0 ? 'amber' : 'green'} />
-      </div>
-
-      <div>
-        <h2 className="text-lg font-semibold text-ink mb-3">By Organization</h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {overview.map((org) => (
-            <OrgHealthCard key={org.id} org={org} onClick={() => onSelectOrg(org.id)} />
-          ))}
+      <SectionGate featureKey="section.overview.stat_tiles">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <MetricCard label="Avg. Health Score" value={avgScore ?? '—'} icon="📊" color={avgScore !== null && avgScore >= 90 ? 'green' : avgScore !== null && avgScore >= 70 ? 'amber' : 'default'} />
+          <MetricCard label="Orgs Needing Attention" value={needsAttention} icon="⚠" color={needsAttention > 0 ? 'red' : 'green'} />
+          <MetricCard label="Critical Findings" value={totalCritical} icon="🔴" color={totalCritical > 0 ? 'red' : 'green'} />
+          <MetricCard label="High Findings" value={totalHigh} icon="🟠" color={totalHigh > 0 ? 'amber' : 'green'} />
         </div>
-      </div>
+      </SectionGate>
+
+      <SectionGate featureKey="section.overview.by_org">
+        <div>
+          <h2 className="text-lg font-semibold text-ink mb-3">By Organization</h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {overview.map((org) => (
+              <OrgHealthCard key={org.id} org={org} onClick={() => onSelectOrg(org.id)} />
+            ))}
+          </div>
+        </div>
+      </SectionGate>
     </div>
   );
 }
@@ -342,8 +360,8 @@ function OrgHealthCard({ org, onClick }: { org: OrgOverview; onClick: () => void
 }
 
 function OrgStatusPill({
-  org, selected, onSelect, onScan,
-}: { org: Org; selected: boolean; onSelect: () => void; onScan: () => void }) {
+  org, selected, onSelect, onScan, scanEnabled,
+}: { org: Org; selected: boolean; onSelect: () => void; onScan: () => void; scanEnabled: boolean }) {
   return (
     <div
       className={clsx(
@@ -360,7 +378,9 @@ function OrgStatusPill({
       {org.lastScanStatus !== 'running' && (
         <button
           onClick={(e) => { e.stopPropagation(); onScan(); }}
-          className="text-xs text-dd-purple hover:text-dd-purple-dark ml-1"
+          disabled={!scanEnabled}
+          title={scanEnabled ? undefined : 'Scanning is disabled by an admin in Feature Flags'}
+          className="text-xs text-dd-purple hover:text-dd-purple-dark ml-1 disabled:opacity-40 disabled:cursor-not-allowed"
         >
           Scan
         </button>

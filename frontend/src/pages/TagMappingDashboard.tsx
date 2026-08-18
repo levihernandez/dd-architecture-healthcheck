@@ -6,6 +6,8 @@ import { EmptyState } from '../components/common/LoadingState';
 import PageHeader from '../components/ui/PageHeader';
 import { SkeletonCards } from '../components/ui/Skeleton';
 import FilterChip, { FilterChipRow } from '../components/ui/FilterChip';
+import ResourceFindingCard from '../components/tagging/ResourceFindingCard';
+import SectionGate from '../components/SectionGate';
 
 function StatusBadge({ status }: { status: 'found' | 'missing' | 'drifted' }) {
   const map = {
@@ -46,6 +48,14 @@ export default function TagMappingDashboard() {
   const filteredConflicts = (norm?.conflicts ?? []).filter(
     (c) => conflictTypeFilter === 'all' || c.conflictType === conflictTypeFilter
   );
+  const [expandedConflicts, setExpandedConflicts] = useState<Set<number>>(new Set());
+  function toggleConflict(i: number) {
+    setExpandedConflicts((prev) => {
+      const next = new Set(prev);
+      if (next.has(i)) next.delete(i); else next.add(i);
+      return next;
+    });
+  }
 
   return (
     <div className="max-w-5xl space-y-8">
@@ -86,6 +96,7 @@ export default function TagMappingDashboard() {
 
             {/* Conflicts — most actionable, shown first */}
             {norm.conflicts.length > 0 && (
+              <SectionGate featureKey="section.tag_mapping.conflicts">
               <section>
                 <h2 className="text-lg font-bold text-ink mb-1">Conflicts & Inconsistencies</h2>
                 <p className="text-sm text-ink-muted mb-3">Issues that reduce tag reliability and should be resolved before extending coverage.</p>
@@ -127,15 +138,36 @@ export default function TagMappingDashboard() {
                             <span className="font-semibold text-blue-400 uppercase tracking-wide">Fix: </span>
                             {c.recommendation}
                           </div>
+                          {c.affectedResources.length > 0 && (
+                            <button
+                              onClick={() => toggleConflict(i)}
+                              className="text-xs text-violet-400 hover:underline mt-2"
+                            >
+                              {expandedConflicts.has(i) ? '▾ Hide affected resources' : `▸ Show affected resources`}
+                            </button>
+                          )}
                         </div>
                       </div>
+                      {expandedConflicts.has(i) && c.affectedResources.length > 0 && (
+                        <div className="mt-2">
+                          <ResourceFindingCard
+                            title={`"${c.tagKey}" conflict`}
+                            recommendation={c.recommendation}
+                            affectedResources={c.affectedResources}
+                            affectedCount={c.affectedCount}
+                            totalCount={c.affectedCount}
+                          />
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
               </section>
+              </SectionGate>
             )}
 
             {/* Synonym Groups */}
+            <SectionGate featureKey="section.tag_mapping.synonym_detection">
             <section>
               <h2 className="text-lg font-bold text-ink mb-1">Synonym Detection</h2>
               <p className="text-sm text-ink-muted mb-3">Tag keys detected in your org that map to the same canonical Datadog key. Consolidating these reduces confusion and enables unified filtering.</p>
@@ -177,8 +209,10 @@ export default function TagMappingDashboard() {
                 ))}
               </div>
             </section>
+            </SectionGate>
 
             {/* Tag Dictionary — reference view, shown last */}
+            <SectionGate featureKey="section.tag_mapping.dictionary_status">
             <section>
               <h2 className="text-lg font-bold text-ink mb-1">Tag Dictionary Status</h2>
               <p className="text-sm text-ink-muted mb-3">Coverage of standard Datadog tagging keys across your infrastructure.</p>
@@ -218,6 +252,7 @@ export default function TagMappingDashboard() {
                 ))}
               </div>
             </section>
+            </SectionGate>
           </>
         )}
     </div>

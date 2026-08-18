@@ -1,12 +1,22 @@
-import type { AIAssessmentRequest } from '../types/assessment.types';
+import type { AIAssessmentRequest, TopFindingSummary } from '../types/assessment.types';
 import { gradeLabel } from '../assessment/scorer';
+import { getPrompt } from './prompt-store';
+
+/** Renders a top finding with its capped, concrete resource refs so the model has
+ * something real to cite as evidence instead of only a category-level percentage. */
+function formatTopFinding(f: TopFindingSummary): string {
+  const base = `${f.title} (${f.affectedCount}/${f.totalCount}, ${Math.round(f.percentage)}%)`;
+  if (f.resources.length === 0) return base;
+  const shown = f.resources.map((r) => r.name || r.id).join(', ');
+  const remaining = f.totalResourceCount - f.resources.length;
+  const type = f.resources[0]?.type ? `${f.resources[0].type}s` : 'resources';
+  return `${base} [${type}: ${shown}${remaining > 0 ? `, +${remaining} more` : ''}]`;
+}
 
 export function buildAssessmentPrompt(req: AIAssessmentRequest): string {
   const { scorecard, findingSummary, inventorySummary, tagAnalysis } = req;
 
-  return `You are a Datadog Solutions Engineer performing a formal Architecture Health Check for a customer. You have access to the following scan data collected via read-only Datadog API calls. You must base all findings and recommendations strictly on this data — do not invent statistics or issues not supported by the evidence.
-
-## Organization Scorecard
+  const scanData = `## Organization Scorecard
 
 Overall Score: ${scorecard.overallScore}/100 (${gradeLabel(scorecard.overallGrade)})
 Total Findings: ${scorecard.totalFindings} (Critical: ${scorecard.criticalFindings}, High: ${scorecard.highFindings})
@@ -47,49 +57,18 @@ ${tagAnalysis.tagMappingSuggestions.length > 0
 ## Key Findings by Category
 ${Object.entries(findingSummary.byCategory).map(([cat, data]) =>
   data.count > 0
-    ? `### ${formatCategory(cat as keyof typeof findingSummary.byCategory)}\n${data.count} findings\nTop: ${data.topFindings.slice(0, 3).join('; ')}`
+    ? `### ${formatCategory(cat as keyof typeof findingSummary.byCategory)}\n${data.count} findings\nTop: ${data.topFindings.slice(0, 3).map(formatTopFinding).join('; ')}`
     : null
-).filter(Boolean).join('\n\n')}
+).filter(Boolean).join('\n\n')}`;
 
----
-
-Based solely on the above evidence, produce a structured health check assessment in the following JSON format. Every recommendation must reference at least one evidence field from the data above.
-
-Respond with valid JSON matching this schema:
-{
-  "executiveSummary": "3-5 sentence executive summary suitable for a VP Engineering",
-  "keyStrengths": ["strength1", "strength2", "strength3"],
-  "topRisks": ["risk1", "risk2", "risk3"],
-  "prioritizedRecommendations": [
-    {
-      "priority": 1,
-      "title": "string",
-      "description": "string",
-      "effort": "low|medium|high",
-      "impact": "low|medium|high",
-      "category": "unified_tagging|service_architecture|monitors_health|logs_health|dashboards_health|synthetics_health|integration_hygiene|network_cloud|governance",
-      "evidenceRefs": ["specific data point from the scan that supports this recommendation"]
-    }
-  ],
-  "taggingStrategyProposal": {
-    "requiredTags": [{"key": "env", "description": "...", "examples": ["prod", "staging"], "required": true}],
-    "recommendedTags": [{"key": "team", "description": "...", "examples": ["platform", "data"], "required": false}],
-    "tagMappings": [{"from": "existing_key", "to": "standard_key", "rationale": "..."}]
-  },
-  "serviceOwnershipModel": "Paragraph describing recommended service ownership model based on findings",
-  "remediationPlan": [
-    {
-      "phase": 1,
-      "title": "Immediate (Week 1-2)",
-      "timeframe": "2 weeks",
-      "actions": ["action1", "action2"],
-      "expectedOutcome": "..."
-    }
-  ],
-  "healthCheckTakeaways": ["takeaway1", "takeaway2", "takeaway3"],
-  "generatedAt": "${new Date().toISOString()}",
-  "evidenceCount": ${scorecard.totalFindings}
-}`;
+  // Static instructional prose lives in the host-editable `assessment-instructions`
+  // prompt file — the scan data computed above, plus the generatedAt/evidenceCount
+  // values, are spliced into its {{SCAN_DATA}}/{{GENERATED_AT}}/{{EVIDENCE_COUNT}}
+  // markers so the file stays a single source of truth for the wording.
+  return getPrompt('assessment-instructions')
+    .replace('{{SCAN_DATA}}', () => scanData) // function form: avoids `$`-pattern interpolation in scan data
+    .replace('{{GENERATED_AT}}', new Date().toISOString())
+    .replace('{{EVIDENCE_COUNT}}', String(scorecard.totalFindings));
 }
 
 function formatCategory(category: string): string {

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import clsx from 'clsx';
 import {
   DndContext, closestCenter, PointerSensor, KeyboardSensor, useSensor, useSensors, type DragEndEvent,
@@ -36,6 +36,10 @@ interface DataTableProps<T> {
   searchPlaceholder?: string;
   /** Enables built-in client-side pagination at this page size. Skip on tables whose data is already server-paginated. */
   pageSize?: number;
+  /** When provided (together with expandedRowRender), shows a per-row expand/collapse toggle. */
+  expandable?: (row: T) => boolean;
+  /** Renders extra content in a full-width row beneath an expanded row. */
+  expandedRowRender?: (row: T) => React.ReactNode;
 }
 
 type SortRule = { key: string; dir: 'asc' | 'desc' };
@@ -127,7 +131,16 @@ function SortableHeader<T>({
 export default function DataTable<T>({
   columns: rawColumns, data, rowKey, onRowClick, emptyMessage = 'No data', className,
   tableId, selectable, bulkActions, searchable, searchPlaceholder = 'Search…', pageSize,
+  expandable, expandedRowRender,
 }: DataTableProps<T>) {
+  const [expandedKeys, setExpandedKeys] = useState<Set<string>>(new Set());
+  function toggleExpanded(key: string) {
+    setExpandedKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  }
   const [columnOrder, setColumnOrder] = useState<string[]>(() =>
     tableId ? orderColumns(rawColumns, tableId).map((c) => c.key) : rawColumns.map((c) => c.key)
   );
@@ -265,6 +278,7 @@ export default function DataTable<T>({
         <table className="w-full text-sm">
             <thead>
               <tr className="bg-surface-subtle border-b border-border sticky top-0 z-10">
+                {expandedRowRender && <th className="px-2 py-3 w-8" />}
                 {selectable && (
                   <th className="px-4 py-3 w-10">
                     <input
@@ -296,42 +310,68 @@ export default function DataTable<T>({
           <tbody className="bg-surface-subtle divide-y divide-border">
             {pagedData.length === 0 ? (
               <tr>
-                <td colSpan={columns.length + (selectable ? 1 : 0)} className="px-4 py-12 text-center text-ink-faint">
+                <td colSpan={columns.length + (selectable ? 1 : 0) + (expandedRowRender ? 1 : 0)} className="px-4 py-12 text-center text-ink-faint">
                   {data.length > 0 ? 'No rows match your search' : emptyMessage}
                 </td>
               </tr>
             ) : (
               pagedData.map((row) => {
                 const key = rowKey(row);
+                const canExpand = Boolean(expandedRowRender) && (!expandable || expandable(row));
+                const isExpanded = canExpand && expandedKeys.has(key);
                 return (
-                  <tr
-                    key={key}
-                    tabIndex={onRowClick ? 0 : undefined}
-                    onKeyDown={onRowClick ? (e) => { if (e.key === 'Enter') onRowClick(row); } : undefined}
-                    className={clsx(
-                      'hover:bg-surface-subtle transition-colors',
-                      onRowClick && 'cursor-pointer',
-                      selected.has(key) && 'bg-dd-purple/5'
+                  <Fragment key={key}>
+                    <tr
+                      tabIndex={onRowClick ? 0 : undefined}
+                      onKeyDown={onRowClick ? (e) => { if (e.key === 'Enter') onRowClick(row); } : undefined}
+                      className={clsx(
+                        'hover:bg-surface-subtle transition-colors',
+                        onRowClick && 'cursor-pointer',
+                        selected.has(key) && 'bg-dd-purple/5'
+                      )}
+                      onClick={() => onRowClick?.(row)}
+                    >
+                      {expandedRowRender && (
+                        <td className="px-2 py-3 text-center" onClick={(e) => e.stopPropagation()}>
+                          {canExpand && (
+                            <button
+                              onClick={() => toggleExpanded(key)}
+                              aria-label={isExpanded ? 'Collapse row' : 'Expand row'}
+                              className="text-ink-faint hover:text-ink text-xs w-5 h-5 inline-flex items-center justify-center"
+                            >
+                              {isExpanded ? '▾' : '▸'}
+                            </button>
+                          )}
+                        </td>
+                      )}
+                      {selectable && (
+                        <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                          <input
+                            type="checkbox"
+                            checked={selected.has(key)}
+                            onChange={() => toggleRow(key)}
+                            aria-label="Select row"
+                            className="rounded border-border-strong"
+                          />
+                        </td>
+                      )}
+                      {columns.map((col) => (
+                        <td key={col.key} className="px-4 py-3 text-ink">
+                          {col.render ? col.render(row) : String((row as Record<string, unknown>)[col.key] ?? '')}
+                        </td>
+                      ))}
+                    </tr>
+                    {isExpanded && expandedRowRender && (
+                      <tr key={`${key}-expanded`} className="bg-surface-subtle">
+                        <td
+                          colSpan={columns.length + (selectable ? 1 : 0) + 1}
+                          className="px-4 py-3 border-t border-border"
+                        >
+                          {expandedRowRender(row)}
+                        </td>
+                      </tr>
                     )}
-                    onClick={() => onRowClick?.(row)}
-                  >
-                    {selectable && (
-                      <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
-                        <input
-                          type="checkbox"
-                          checked={selected.has(key)}
-                          onChange={() => toggleRow(key)}
-                          aria-label="Select row"
-                          className="rounded border-border-strong"
-                        />
-                      </td>
-                    )}
-                    {columns.map((col) => (
-                      <td key={col.key} className="px-4 py-3 text-ink">
-                        {col.render ? col.render(row) : String((row as Record<string, unknown>)[col.key] ?? '')}
-                      </td>
-                    ))}
-                  </tr>
+                  </Fragment>
                 );
               })
             )}

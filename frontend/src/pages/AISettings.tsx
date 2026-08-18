@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import { aiSettingsApi } from '../services/api';
 import PageHeader from '../components/ui/PageHeader';
 import { SkeletonText } from '../components/ui/Skeleton';
+import SectionGate from '../components/SectionGate';
 
 type Provider = 'openai' | 'anthropic' | 'ollama' | 'none';
 
@@ -45,6 +46,11 @@ export default function AISettings() {
     queryFn: aiSettingsApi.get,
   });
 
+  const { data: prompts, isLoading: promptsLoading } = useQuery({
+    queryKey: ['ai-prompts'],
+    queryFn: aiSettingsApi.getPrompts,
+  });
+
   const [provider, setProvider] = useState<Provider>('none');
   const [apiKey, setApiKey] = useState('');
   const [baseUrl, setBaseUrl] = useState('http://localhost:11434');
@@ -54,6 +60,10 @@ export default function AISettings() {
   const [discoverError, setDiscoverError] = useState('');
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
   const [dirty, setDirty] = useState(false);
+
+  const [selectedPromptKey, setSelectedPromptKey] = useState<string>('');
+  const [promptContent, setPromptContent] = useState('');
+  const [promptDirty, setPromptDirty] = useState(false);
 
   // Initialise form from saved settings
   useEffect(() => {
@@ -101,6 +111,37 @@ export default function AISettings() {
       discoverModels();
     }
   }, [provider]);
+
+  // Default to the first prompt once the list loads, and load its content
+  // into the textarea whenever the selection changes.
+  useEffect(() => {
+    if (!prompts || prompts.length === 0) return;
+    if (!selectedPromptKey || !prompts.some((p) => p.key === selectedPromptKey)) {
+      setSelectedPromptKey(prompts[0].key);
+      return;
+    }
+    const current = prompts.find((p) => p.key === selectedPromptKey);
+    if (current) {
+      setPromptContent(current.content);
+      setPromptDirty(false);
+    }
+  }, [prompts, selectedPromptKey]);
+
+  const selectedPrompt = prompts?.find((p) => p.key === selectedPromptKey);
+
+  const savePromptMutation = useMutation({
+    mutationFn: ({ key, content }: { key: string; content: string }) => aiSettingsApi.savePrompt(key, content),
+    onSuccess: (updated) => {
+      qc.setQueryData(['ai-prompts'], (old: typeof prompts) =>
+        old?.map((p) => (p.key === updated.key ? updated : p))
+      );
+      setPromptDirty(false);
+      toast.success(`${updated.label} saved`);
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : 'Failed to save prompt');
+    },
+  });
 
   const saveMutation = useMutation({
     mutationFn: aiSettingsApi.save,
@@ -175,6 +216,7 @@ export default function AISettings() {
       )}
 
       {/* Provider selector */}
+      <SectionGate featureKey="section.ai_settings.provider_config">
       <section>
         <h2 className="text-sm font-semibold text-ink-muted uppercase tracking-wide mb-3">Provider</h2>
         <div className="grid grid-cols-3 gap-3">
@@ -338,9 +380,11 @@ export default function AISettings() {
           )}
         </>
       )}
+      </SectionGate>
 
       {/* Current status card */}
       {saved && saved.provider !== 'none' && (
+        <SectionGate featureKey="section.ai_settings.status">
         <div className="card bg-surface-subtle border-border">
           <div className="text-xs font-semibold text-ink-faint uppercase tracking-wide mb-2">Active Configuration</div>
           <div className="flex flex-wrap gap-3 text-sm">
@@ -366,7 +410,69 @@ export default function AISettings() {
             )}
           </div>
         </div>
+        </SectionGate>
       )}
+
+      {/* Prompts */}
+      <SectionGate featureKey="section.ai_settings.prompts">
+      <section>
+        <h2 className="text-sm font-semibold text-ink-muted uppercase tracking-wide mb-3">Prompts</h2>
+        <p className="text-xs text-ink-faint mb-3">
+          Edit the raw prompt text used for chat, assessments, and each provider's system message. Every surface
+          composes the shared grounding instructions with these files at call time — no restart needed.
+        </p>
+        {promptsLoading ? (
+          <div className="card space-y-4">
+            <SkeletonText lines={4} />
+          </div>
+        ) : (
+          <div className="card space-y-3">
+            <div className="flex flex-wrap gap-2">
+              {(prompts ?? []).map((p) => (
+                <button
+                  key={p.key}
+                  onClick={() => setSelectedPromptKey(p.key)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+                    selectedPromptKey === p.key
+                      ? 'border-dd-purple bg-dd-purple/5 text-dd-purple-dark'
+                      : 'border-border bg-surface-subtle text-ink-muted hover:border-border-strong'
+                  }`}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+
+            <textarea
+              value={promptContent}
+              onChange={(e) => { setPromptContent(e.target.value); setPromptDirty(true); }}
+              rows={20}
+              spellCheck={false}
+              className="input font-mono text-xs w-full"
+            />
+
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => selectedPromptKey && savePromptMutation.mutate({ key: selectedPromptKey, content: promptContent })}
+                disabled={savePromptMutation.isPending || !promptDirty || !selectedPromptKey}
+                className="btn-primary disabled:opacity-50"
+              >
+                {savePromptMutation.isPending ? 'Saving…' : 'Save Prompt'}
+              </button>
+              {promptDirty && <span className="text-xs text-amber-400">Unsaved changes</span>}
+              {!promptDirty && savePromptMutation.isSuccess && <span className="text-xs text-green-400">✓ Saved</span>}
+            </div>
+
+            {selectedPrompt && (
+              <p className="text-xs text-ink-faint">
+                Changes are saved to this file on the server: <code className="bg-surface-sunken px-1 py-0.5 rounded">{selectedPrompt.filePath}</code>.
+                Use git to track and review history.
+              </p>
+            )}
+          </div>
+        )}
+      </section>
+      </SectionGate>
     </div>
   );
 }

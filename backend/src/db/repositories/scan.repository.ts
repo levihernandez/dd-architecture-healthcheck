@@ -51,6 +51,20 @@ export const ScanRepository = {
     return row ? rowToResponse(row) : null;
   },
 
+  // The most recent completed scan for the org that started strictly before
+  // `beforeScanId`'s own start time — used as the default "previous scan" to
+  // diff against when a comparison doesn't specify one explicitly.
+  findPreviousCompleted(orgId: string, beforeScanId: string): ScanRunResponse | null {
+    const db = getDatabase();
+    const row = db.prepare(`
+      SELECT * FROM scan_runs
+      WHERE org_id = ? AND status = 'completed'
+        AND started_at < (SELECT started_at FROM scan_runs WHERE id = ?)
+      ORDER BY started_at DESC LIMIT 1
+    `).get(orgId, beforeScanId) as ScanRow | undefined;
+    return row ? rowToResponse(row) : null;
+  },
+
   updateStatus(
     id: string,
     status: ScanRunResponse['status'],

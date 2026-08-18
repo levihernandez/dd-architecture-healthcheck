@@ -190,13 +190,13 @@ export function buildChatContext(orgId: string, scanId?: string, page?: string):
 
   const findings = pageContext
     ? db.prepare(`
-        SELECT severity, category, title, affected_count, total_count, percentage
+        SELECT severity, category, title, affected_count, total_count, percentage, affected_resources
         FROM findings WHERE org_id=? AND scan_run_id=? AND category=?
         ORDER BY CASE severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
                  percentage DESC LIMIT 10
       `).all(orgId, sid, pageContext.category)
     : db.prepare(`
-        SELECT severity, category, title, affected_count, total_count, percentage
+        SELECT severity, category, title, affected_count, total_count, percentage, affected_resources
         FROM findings WHERE org_id=? AND scan_run_id=?
         ORDER BY CASE severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
                  percentage DESC LIMIT 12
@@ -204,7 +204,24 @@ export function buildChatContext(orgId: string, scanId?: string, page?: string):
   const typedFindings = findings as Array<{
     severity: string; category: string; title: string;
     affected_count: number; total_count: number; percentage: number;
+    affected_resources: string | null;
   }>;
+
+  // Capped (top 3) concrete resource refs per finding, so chat can cite something
+  // real instead of only a category-level percentage — mirrors the one-shot
+  // report's buildFindingSummary in ai/service.ts.
+  const findingResourceLabel = (raw: string | null): string => {
+    if (!raw) return '';
+    let resources: Array<{ type?: string; id?: string; name?: string }>;
+    try { resources = JSON.parse(raw); } catch { return ''; }
+    if (!Array.isArray(resources) || resources.length === 0) return '';
+    const shown = resources.slice(0, 3);
+    const remaining = resources.length - shown.length;
+    const type = shown[0]?.type ? `${shown[0].type}s` : 'resources';
+    const names = shown.map((r) => r.name || r.id).filter(Boolean).join(', ');
+    if (!names) return '';
+    return ` [${type}: ${names}${remaining > 0 ? `, +${remaining} more` : ''}]`;
+  };
 
   const pct = (n: number, d: number) => d > 0 ? Math.round((n / d) * 100) : 0;
   const tier = hosts < 50 ? 'Startup (<50)' : hosts < 250 ? 'Growth (50-250)' : hosts < 1000 ? 'Mid-Market (250-999)' : 'Enterprise (1000+)';
@@ -214,28 +231,32 @@ export function buildChatContext(orgId: string, scanId?: string, page?: string):
   // Existing per-domain detail blocks, keyed by category — computed unconditionally
   // above (cheap), assembled conditionally below based on the page focus.
   const detailBlocks: Partial<Record<FindingCategory, string>> = {
-    unified_tagging: `=== UNIFIED SERVICE TAGGING (UST) COVERAGE — ALL HOSTS ===
+    unified_tagging: `=== UNIFIED SERVICE TAGGING (UST) COVERAGE ===
+Host-level tags (env/team belong on every host — this is a real gap if low):
   env:     ${envCov}%  ${envCov >= 80 ? '✓ Good' : envCov >= 50 ? '△ Partial' : '✗ Critical gap'}
-  service: ${svcCov}%  ${svcCov >= 80 ? '✓ Good' : svcCov >= 50 ? '△ Partial' : '✗ Critical gap'}
-  version: ${verCov}%  ${verCov >= 80 ? '✓ Good' : verCov >= 50 ? '△ Partial' : '✗ Critical gap'}
   team:    ${teamCov}%  ${teamCov >= 80 ? '✓ Good' : teamCov >= 50 ? '△ Partial' : '✗ Critical gap'}
+Workload-level tags, shown as % of hosts carrying them — informational only, NOT a
+host requirement (a host commonly runs multiple services, so don't advise the user
+to blanket-tag hosts with service/version; that belongs on the APM service/container):
+  service: ${svcCov}%
+  version: ${verCov}%
 Total unique tag keys in org: ${tagRows.length}
 High-cardinality keys (>50 unique values): ${highCard.length}
 Top keys by cardinality: ${topByCard.join(', ') || 'none'}`,
 
     cost_optimization: `=== CUSTOM METRICS ASSESSMENT ===
-Estimated custom metric volume: ~${estCM.toLocaleString()}
-Typical standard allotment (150/host): ~${standardAllotment.toLocaleString()}
+Estimated custom metric volume: ~${estCM.toLocaleString()} (estimated)
+Typical standard allotment (150/host): ~${standardAllotment.toLocaleString()} (estimated)
 On-demand risk level: ${cmRisk}
 High-cardinality tag keys: ${highCard.length} keys with >50 values each
 Top cardinality drivers: ${topByCard.slice(0, 5).join(', ')}
 Note: Each unique (metric_name × tag_value_combination) = 1 billable custom metric. DogStatsD, APM custom spans, and integration metrics are the most common sources.
-On-demand triggers at: ~${Math.round(standardAllotment * 1.0).toLocaleString()} (above contracted allotment; typically 1.5–3× standard rate)
+On-demand triggers at: ~${Math.round(standardAllotment * 1.0).toLocaleString()} (estimated; above contracted allotment; typically 1.5–3× standard rate)
 
 === HOST ALLOTMENT CONTEXT ===
 Infrastructure hosts: ${hosts}
-At 100/host standard allotment: ~${hosts * 100} custom metrics included
-At 200/host (higher tier): ~${hosts * 200} custom metrics included
+At 100/host standard allotment: ~${hosts * 100} custom metrics included (estimated)
+At 200/host (higher tier): ~${hosts * 200} custom metrics included (estimated)
 APM hosts may be billed separately if on a dedicated APM SKU
 Container hosts: typically billed at a fraction of infra host rate (0.05–0.25× per container)
 Note: Untagged hosts cannot be attributed to teams or services — they inflate costs without accountability.`,
@@ -264,7 +285,7 @@ Key cost levers: (1) head-based sampling client-side, (2) retention filter tunin
 API tests: ${apiTests}
 Browser tests: ${browserTests}
 Average locations per test: ${avgLocs}
-Estimated monthly test runs: ~${estMonthlyRuns.toLocaleString()}
+Estimated monthly test runs: ~${estMonthlyRuns.toLocaleString()} (estimated)
   (API: 288 runs/day × locations; Browser: 96 runs/day × locations, estimated at 15-min interval)
 Cost note: Browser test ≈ 4–10× API test cost per run. Each additional location multiplies cost linearly.
 Key levers: (1) reduce browser → API where no UI assertion needed, (2) lower frequency for non-critical tests, (3) reduce locations for internal services, (4) remove deprecated test duplicate runs`,
@@ -295,16 +316,16 @@ Key levers: (1) delete or populate empty dashboards, (2) convert single-team das
     network_cloud: `=== NETWORK & CLOUD ===
 Cloud accounts: ${cloudRows.map(r => `${r.provider}(${r.c})`).join(', ') || 'none detected'}
 Cloud Cost Management configured: ${ccmRows.filter(r => r.configured).map(r => r.provider).join(', ') || 'none'} / detected providers: ${ccmRows.map(r => r.provider).join(', ') || 'none'}
-CNM (Cloud Network Monitor, formerly Network Performance Monitoring/NPM) — proxy-detected via integration name match: ${npmProxy} integration(s) matched
-NDM (Network Device Monitoring) — proxy-detected via SNMP/vendor integration name match: ${ndmProxy} integration(s) matched
-DBM (Database Monitoring) — proxy-detected via Postgres/MySQL/Oracle/MongoDB/SQL Server integration name match: ${dbmProxy} integration(s) matched
+CNM (Cloud Network Monitor, formerly Network Performance Monitoring/NPM) — proxy-detected via integration name match: ${npmProxy} integration(s) matched (estimated)
+NDM (Network Device Monitoring) — proxy-detected via SNMP/vendor integration name match: ${ndmProxy} integration(s) matched (estimated)
+DBM (Database Monitoring) — proxy-detected via Postgres/MySQL/Oracle/MongoDB/SQL Server integration name match: ${dbmProxy} integration(s) matched (estimated)
 Caveat: CNM/NDM/DBM have no dedicated collector in this tool yet — these are heuristic signals from integration names, not confirmed product usage. A 0 count may mean "not in use" or "not detectable by this heuristic" — advise the user to verify directly in Datadog if it matters for their decision.
 Key levers: (1) enable Cloud Cost Management for every connected cloud provider, (2) confirm CNM/NDM/DBM usage manually if this org runs databases or network infra, (3) ensure cloud tags propagate to hosts for cost attribution.`,
 
     governance: `=== GOVERNANCE & ACCESS ===
 Users: ${signals.find(s => s.product === 'governance' && s.signal === 'user_count')?.value ?? 'unknown'}
 Roles: ${signals.find(s => s.product === 'governance' && s.signal === 'role_count')?.value ?? 'unknown'}
-Unified tagging (ownership signal — see UST block above): env ${envCov}%, service ${svcCov}%, team ${teamCov}%
+Unified tagging (ownership signal — see UST block above): env ${envCov}% and team ${teamCov}% are host-level; service ${svcCov}% is workload-level context, not a host gap
 Team tag coverage on hosts is the primary proxy for "is there a clear owning team" — low team-tag coverage means alerts/dashboards/services can't be reliably routed to the right humans.
 Key levers: (1) define a Datadog Team per engineering team and assign service ownership in the Service Catalog, (2) enforce team: tag at ingestion via Agent config or admission controllers, (3) review roles/permissions for least-privilege access, especially for API/App keys with broad scopes.`,
 
@@ -361,7 +382,7 @@ Overall Score: ${sc?.overall_score ?? 'N/A'}/100  Grade: ${sc?.overall_grade ?? 
 ${Object.entries(catScores).map(([cat, pct]) => `  ${cat.replace(/_/g, ' ')}: ${pct}%`).join('\n')}
 
 === ${pageContext ? `${pageContext.label.toUpperCase()} FINDINGS` : 'TOP FINDINGS (prioritized by severity)'} ===
-${typedFindings.map(f => `  [${f.severity.toUpperCase()}] ${f.title} — ${f.affected_count}/${f.total_count} (${Math.round(f.percentage)}%)`).join('\n') || '  No findings recorded'}
+${typedFindings.map(f => `  [${f.severity.toUpperCase()}] ${f.title} — ${f.affected_count}/${f.total_count} (${Math.round(f.percentage)}%)${findingResourceLabel(f.affected_resources)}`).join('\n') || '  No findings recorded'}
 `.trim();
 
   // Final defense-in-depth sweep — catches anything identifier-shaped that

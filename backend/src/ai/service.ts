@@ -1,4 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
+import { createHash } from 'crypto';
 import { getDatabase } from '../db/database';
 import { ScorecardRepository } from '../db/repositories/scorecard.repository';
 import { FindingRepository } from '../db/repositories/finding.repository';
@@ -7,6 +8,7 @@ import { runOpenAIAssessment } from './providers/openai.provider';
 import { runAnthropicAssessment } from './providers/anthropic.provider';
 import { runOllamaAssessment } from './providers/ollama.provider';
 import { getAIConfig } from './config';
+import { validateAssessment } from './validate-assessment';
 import { logger } from '../utils/logger';
 import type {
   AIAssessmentRequest, AIAssessmentResponse,
@@ -54,22 +56,30 @@ export async function generateAIAssessment(
     throw new Error(`Unknown AI provider: ${provider}`);
   }
 
+  // Post-generation grounding check — flags unverifiable evidenceRefs in place,
+  // never retries/rejects. Persist the annotated response, not the raw one.
+  // (validateAssessment logs its own logger.warn summary when issues are found.)
+  const { assessment: validatedResponse } = validateAssessment(response, req);
+
+  const promptHash = createHash('sha256').update(prompt).digest('hex');
+
   // Persist the assessment
   db.prepare(`
     INSERT OR REPLACE INTO ai_assessments
-      (id, org_id, scan_run_id, provider, model, response, evidence_count, generated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      (id, org_id, scan_run_id, provider, model, prompt_hash, response, evidence_count, generated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     uuidv4(), orgId, scanRunId,
     provider,
     config.model,
-    JSON.stringify(response),
+    promptHash,
+    JSON.stringify(validatedResponse),
     scorecard.totalFindings,
     new Date().toISOString()
   );
 
   logger.info(`[${orgId}] AI assessment generated via ${provider}`);
-  return response;
+  return validatedResponse;
 }
 
 export async function getStoredAssessment(
@@ -183,7 +193,19 @@ function buildFindingSummary(findings: ReturnType<typeof FindingRepository.findB
     const catFindings = findings.filter((f) => f.category === cat);
     byCategory[cat] = {
       count: catFindings.length,
-      topFindings: catFindings.slice(0, 3).map((f) => f.title),
+      topFindings: catFindings.slice(0, 3).map((f) => {
+        const resources = f.affectedResources?.slice(0, 3).map((r) => ({
+          type: r.type, id: r.id, name: r.name,
+        })) ?? [];
+        return {
+          title: f.title,
+          affectedCount: f.affectedCount,
+          totalCount: f.totalCount,
+          percentage: f.percentage,
+          resources,
+          totalResourceCount: f.affectedResources?.length ?? 0,
+        };
+      }),
     };
   }
 

@@ -9,6 +9,7 @@ import { EmptyState } from '../components/common/LoadingState';
 import PageHeader from '../components/ui/PageHeader';
 import FilterChip, { FilterChipRow } from '../components/ui/FilterChip';
 import { SkeletonCards, SkeletonCard } from '../components/ui/Skeleton';
+import SectionGate from '../components/SectionGate';
 import type { FindingSeverity } from '../types';
 
 function DDLink({ href, label = 'Open in Datadog' }: { href: string; label?: string }) {
@@ -82,6 +83,7 @@ export default function DashboardsHealth() {
       ) : (
         <>
           {/* Metrics */}
+          <SectionGate featureKey="section.dashboards.metric_tiles">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <MetricCard label="Total Dashboards" value={totalDashboards} icon="📈" />
             <MetricCard label="Dashboards / Service" value={String(dashPerService)}
@@ -95,9 +97,11 @@ export default function DashboardsHealth() {
               icon="🎯"
               color={sloCount === 0 && totalServices > 0 ? 'red' : 'default'} />
           </div>
+          </SectionGate>
 
           {/* Coverage analysis */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <SectionGate featureKey="section.dashboards.coverage_analysis">
             <div className="card">
               <h2 className="text-base font-semibold text-ink mb-3">Coverage Analysis</h2>
               <div className="space-y-3">
@@ -138,7 +142,9 @@ export default function DashboardsHealth() {
                 )}
               </div>
             </div>
+            </SectionGate>
 
+            <SectionGate featureKey="section.dashboards.best_practices">
             <div className="card">
               <h2 className="text-base font-semibold text-ink mb-3">Best Practices</h2>
               <ul className="space-y-2">
@@ -156,9 +162,11 @@ export default function DashboardsHealth() {
                 ))}
               </ul>
             </div>
+            </SectionGate>
           </div>
 
           {/* Findings */}
+          <SectionGate featureKey="section.dashboards.findings">
           {findings.length > 0 ? (
             <div className="card">
               <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
@@ -188,6 +196,7 @@ export default function DashboardsHealth() {
               <p className="text-ink font-medium">No dashboard-specific findings detected</p>
             </div>
           )}
+          </SectionGate>
 
           {/* Investigation links */}
           <div className="card">

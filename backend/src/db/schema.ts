@@ -92,6 +92,7 @@ export function runMigrations(db: Database.Database): void {
       UNIQUE(org_id, host_name)
     );
     CREATE INDEX IF NOT EXISTS idx_hosts_org ON hosts(org_id);
+    CREATE INDEX IF NOT EXISTS idx_hosts_org_scan ON hosts(org_id, scan_run_id);
 
     -- Services / APM
     CREATE TABLE IF NOT EXISTS services (
@@ -114,6 +115,7 @@ export function runMigrations(db: Database.Database): void {
       UNIQUE(org_id, service_name, env)
     );
     CREATE INDEX IF NOT EXISTS idx_services_org ON services(org_id);
+    CREATE INDEX IF NOT EXISTS idx_services_org_scan ON services(org_id, scan_run_id);
 
     -- Service catalog entries
     CREATE TABLE IF NOT EXISTS service_catalog (
@@ -380,6 +382,60 @@ export function runMigrations(db: Database.Database): void {
       tested_at TEXT NOT NULL
     );
 
+    -- Teams (Internal Developer Portal): richer per-team detail than the
+    -- generic 'team' rows in the resources table (which only mirror the raw list call).
+    CREATE TABLE IF NOT EXISTS teams (
+      id TEXT PRIMARY KEY,
+      org_id TEXT NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
+      scan_run_id TEXT NOT NULL REFERENCES scan_runs(id) ON DELETE CASCADE,
+      team_id TEXT NOT NULL,
+      team_name TEXT,
+      handle TEXT,
+      description TEXT,
+      user_count INTEGER NOT NULL DEFAULT 0,
+      link_count INTEGER NOT NULL DEFAULT 0,
+      member_handles TEXT,
+      link_labels TEXT,
+      raw_json TEXT,
+      first_seen TEXT NOT NULL,
+      last_seen TEXT NOT NULL,
+      UNIQUE(org_id, team_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_teams_org ON teams(org_id);
+
+    -- Scorecard rules (Software Catalog Scorecards)
+    CREATE TABLE IF NOT EXISTS scorecard_rules (
+      id TEXT PRIMARY KEY,
+      org_id TEXT NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
+      scan_run_id TEXT NOT NULL REFERENCES scan_runs(id) ON DELETE CASCADE,
+      rule_id TEXT NOT NULL,
+      rule_name TEXT,
+      description TEXT,
+      enabled INTEGER NOT NULL DEFAULT 0,
+      is_custom INTEGER NOT NULL DEFAULT 0,
+      raw_json TEXT,
+      first_seen TEXT NOT NULL,
+      last_seen TEXT NOT NULL,
+      UNIQUE(org_id, rule_id)
+    );
+
+    -- Scorecard outcomes (per service, per rule)
+    CREATE TABLE IF NOT EXISTS scorecard_outcomes (
+      id TEXT PRIMARY KEY,
+      org_id TEXT NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
+      scan_run_id TEXT NOT NULL REFERENCES scan_runs(id) ON DELETE CASCADE,
+      rule_id TEXT,
+      rule_name TEXT,
+      service_name TEXT,
+      state TEXT,
+      remarks TEXT,
+      raw_json TEXT,
+      first_seen TEXT NOT NULL,
+      last_seen TEXT NOT NULL,
+      UNIQUE(org_id, scan_run_id, rule_id, service_name)
+    );
+    CREATE INDEX IF NOT EXISTS idx_scorecard_outcomes_org ON scorecard_outcomes(org_id, scan_run_id);
+
     -- Tag dictionary / analysis
     CREATE TABLE IF NOT EXISTS tag_analysis (
       id TEXT PRIMARY KEY,
@@ -561,7 +617,41 @@ export function runMigrations(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_incidents_org ON incidents(org_id, scan_run_id);
   `);
 
+  db.exec(`
+    -- Event stats: counts from the Events Search API grouped by source_type_name,
+    -- service, and status. Raw events aren't stored — only per-dimension counts,
+    -- since event volume can be far larger than the other collected resources.
+    CREATE TABLE IF NOT EXISTS event_stats (
+      id TEXT PRIMARY KEY,
+      org_id TEXT NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
+      scan_run_id TEXT NOT NULL REFERENCES scan_runs(id) ON DELETE CASCADE,
+      dimension TEXT NOT NULL,
+      dimension_value TEXT NOT NULL,
+      event_count INTEGER NOT NULL DEFAULT 0,
+      computed_at TEXT NOT NULL,
+      UNIQUE(org_id, scan_run_id, dimension, dimension_value)
+    );
+    CREATE INDEX IF NOT EXISTS idx_event_stats_org ON event_stats(org_id, scan_run_id);
+  `);
+
+  db.exec(`
+    -- Feature flag hierarchy (Scan -> Collector -> Rule/Page). Global, no org_id:
+    -- these are admin toggles for this app instance, not per-org data.
+    -- Effective state is always computed at read time (see FeatureFlagRepository):
+    -- a disabled ancestor makes every descendant effectively disabled without ever
+    -- overwriting the descendant's own stored preference.
+    CREATE TABLE IF NOT EXISTS feature_flags (
+      key TEXT PRIMARY KEY,
+      parent_key TEXT REFERENCES feature_flags(key),
+      node_type TEXT NOT NULL,        -- 'scan' | 'collector' | 'rule' | 'page'
+      enabled INTEGER NOT NULL DEFAULT 1,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_feature_flags_parent ON feature_flags(parent_key);
+  `);
+
   addColumnIfMissing(db, 'dashboards', 'is_read_only', 'INTEGER NOT NULL DEFAULT 0');
+  addColumnIfMissing(db, 'service_catalog', 'link_count', 'INTEGER NOT NULL DEFAULT 0');
   migrateOrgIdsToDatadogOrgId(db);
 
   logger.info('Database schema migrations complete');
@@ -586,6 +676,7 @@ const ORG_SCOPED_TABLES = [
   'product_usage_signals', 'findings', 'scorecards', 'ai_assessments',
   'permissions_report', 'tag_analysis', 'org_context', 'usage_summary',
   'rum_applications', 'org_ai_settings', 'org_tag_template',
+  'teams', 'scorecard_rules', 'scorecard_outcomes', 'event_stats',
 ];
 
 // One-time (per org), idempotent: rewrites an org's primary key from its

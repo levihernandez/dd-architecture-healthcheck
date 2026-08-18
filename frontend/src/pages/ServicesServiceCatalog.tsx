@@ -11,6 +11,7 @@ import { EmptyState } from '../components/common/LoadingState';
 import PageHeader from '../components/ui/PageHeader';
 import FilterChip, { FilterChipRow } from '../components/ui/FilterChip';
 import { SkeletonCards, SkeletonTable } from '../components/ui/Skeleton';
+import SectionGate from '../components/SectionGate';
 import type { FindingSeverity } from '../types';
 
 function downloadCsv(filename: string, rows: Array<Record<string, unknown>>) {
@@ -84,30 +85,33 @@ export default function ServicesServiceCatalog() {
           </div>
 
           {findings.length > 0 && (
-            <div className="card">
-              <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-                <h2 className="text-lg font-semibold text-ink">
-                  Service Architecture Findings ({filteredFindings.length}{filteredFindings.length !== findings.length ? ` of ${findings.length}` : ''})
-                </h2>
-                <FilterChipRow>
-                  <FilterChip label="All" active={severityFilter === 'all'} count={findings.length} onClick={() => setSeverityFilter('all')} />
-                  {(['critical', 'high', 'medium', 'low', 'info'] as FindingSeverity[])
-                    .filter((s) => severityCounts[s] > 0)
-                    .map((s) => (
-                      <FilterChip
-                        key={s}
-                        label={s[0].toUpperCase() + s.slice(1)}
-                        active={severityFilter === s}
-                        count={severityCounts[s]}
-                        onClick={() => setSeverityFilter(s)}
-                      />
-                    ))}
-                </FilterChipRow>
+            <SectionGate featureKey="section.services.findings_summary">
+              <div className="card">
+                <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+                  <h2 className="text-lg font-semibold text-ink">
+                    Service Architecture Findings ({filteredFindings.length}{filteredFindings.length !== findings.length ? ` of ${findings.length}` : ''})
+                  </h2>
+                  <FilterChipRow>
+                    <FilterChip label="All" active={severityFilter === 'all'} count={findings.length} onClick={() => setSeverityFilter('all')} />
+                    {(['critical', 'high', 'medium', 'low', 'info'] as FindingSeverity[])
+                      .filter((s) => severityCounts[s] > 0)
+                      .map((s) => (
+                        <FilterChip
+                          key={s}
+                          label={s[0].toUpperCase() + s.slice(1)}
+                          active={severityFilter === s}
+                          count={severityCounts[s]}
+                          onClick={() => setSeverityFilter(s)}
+                        />
+                      ))}
+                  </FilterChipRow>
+                </div>
+                <EvidenceTable findings={filteredFindings} />
               </div>
-              <EvidenceTable findings={filteredFindings} />
-            </div>
+            </SectionGate>
           )}
 
+          <SectionGate featureKey="section.services.service_inventory">
           <div className="card p-0 overflow-hidden">
             <div className="px-4 py-3 border-b border-border">
               <h2 className="text-base font-semibold text-ink">Service Inventory ({total})</h2>
@@ -154,6 +158,7 @@ export default function ServicesServiceCatalog() {
               pageSize={15}
             />
           </div>
+          </SectionGate>
         </>
       )}
     </div>

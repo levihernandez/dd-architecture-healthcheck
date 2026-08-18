@@ -6,6 +6,7 @@ import { orgContextApi } from '../services/api';
 import PageHeader from '../components/ui/PageHeader';
 import { SkeletonText } from '../components/ui/Skeleton';
 import type { OrgContextData } from '../types';
+import SectionGate from '../components/SectionGate';
 
 // ── Chip selector ──────────────────────────────────────────────────────────────
 
@@ -237,6 +238,7 @@ export default function OrgContext() {
         <div className="space-y-5">
 
           {/* 1 — About Your Business */}
+          <SectionGate featureKey="section.org_context.about_business">
           <Section icon="🏢" title="About Your Business" subtitle="What does your organization do, and who depends on it?">
             <Field label="Industry" hint="Used to apply industry-specific Datadog best practices and cost benchmarks">
               <Select value={form.industry ?? ''} onChange={v => update('industry', v)}
@@ -247,8 +249,10 @@ export default function OrgContext() {
                 placeholder="e.g. We operate payment processing infrastructure for 300K+ POS terminals across North America and Europe. We process ~50M transactions/day across .NET APIs backed by Kubernetes on AWS, with React-based merchant portals and Golang microservices handling settlement and fraud detection." rows={4} />
             </Field>
           </Section>
+          </SectionGate>
 
           {/* 2 — Tech Stack */}
+          <SectionGate featureKey="section.org_context.tech_stack">
           <Section icon="⚙️" title="Tech Stack & Infrastructure" subtitle="Powers your tagging strategy, APM service naming, K8s label recommendations, and integration gap analysis.">
             <Field label="Languages & Frameworks">
               <ChipGroup options={TECH_STACK} selected={form.techStack ?? []} onChange={v => update('techStack', v)} allowCustom />
@@ -257,8 +261,10 @@ export default function OrgContext() {
               <ChipGroup options={CLOUD_PROVIDERS} selected={form.cloudProviders ?? []} onChange={v => update('cloudProviders', v)} />
             </Field>
           </Section>
+          </SectionGate>
 
           {/* 3 — Scale */}
+          <SectionGate featureKey="section.org_context.scale_volume">
           <Section icon="📊" title="Scale & Volume" subtitle="Informs capacity forecasting, custom metric allotment risk, and log volume projections.">
             <div className="grid grid-cols-3 gap-4">
               <Field label="End users" hint="Active users or accounts">
@@ -275,8 +281,10 @@ export default function OrgContext() {
               </Field>
             </div>
           </Section>
+          </SectionGate>
 
           {/* 4 — Service Tiers */}
+          <SectionGate featureKey="section.org_context.service_tiers">
           <Section icon="🎯" title="Service Criticality Tiers" subtitle="Drives Synthetics coverage recommendations, alerting thresholds, SLO targets, and log retention by tier.">
             <div className="space-y-4">
               {([
@@ -308,8 +316,10 @@ export default function OrgContext() {
               ))}
             </div>
           </Section>
+          </SectionGate>
 
           {/* 5 — Revenue & Compliance */}
+          <SectionGate featureKey="section.org_context.revenue_compliance">
           <Section icon="💰" title="Revenue & Compliance" subtitle="Helps quantify the cost of downtime and ensures recommendations meet your regulatory requirements.">
             <Field label="Revenue impact of Tier 0 downtime" hint="How much revenue is at risk per hour of outage? Used to prioritize alerting and Synthetics recommendations.">
               <div className="flex flex-wrap gap-2 mt-2">
@@ -325,8 +335,10 @@ export default function OrgContext() {
               <ChipGroup options={COMPLIANCE} selected={form.complianceFrameworks ?? []} onChange={v => update('complianceFrameworks', v)} allowCustom />
             </Field>
           </Section>
+          </SectionGate>
 
           {/* 6 — Seasonality */}
+          <SectionGate featureKey="section.org_context.seasonality">
           <Section icon="📅" title="Seasonality & Traffic Patterns" subtitle="Used for capacity planning, Synthetics schedule recommendations, and log volume forecasting.">
             <Field label="Known peak periods">
               <ChipGroup options={PEAK_PERIODS} selected={form.peakPeriods ?? []} onChange={v => update('peakPeriods', v)} />
@@ -336,8 +348,10 @@ export default function OrgContext() {
                 placeholder="Describe any seasonal or time-of-day patterns, expected growth rates, or planned events that drive traffic spikes..." rows={3} />
             </Field>
           </Section>
+          </SectionGate>
 
           {/* 7 — Team & Operations */}
+          <SectionGate featureKey="section.org_context.team_ops">
           <Section icon="👥" title="Team & Operations" subtitle="Aligns alert routing, on-call recommendations, and team ownership tagging strategies.">
             <div className="grid grid-cols-3 gap-4">
               <Field label="Engineering team size">
@@ -360,8 +374,10 @@ export default function OrgContext() {
               </Field>
             </div>
           </Section>
+          </SectionGate>
 
           {/* 8 — Goals & Pain Points */}
+          <SectionGate featureKey="section.org_context.goals_pain_points">
           <Section icon="🎯" title="Goals & Current Pain Points" subtitle="Prioritizes AI recommendations toward the outcomes that matter most to your team.">
             <Field label="What's hurting most right now?" hint="Select all that apply — the AI will address these first in its recommendations.">
               <ChipGroup options={PAIN_POINTS} selected={form.currentPainPoints ?? []} onChange={v => update('currentPainPoints', v)} allowCustom />
@@ -374,6 +390,7 @@ export default function OrgContext() {
                 placeholder="e.g. We're migrating from ECS to EKS over the next 6 months. We have a hard cap on Datadog spend. Our on-call team is in 3 time zones. We're onboarding 5 new microservices by Q3..." rows={4} />
             </Field>
           </Section>
+          </SectionGate>
 
           {saved?.updatedAt && (
             <p className="text-xs text-center text-ink-faint">

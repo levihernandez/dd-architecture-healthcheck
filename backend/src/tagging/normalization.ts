@@ -1,5 +1,7 @@
 import { getDatabase } from '../db/database';
 
+const AFFECTED_CAP = 25;
+
 // ─── Synonym groups: every variant maps to one canonical key ─────────────────
 export const SYNONYM_GROUPS = [
   {
@@ -73,6 +75,35 @@ function caseFold(s: string) {
   return s.toLowerCase().replace(/[-.\s]/g, '_');
 }
 
+/**
+ * Looks up concrete resources affected by a tag-key conflict (casing variants)
+ * or a value-drift conflict (a single tag key with drifted values), mirroring
+ * the resource_tags query pattern used in cloud-alignment.ts. resource_tags is
+ * currently only populated for resource_type='host' by the infrastructure
+ * collector, so this surfaces host-level detail; the returned list is capped.
+ */
+function findAffectedResources(
+  db: ReturnType<typeof getDatabase>,
+  orgId: string,
+  scanRunId: string,
+  tagKeys: string[],
+  tagValues?: string[]
+): Array<{ type: string; id: string; name: string }> {
+  if (tagKeys.length === 0) return [];
+  const keyPlaceholders = tagKeys.map(() => '?').join(', ');
+  let query = `SELECT DISTINCT resource_type, resource_id FROM resource_tags
+     WHERE org_id = ? AND scan_run_id = ? AND tag_key IN (${keyPlaceholders})`;
+  const params: Array<string> = [orgId, scanRunId, ...tagKeys];
+  if (tagValues && tagValues.length > 0) {
+    const valuePlaceholders = tagValues.map(() => '?').join(', ');
+    query += ` AND tag_value IN (${valuePlaceholders})`;
+    params.push(...tagValues);
+  }
+  query += ` LIMIT ${AFFECTED_CAP}`;
+  const rows = db.prepare(query).all(...params) as Array<{ resource_type: string; resource_id: string }>;
+  return rows.map((r) => ({ type: r.resource_type, id: r.resource_id, name: r.resource_id }));
+}
+
 export interface NormalizationResult {
   synonymGroups: Array<{
     canonicalKey: string;
@@ -90,6 +121,7 @@ export interface NormalizationResult {
     resourceTypes: string[];
     affectedCount: number;
     recommendation: string;
+    affectedResources: Array<{ type: string; id: string; name: string }>;
   }>;
   tagDictionary: Array<{
     canonicalKey: string;
@@ -186,6 +218,7 @@ export function analyzeTagNormalization(orgId: string, scanRunId: string): Norma
       resourceTypes: ['host', 'service'],
       affectedCount,
       recommendation: `Standardize to lowercase: use "${lower}" consistently across all resources`,
+      affectedResources: findAffectedResources(db, orgId, scanRunId, variants),
     });
   }
 
@@ -209,6 +242,7 @@ export function analyzeTagNormalization(orgId: string, scanRunId: string): Norma
           resourceTypes: ['host', 'service'],
           affectedCount: row.host_occurrence_count + row.service_occurrence_count,
           recommendation: `Normalize values: standardize to "${group[0]}" (found variants: ${found.join(', ')})`,
+          affectedResources: findAffectedResources(db, orgId, scanRunId, [matchingKey], found),
         });
       }
     }

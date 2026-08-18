@@ -7,7 +7,10 @@ import { ddBaseUrl } from '../utils/ddUrl';
 import PageHeader from '../components/ui/PageHeader';
 import { Skeleton, SkeletonText } from '../components/ui/Skeleton';
 import FilterChip, { FilterChipRow } from '../components/ui/FilterChip';
-import type { CloudAutoTagScore, TagPolicyLayer, IndustryTemplateDetail, TemplateScore } from '../types';
+import ResourceExamplesModal from '../components/tagging/ResourceExamplesModal';
+import TaggingStrategyGuideModal from '../components/tagging/TaggingStrategyGuideModal';
+import SectionGate from '../components/SectionGate';
+import type { CloudAutoTagScore, TagPolicyLayer, IndustryTemplateDetail, TemplateScore, ResourceExample } from '../types';
 
 function ScoreRing({ score, size = 'md' }: { score: number; size?: 'sm' | 'md' | 'lg' }) {
   const color = score >= 80 ? '#22c55e' : score >= 50 ? '#f59e0b' : '#ef4444';
@@ -28,15 +31,17 @@ function ScoreRing({ score, size = 'md' }: { score: number; size?: 'sm' | 'md' |
 }
 
 function TagRow({
-  tagKey, description, why, how, when: when_, where, found, coverage, foundKey, exampleValues, platformGuides,
+  tagKey, description, why, how, when: when_, where, found, coverage, foundKey, exampleValues, platformGuides, resourceExamples,
 }: {
   tagKey: string; description: string; why?: string; how?: string; when?: string; where?: string;
   /** Omit found/coverage entirely when there's no scan to score against yet — renders a neutral
    * "definition only" style instead of the green/red found/missing styling. */
   found?: boolean; coverage?: number; foundKey?: string | null; exampleValues?: string[];
   platformGuides?: Array<{ platform: string; method: string }>;
+  resourceExamples?: ResourceExample[];
 }) {
   const [open, setOpen] = useState(false);
+  const [showExamples, setShowExamples] = useState(false);
   const scored = found !== undefined;
   return (
     <div className={`border rounded-lg ${!scored ? 'border-border bg-surface-subtle' : found ? 'border-green-500/30 bg-green-500/10' : 'border-red-500/30 bg-red-500/10'}`}>
@@ -52,6 +57,16 @@ function TagRow({
             {coverage}%
           </span>
         )}
+        <span
+          role="button"
+          tabIndex={0}
+          title="View per-resource setup examples (RUM, Logs, APM, Agent, Integrations)"
+          onClick={(e) => { e.stopPropagation(); setShowExamples(true); }}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); setShowExamples(true); } }}
+          className="text-xs text-violet-400 hover:text-violet-300 hover:underline shrink-0"
+        >
+          {'</>'}
+        </span>
         {(why || how) && (
           <span className="text-ink-faint text-xs shrink-0">{open ? '▲' : '▼'}</span>
         )}
@@ -82,6 +97,9 @@ function TagRow({
             </div>
           )}
         </div>
+      )}
+      {showExamples && (
+        <ResourceExamplesModal tagKey={tagKey} examples={resourceExamples} onClose={() => setShowExamples(false)} />
       )}
     </div>
   );
@@ -491,7 +509,9 @@ export default function IndustryTemplates() {
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>('generic');
   const [userPicked, setUserPicked] = useState(false);
   const [categoryFilter, setCategoryFilter] = useState<'all' | 'industry' | 'org'>('all');
+  const [search, setSearch] = useState('');
   const [showExport, setShowExport] = useState(false);
+  const [showGuide, setShowGuide] = useState(false);
   const enabled = Boolean(selectedOrgId && selectedScanId);
 
   const { data: templates = [] } = useQuery({
@@ -549,10 +569,28 @@ export default function IndustryTemplates() {
     setSelectedTemplateId(id);
   }
 
-  const filtered = templates.filter((t) => categoryFilter === 'all' || t.category === categoryFilter);
+  const searchLower = search.trim().toLowerCase();
+  const filtered = templates.filter((t) => {
+    if (categoryFilter !== 'all' && t.category !== categoryFilter) return false;
+    if (!searchLower) return true;
+    return (
+      t.name.toLowerCase().includes(searchLower) ||
+      (t.sector ?? '').toLowerCase().includes(searchLower) ||
+      t.description.toLowerCase().includes(searchLower)
+    );
+  });
   const isActive = Boolean(activeSelection?.templateId && activeSelection.templateId === selectedTemplateId);
   const exportSections = buildExportSections(templateDetail, score);
   const orgLabel = orgs.find((o) => o.id === selectedOrgId)?.name;
+
+  // Feed the currently selected template's own required tags into the tagging
+  // guide so its examples reflect this org's actual policy, not generic filler.
+  const guideTagDefs = (templateDetail?.required?.length ? templateDetail.required : templateDetail?.globalBaseline) ?? [];
+  const guideIndustryTags = guideTagDefs.slice(0, 4).map((t) => ({
+    key: t.key,
+    description: t.description,
+    example: t.exampleValues?.[0] ?? 'value',
+  }));
 
   // Group the sidebar by sector so sub-verticals within one sector (e.g. Payments —
   // Banking, Restaurants, E-commerce, Card Networks) sit together instead of one flat
@@ -570,10 +608,16 @@ export default function IndustryTemplates() {
       <PageHeader
         title="Industry & Org Tagging Templates"
         subtitle="Select your industry or org model to see the required/suggested tagging policy and where to enforce it, then use it across the app as the standard for Tag Explorer and the Unified Tagging Scorecard."
+        actions={
+          <button onClick={() => setShowGuide(true)} className="btn-secondary text-xs">
+            📚 How tagging works (cloud + datacenter)
+          </button>
+        }
       />
 
       <div className="flex gap-6">
           {/* Template picker sidebar */}
+          <SectionGate featureKey="section.industry_templates.picker">
           <div className="w-64 shrink-0 space-y-3">
             {activeSelection?.templateId && (
               <div className="card bg-green-500/10 border-green-500/30 p-3">
@@ -598,6 +642,14 @@ export default function IndustryTemplates() {
               </div>
             )}
 
+            <input
+              type="text"
+              placeholder="Search templates..."
+              className="input w-full text-sm"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+
             <FilterChipRow>
               {(['all', 'industry', 'org'] as const).map((c) => (
                 <FilterChip
@@ -608,6 +660,10 @@ export default function IndustryTemplates() {
                 />
               ))}
             </FilterChipRow>
+
+            {sectorGroups.length === 0 && (
+              <div className="text-xs text-ink-faint px-1 py-4 text-center">No templates match "{search}"</div>
+            )}
 
             <div className="space-y-3 max-h-[70vh] overflow-y-auto pr-1">
               {sectorGroups.map((group) => (
@@ -637,15 +693,19 @@ export default function IndustryTemplates() {
               ))}
             </div>
           </div>
+          </SectionGate>
 
           {/* Score panel */}
+          <SectionGate featureKey="section.industry_templates.score_panel">
           <div className="flex-1 space-y-6">
             {!enabled && !detailLoading && templateDetail ? (
               <>
                 <div className="card bg-amber-500/10 border-amber-500/30 text-amber-400 text-sm flex items-center justify-between gap-3">
                   <span>No scan selected yet — showing the tagging policy for <strong>{templateDetail.name}</strong>. Connect a scan to see coverage against your org's actual tags.</span>
                   {exportSections && (
-                    <button onClick={() => setShowExport(true)} className="btn-secondary text-xs shrink-0">⬇ Export</button>
+                    <SectionGate featureKey="section.industry_templates.export">
+                      <button onClick={() => setShowExport(true)} className="btn-secondary text-xs shrink-0">⬇ Export</button>
+                    </SectionGate>
                   )}
                 </div>
 
@@ -657,7 +717,7 @@ export default function IndustryTemplates() {
                     {templateDetail.globalBaseline.map((tag) => (
                       <TagRow key={tag.key} tagKey={tag.key} description={tag.description}
                         why={tag.why} how={tag.how} when={tag.when} where={tag.where}
-                        exampleValues={tag.exampleValues} platformGuides={tag.platformGuides} />
+                        exampleValues={tag.exampleValues} platformGuides={tag.platformGuides} resourceExamples={tag.resourceExamples} />
                     ))}
                   </div>
                 </section>
@@ -671,7 +731,7 @@ export default function IndustryTemplates() {
                       {templateDetail.required.map((tag) => (
                         <TagRow key={tag.key} tagKey={tag.key} description={tag.description}
                           why={tag.why} how={tag.how} when={tag.when} where={tag.where}
-                          exampleValues={tag.exampleValues} platformGuides={tag.platformGuides} />
+                          exampleValues={tag.exampleValues} platformGuides={tag.platformGuides} resourceExamples={tag.resourceExamples} />
                       ))}
                     </div>
                   </section>
@@ -684,7 +744,7 @@ export default function IndustryTemplates() {
                       {templateDetail.recommended.map((tag) => (
                         <TagRow key={tag.key} tagKey={tag.key} description={tag.description}
                           why={tag.why} how={tag.how} when={tag.when} where={tag.where}
-                          exampleValues={tag.exampleValues} platformGuides={tag.platformGuides} />
+                          exampleValues={tag.exampleValues} platformGuides={tag.platformGuides} resourceExamples={tag.resourceExamples} />
                       ))}
                     </div>
                   </section>
@@ -697,7 +757,7 @@ export default function IndustryTemplates() {
                       {templateDetail.optional.map((tag) => (
                         <TagRow key={tag.key} tagKey={tag.key} description={tag.description}
                           why={tag.why} how={tag.how} when={tag.when} where={tag.where}
-                          exampleValues={tag.exampleValues} platformGuides={tag.platformGuides} />
+                          exampleValues={tag.exampleValues} platformGuides={tag.platformGuides} resourceExamples={tag.resourceExamples} />
                       ))}
                     </div>
                   </section>
@@ -755,7 +815,9 @@ export default function IndustryTemplates() {
                           </button>
                         )}
                         {exportSections && (
-                          <button onClick={() => setShowExport(true)} className="btn-secondary text-xs ml-auto">⬇ Export</button>
+                          <SectionGate featureKey="section.industry_templates.export">
+                            <button onClick={() => setShowExport(true)} className="btn-secondary text-xs ml-auto">⬇ Export</button>
+                          </SectionGate>
                         )}
                       </div>
                       <div className="flex gap-4 mt-2 text-sm">
@@ -800,7 +862,7 @@ export default function IndustryTemplates() {
                       <TagRow key={tag.key} tagKey={tag.key} description={tag.description}
                         why={tag.why} how={tag.how} when={tag.when} where={tag.where}
                         found={tag.found} coverage={tag.coverage} foundKey={tag.foundKey}
-                        exampleValues={tag.exampleValues} platformGuides={tag.platformGuides} />
+                        exampleValues={tag.exampleValues} platformGuides={tag.platformGuides} resourceExamples={tag.resourceExamples} />
                     ))}
                   </div>
                 </section>
@@ -816,7 +878,7 @@ export default function IndustryTemplates() {
                         <TagRow key={tag.key} tagKey={tag.key} description={tag.description}
                           why={tag.why} how={tag.how} when={tag.when} where={tag.where}
                           found={tag.found} coverage={tag.coverage} foundKey={tag.foundKey}
-                          exampleValues={tag.exampleValues} />
+                          exampleValues={tag.exampleValues} resourceExamples={tag.resourceExamples} />
                       ))}
                     </div>
                   </section>
@@ -901,18 +963,29 @@ export default function IndustryTemplates() {
               </>
             )}
           </div>
+          </SectionGate>
 
           <PolicyResourcesPanel />
       </div>
 
-      {showExport && exportSections && (
-        <ExportModal
-          templateName={templateDetail?.name ?? score?.templateName ?? selectedTemplateId}
-          orgLabel={orgLabel}
-          sections={exportSections}
-          scoreSummary={score ? { overall: score.overallScore, baseline: score.baselineScore, compliance: score.complianceTags.length > 0 ? score.complianceScore : undefined } : undefined}
-          onClose={() => setShowExport(false)}
+      {showGuide && (
+        <TaggingStrategyGuideModal
+          onClose={() => setShowGuide(false)}
+          industryName={templateDetail?.name}
+          industryTags={guideIndustryTags}
         />
+      )}
+
+      {showExport && exportSections && (
+        <SectionGate featureKey="section.industry_templates.export">
+          <ExportModal
+            templateName={templateDetail?.name ?? score?.templateName ?? selectedTemplateId}
+            orgLabel={orgLabel}
+            sections={exportSections}
+            scoreSummary={score ? { overall: score.overallScore, baseline: score.baselineScore, compliance: score.complianceTags.length > 0 ? score.complianceScore : undefined } : undefined}
+            onClose={() => setShowExport(false)}
+          />
+        </SectionGate>
       )}
     </div>
   );

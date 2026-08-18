@@ -10,6 +10,7 @@ import { EmptyState } from '../components/common/LoadingState';
 import PageHeader from '../components/ui/PageHeader';
 import FilterChip, { FilterChipRow } from '../components/ui/FilterChip';
 import { SkeletonCards, SkeletonTable } from '../components/ui/Skeleton';
+import SectionGate from '../components/SectionGate';
 import type { FindingSeverity } from '../types';
 
 function DDLink({ href, label = 'Open in Datadog' }: { href: string; label?: string }) {
@@ -100,6 +101,7 @@ export default function SyntheticsHealth() {
 
           {/* Risk signals */}
           {(pausedTests.length > 0 || alertTests.length > 0 || singleLocationTests.length > 0) && (
+            <SectionGate featureKey="section.synthetics.active_signals">
             <div className="space-y-2">
               <h2 className="text-sm font-semibold text-ink-muted uppercase tracking-wide">Active Signals</h2>
               {alertTests.length > 0 && (
@@ -137,12 +139,14 @@ export default function SyntheticsHealth() {
                 </div>
               )}
             </div>
+            </SectionGate>
           )}
 
           {/* Test breakdown */}
           {details.length > 0 && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {/* Test type breakdown */}
+              <SectionGate featureKey="section.synthetics.test_type_breakdown">
               <div className="card">
                 <h2 className="text-base font-semibold text-ink mb-3">Test Type Breakdown</h2>
                 <div className="space-y-2">
@@ -160,8 +164,10 @@ export default function SyntheticsHealth() {
                   })}
                 </div>
               </div>
+              </SectionGate>
 
               {/* Location distribution */}
+              <SectionGate featureKey="section.synthetics.location_coverage">
               <div className="card">
                 <h2 className="text-base font-semibold text-ink mb-3">Location Coverage</h2>
                 <div className="space-y-2">
@@ -185,11 +191,13 @@ export default function SyntheticsHealth() {
                   Best practice: use 3+ geographic locations for production-critical tests
                 </p>
               </div>
+              </SectionGate>
             </div>
           )}
 
           {/* Test table */}
           {details.length > 0 && (
+            <SectionGate featureKey="section.synthetics.test_inventory">
             <div className="card p-0 overflow-hidden">
               <div className="px-4 py-3 border-b border-border flex items-center justify-between">
                 <h2 className="text-base font-semibold text-ink">Test Inventory ({details.length})</h2>
@@ -227,10 +235,12 @@ export default function SyntheticsHealth() {
                 pageSize={15}
               />
             </div>
+            </SectionGate>
           )}
 
           {/* Findings */}
           {findings.length > 0 && (
+            <SectionGate featureKey="section.synthetics.findings">
             <div className="card">
               <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
                 <h2 className="text-lg font-semibold text-ink">
@@ -253,6 +263,7 @@ export default function SyntheticsHealth() {
               </div>
               <EvidenceTable findings={filteredFindings} />
             </div>
+            </SectionGate>
           )}
 
           {/* Investigation links */}

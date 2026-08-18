@@ -6,3 +6,6 @@ backend/logs/
 frontend/.env
 backend/.env
 *.log
+certs/
+.compose-files
+.claude/skills/dd-architecture-healthcheck/snapshots/

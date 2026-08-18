@@ -119,6 +119,19 @@ export interface Finding {
   evidence: Array<{ type: string; description: string; value?: string | number; source?: string }>;
   tags?: string[];
   createdAt: string;
+  tagKey?: string;
+  bestPractice?: BestPracticeRecommendation;
+}
+
+export interface BestPracticeRecommendation {
+  tagKey: string;
+  found: boolean;
+  what: string;
+  how: string;
+  when: string;
+  where: string;
+  why: string;
+  priority: 'critical' | 'high' | 'moderate' | 'low' | null;
 }
 
 export interface AIAssessment {
@@ -250,6 +263,7 @@ export interface NormalizationResult {
     resourceTypes: string[];
     affectedCount: number;
     recommendation: string;
+    affectedResources: Array<{ type: string; id: string; name: string }>;
   }>;
   tagDictionary: Array<{
     canonicalKey: string;
@@ -272,6 +286,9 @@ export interface CloudAlignmentRow {
   alignmentStatus: 'aligned' | 'missing_in_dd' | 'key_drift' | 'value_drift' | 'dd_only';
   mappingSuggestion: string | null;
   hostCount: number;
+  affectedHosts: Array<{ id: string; name: string }>;
+  affectedHostCount: number;
+  bestPractice: BestPracticeRecommendation;
 }
 
 export interface CloudAlignmentResult {
@@ -334,6 +351,12 @@ export interface TemplateSummary {
 
 // Static tag definition — the raw template shape from GET /tagging/templates/:id,
 // with no found/coverage since it's not scored against any org's scan data.
+export interface ResourceExample {
+  resource: 'rum' | 'logs' | 'apm' | 'agent' | 'integrations';
+  example: string;
+  description?: string;
+}
+
 export interface TemplateTagDef {
   key: string;
   description: string;
@@ -343,6 +366,7 @@ export interface TemplateTagDef {
   where: string;
   exampleValues?: string[];
   platformGuides?: Array<{ platform: string; method: string }>;
+  resourceExamples?: ResourceExample[];
 }
 
 export interface IndustryTemplateDetail {
@@ -372,6 +396,7 @@ export interface TemplateTag {
   coverage: number;
   foundKey?: string | null;
   platformGuides?: Array<{ platform: string; method: string }>;
+  resourceExamples?: ResourceExample[];
 }
 
 export interface CloudAutoTagScore {
@@ -434,6 +459,37 @@ export interface TagPolicyResource {
 export interface OrgTagTemplateSelection {
   templateId: string;
   updatedAt: string;
+}
+
+// ─── Tagging implementation guide ──────────────────────────────────────────────
+export type TaggingMode = 'hard' | 'soft';
+export type HardMechanism = 'terraform' | 'ansible' | 'scom' | 'fleet_automation';
+
+export interface EnrichedGapResource {
+  type: string;
+  id: string;
+  name: string;
+  cloudProvider: string | null;
+}
+
+export interface GapSummaryEntry {
+  tagKey: string;
+  ruleId: string;
+  title: string;
+  affectedCount: number;
+  totalCount: number;
+  percentage: number;
+  bestPracticeHow: string;
+  sampleResources: EnrichedGapResource[];
+}
+
+export interface ImplementationGuideResult {
+  mode: TaggingMode;
+  mechanism?: HardMechanism;
+  gaps: GapSummaryEntry[];
+  mechanismWarning: string | null;
+  promptText: string;
+  staticReference: TagPolicyLayer[];
 }
 
 // ─── Host instrumentation blind-spot analysis ─────────────────────────────────
@@ -617,9 +673,12 @@ export interface AnalyticsData {
   };
   integrations: {
     total: number; configured: number; enabled: number;
-    installed: number; broken: number; idle: number; notInstalled: number;
+    installed: number; broken: number; idle: number; notInstalled: number; receivingData: number;
     byType: Array<{ type: string; count: number }>;
-    list: Array<{ name: string; type: string | null; status: string | null; isConfigured: boolean; isEnabled: boolean }>;
+    list: Array<{
+      name: string; type: string | null; status: string | null; isConfigured: boolean; isEnabled: boolean;
+      hostCount: number | null; receivingData: boolean;
+    }>;
     recommendations: string[];
   };
   synthetics: {
@@ -782,6 +841,81 @@ export interface UsageData {
   products: UsageProductSummary[];
 }
 
+export interface EventStatBucket {
+  key: string;
+  count: number;
+}
+
+export interface EventStatsData {
+  scanRunId: string;
+  computedAt: string | null;
+  totalEvents: number;
+  bySource: EventStatBucket[];
+  byService: EventStatBucket[];
+  byStatus: EventStatBucket[];
+}
+
+export type FeatureNodeType = 'scan' | 'collector' | 'rule' | 'page' | 'section';
+
+// Mirrors backend/src/feature-flags/types.ts FeatureFlagState — a tree node
+// with both its own stored preference and the read-time-computed effective
+// state (storedEnabled AND every ancestor's effectiveEnabled).
+export interface FeatureFlagState {
+  key: string;
+  parentKey: string | null;
+  nodeType: FeatureNodeType;
+  label: string;
+  collectorName?: string;
+  ruleCategory?: string;
+  pagePath?: string;
+  storedEnabled: boolean;
+  effectiveEnabled: boolean;
+  children: FeatureFlagState[];
+}
+
+export type FindingDiffStatus = 'new' | 'resolved' | 'worsened' | 'improved' | 'unchanged';
+
+export interface FindingSnapshot {
+  severity: FindingSeverity;
+  title: string;
+  affectedCount: number;
+  totalCount: number;
+  percentage: number;
+}
+
+export interface FindingDiff {
+  ruleId: string;
+  ruleName: string;
+  category: FindingCategory;
+  status: FindingDiffStatus;
+  previous: FindingSnapshot | null;
+  current: FindingSnapshot | null;
+}
+
+export interface CategoryComparison {
+  category: FindingCategory;
+  previousScore: number | null;
+  currentScore: number | null;
+  scoreDelta: number | null;
+  concerns: FindingDiff[];
+  improvements: FindingDiff[];
+  unchangedCount: number;
+}
+
+export interface ScanComparisonResult {
+  orgId: string;
+  previousScanId: string;
+  currentScanId: string;
+  previousCompletedAt: string | null;
+  currentCompletedAt: string | null;
+  overallPreviousScore: number | null;
+  overallCurrentScore: number | null;
+  overallScoreDelta: number | null;
+  categories: CategoryComparison[];
+  topConcerns: FindingDiff[];
+  topImprovements: FindingDiff[];
+}
+
 export interface AIProviderSettings {
   provider: string;
   model: string | null;
@@ -790,6 +924,13 @@ export interface AIProviderSettings {
   keyHint: string | null;
   updatedAt: string | null;
   envProvider?: string;
+}
+
+export interface AIPromptDescriptor {
+  key: string;
+  label: string;
+  filePath: string;
+  content: string;
 }
 
 export const DATADOG_SITES: Array<{ value: DatadogSite; label: string }> = [

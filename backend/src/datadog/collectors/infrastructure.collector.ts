@@ -103,7 +103,7 @@ export async function collectInfrastructure(
       insertHost.run(
         uuidv4(), orgId, scanRunId, hostName,
         JSON.stringify(host.aliases ?? []),
-        host.agent_version ?? null,
+        host.agent_version ?? host.meta?.agent_version ?? null,
         host.meta?.platform ?? null,
         hasEnv ? 1 : 0, hasService ? 1 : 0, hasVersion ? 1 : 0, hasTeam ? 1 : 0,
         allTags.length,

@@ -1,12 +1,14 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { inventoryApi, taggingApi, tagTemplateApi } from '../services/api';
+import { inventoryApi, taggingApi, tagTemplateApi, scansApi } from '../services/api';
 import { useOrgAndScanFilters } from '../hooks/useFilters';
 import DataTable from '../components/common/DataTable';
 import { EmptyState } from '../components/common/LoadingState';
 import PageHeader from '../components/ui/PageHeader';
 import { SkeletonCards, SkeletonTable } from '../components/ui/Skeleton';
+import ResourceFindingCard from '../components/tagging/ResourceFindingCard';
+import SectionGate from '../components/SectionGate';
 
 // ─── Static recommendation definitions ────────────────────────────────────────
 
@@ -155,7 +157,7 @@ const PRODUCT_LAYERS: ProductLayer[] = [
     icon: '🖥️',
     status: 'tracked',
     description: 'The base layer. Tags applied here propagate to metrics, logs collected by the Agent, and infrastructure dashboards.',
-    requiredTags: ['env', 'service', 'version', 'team'],
+    requiredTags: ['env', 'version', 'team'],
   },
   {
     id: 'containers',
@@ -410,6 +412,21 @@ export default function TagExplorer() {
   });
   const templateTags = templateScore ? [...templateScore.required, ...templateScore.recommended] : [];
 
+  // Real per-resource unified-tagging findings for the "Required (UST)" tab —
+  // replaces the old static REQUIRED_TAGS-only view with actual affected
+  // hosts/services/monitors/synthetics and Datadog's best-practice guidance.
+  const { data: taggingFindings = [] } = useQuery({
+    queryKey: ['findings', selectedScanId, 'unified_tagging'],
+    queryFn: () => scansApi.getFindings(selectedScanId, { category: 'unified_tagging' }),
+    enabled,
+  });
+  const findingsByTagKey = new Map<string, typeof taggingFindings>();
+  for (const f of taggingFindings) {
+    const key = f.tagKey ?? f.ruleId;
+    if (!findingsByTagKey.has(key)) findingsByTagKey.set(key, []);
+    findingsByTagKey.get(key)!.push(f);
+  }
+
   const filtered = tags.filter(
     (t) => !search || t.tag_key.toLowerCase().includes(search.toLowerCase())
   );
@@ -425,7 +442,7 @@ export default function TagExplorer() {
 
   const layerCoverageMap: Record<string, LayerCoverage> = {
     infra: coverage
-      ? { env: coverage.layers.hosts.env, service: coverage.layers.hosts.service, version: coverage.layers.hosts.version, team: coverage.layers.hosts.team }
+      ? { env: coverage.layers.hosts.env, version: coverage.layers.hosts.version, team: coverage.layers.hosts.team }
       : {},
     apm: coverage
       ? { env: coverage.layers.services.env, service: coverage.layers.services.service, version: coverage.layers.services.version, team: coverage.layers.services.team }
@@ -477,6 +494,7 @@ export default function TagExplorer() {
           </div>
 
           {/* ── Section 1: Unified Tagging Recommendations ────────────────── */}
+          <SectionGate featureKey="section.tags.required_recommendations">
           <section>
             <h2 className="text-lg font-bold text-ink mb-1">
               Unified Tagging Recommendations
@@ -514,55 +532,97 @@ export default function TagExplorer() {
             {activeTab === 'required' && (
               <div className="space-y-3">
                 <p className="text-sm text-ink-muted bg-red-500/10 border border-red-500/30 rounded px-3 py-2">
-                  These three tags form the <strong>Unified Service Tagging</strong> foundation. They
+                  These tags form the <strong>Unified Service Tagging</strong> foundation. They
                   must be applied consistently across every resource type for Service Map, Deployment
-                  Tracking, and cross-product correlation to function.
+                  Tracking, and cross-product correlation to function. Each card below is built from
+                  this scan's actual findings — the specific hosts/services/monitors/synthetics tests
+                  still missing the tag, and Datadog's best-practice guidance for fixing it.
                 </p>
                 {REQUIRED_TAGS.map((tag) => {
                   const found = detectedKeys.has(tag.key);
+                  const findingsForTag = findingsByTagKey.get(tag.key) ?? [];
                   return (
-                    <div key={tag.key} className="card">
-                      <div className="flex items-start justify-between gap-4">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2 mb-1">
-                            <TagPill tagKey={tag.key} />
-                            <span
-                              className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-                                found
-                                  ? 'bg-green-500/15 text-green-400'
-                                  : 'bg-red-500/15 text-red-400'
-                              }`}
-                            >
-                              {found ? '✓ Detected' : '✗ Not found'}
-                            </span>
+                    <div key={tag.key} className="space-y-2">
+                      <div className="card">
+                        <div className="flex items-start justify-between gap-4">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2 mb-1">
+                              <TagPill tagKey={tag.key} />
+                              <span
+                                className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                                  found
+                                    ? 'bg-green-500/15 text-green-400'
+                                    : 'bg-red-500/15 text-red-400'
+                                }`}
+                              >
+                                {found ? '✓ Detected' : '✗ Not found'}
+                              </span>
+                            </div>
+                            <p className="text-sm text-ink-muted mt-1">{tag.description}</p>
+                            <p className="text-xs text-ink-muted mt-1 italic">{tag.why}</p>
+                            <div className="mt-2">
+                              <span className="text-xs text-ink-faint mr-1">Applies to:</span>
+                              <AppliesTo layers={tag.applies} />
+                            </div>
                           </div>
-                          <p className="text-sm text-ink-muted mt-1">{tag.description}</p>
-                          <p className="text-xs text-ink-muted mt-1 italic">{tag.why}</p>
-                          <div className="mt-2">
-                            <span className="text-xs text-ink-faint mr-1">Applies to:</span>
-                            <AppliesTo layers={tag.applies} />
-                          </div>
+                          {/* Per-layer coverage for this tag */}
+                          {coverage && (
+                            <div className="w-40 shrink-0 space-y-1.5">
+                              <div className="text-xs text-ink-faint font-medium mb-1">Coverage by layer</div>
+                              {[
+                                { label: 'Hosts', val: (coverage.layers.hosts as Record<string, number | null>)[tag.key] },
+                                { label: 'Services', val: (coverage.layers.services as Record<string, number | null>)[tag.key] },
+                                { label: 'Monitors', val: (coverage.layers.monitors as Record<string, number | null>)[tag.key] },
+                                { label: 'Synthetics', val: (coverage.layers.synthetics as Record<string, number | null>)[tag.key] },
+                              ]
+                                .filter((r) => r.val !== undefined && r.val !== null)
+                                .map((r) => (
+                                  <CoverageBar key={r.label} label={r.label} pct={r.val as number} />
+                                ))}
+                            </div>
+                          )}
                         </div>
-                        {/* Per-layer coverage for this tag */}
-                        {coverage && (
-                          <div className="w-40 shrink-0 space-y-1.5">
-                            <div className="text-xs text-ink-faint font-medium mb-1">Coverage by layer</div>
-                            {[
-                              { label: 'Hosts', val: (coverage.layers.hosts as Record<string, number | null>)[tag.key] },
-                              { label: 'Services', val: (coverage.layers.services as Record<string, number | null>)[tag.key] },
-                              { label: 'Monitors', val: (coverage.layers.monitors as Record<string, number | null>)[tag.key] },
-                              { label: 'Synthetics', val: (coverage.layers.synthetics as Record<string, number | null>)[tag.key] },
-                            ]
-                              .filter((r) => r.val !== undefined && r.val !== null)
-                              .map((r) => (
-                                <CoverageBar key={r.label} label={r.label} pct={r.val as number} />
-                              ))}
-                          </div>
-                        )}
                       </div>
+                      {findingsForTag.map((f) => (
+                        <ResourceFindingCard
+                          key={f.id}
+                          title={f.title}
+                          description={f.description}
+                          tagKey={f.tagKey ?? tag.key}
+                          severity={f.severity}
+                          recommendation={f.recommendation}
+                          bestPractice={f.bestPractice}
+                          affectedResources={f.affectedResources}
+                          affectedCount={f.affectedCount}
+                          totalCount={f.totalCount}
+                        />
+                      ))}
                     </div>
                   );
                 })}
+
+                {/* Findings for tags not in the static REQUIRED_TAGS list above
+                    (e.g. team/application/tier from ust-006/007/008) */}
+                {[...findingsByTagKey.entries()]
+                  .filter(([key]) => !REQUIRED_TAGS.some((t) => t.key === key))
+                  .map(([key, findings]) => (
+                    <div key={key} className="space-y-2">
+                      {findings.map((f) => (
+                        <ResourceFindingCard
+                          key={f.id}
+                          title={f.title}
+                          description={f.description}
+                          tagKey={f.tagKey ?? key}
+                          severity={f.severity}
+                          recommendation={f.recommendation}
+                          bestPractice={f.bestPractice}
+                          affectedResources={f.affectedResources}
+                          affectedCount={f.affectedCount}
+                          totalCount={f.totalCount}
+                        />
+                      ))}
+                    </div>
+                  ))}
               </div>
             )}
 
@@ -691,8 +751,10 @@ export default function TagExplorer() {
               </div>
             )}
           </section>
+          </SectionGate>
 
           {/* ── Section 2: Hierarchical tag tree ─────────────────────────── */}
+          <SectionGate featureKey="section.tags.hierarchy">
           <section>
             <h2 className="text-lg font-bold text-ink mb-1">
               Tag Hierarchy by Product Layer
@@ -713,8 +775,10 @@ export default function TagExplorer() {
               ))}
             </div>
           </section>
+          </SectionGate>
 
           {/* ── Section 3: Tag key inventory table ───────────────────────── */}
+          <SectionGate featureKey="section.tags.key_inventory">
           <section>
             <div className="card p-0 overflow-hidden">
               <div className="px-4 py-3 border-b border-border flex items-center justify-between">
@@ -803,6 +867,7 @@ export default function TagExplorer() {
               />
             </div>
           </section>
+          </SectionGate>
         </>
       )}
     </div>

@@ -85,4 +85,11 @@ export const ddUrl = {
   apiKeys: (base: string) => `${base}/organization-settings/api-keys`,
   samlConfig: (base: string) => `${base}/organization-settings/saml`,
   auditLogs: (base: string) => `${base}/audit-trail`,
+
+  // Internal Developer Portal: Teams, Software Catalog, Scorecards, DORA
+  teams: (base: string) => `${base}/organization-settings/teams`,
+  team: (base: string, handle: string) => `${base}/teams/${enc(handle)}`,
+  softwareCatalog: (base: string) => `${base}/software-catalog`,
+  scorecards: (base: string) => `${base}/scorecards`,
+  doraMetrics: (base: string) => `${base}/ci/dora-metrics`,
 };

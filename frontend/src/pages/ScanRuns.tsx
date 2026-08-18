@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { scansApi } from '../services/api';
@@ -11,11 +12,17 @@ import DataTable, { type Column } from '../components/common/DataTable';
 import { SkeletonTable } from '../components/ui/Skeleton';
 import { formatDistanceToNow, format } from 'date-fns';
 import type { ScanRun } from '../types';
+import { useFeatureFlags } from '../hooks/useFeatureFlags';
+import SectionGate from '../components/SectionGate';
 
 export default function ScanRuns() {
   const qc = useQueryClient();
-  const { orgs, selectedOrgId, setSelectedOrgId } = useOrgAndScanFilters();
+  const navigate = useNavigate();
+  const { orgs, selectedOrgId, setSelectedOrgId, setSelectedScanId } = useOrgAndScanFilters();
   const { data: allScans = [], isLoading } = useScans(selectedOrgId);
+  const { isPageEnabled } = useFeatureFlags();
+  const scanEnabled = isPageEnabled('scan');
+  const comparisonEnabled = isPageEnabled('page.scan_comparison');
 
   const startScan = useMutation({
     mutationFn: (orgId: string) => scansApi.start(orgId),
@@ -136,6 +143,19 @@ export default function ScanRuns() {
             >
               {expandedScan === s.id ? 'Collapse' : 'Details'}
             </button>
+            {comparisonEnabled && s.status === 'completed' && (
+              <button
+                className="btn-secondary text-xs"
+                title="Compare this scan against a previous one"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setSelectedScanId(s.id);
+                  navigate('/scan-comparison');
+                }}
+              >
+                Compare
+              </button>
+            )}
             <button
               className="p-1.5 rounded text-ink-faint hover:text-red-400 hover:bg-red-500/10 disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-ink-faint"
               disabled={isRunning}
@@ -171,8 +191,9 @@ export default function ScanRuns() {
             </select>
             <button
               className="btn-primary"
-              disabled={startScan.isPending || !selectedOrgId}
+              disabled={startScan.isPending || !selectedOrgId || !scanEnabled}
               onClick={() => startScan.mutate(selectedOrgId)}
+              title={scanEnabled ? undefined : 'Scanning is disabled by an admin in Feature Flags'}
             >
               {startScan.isPending ? '⟳ Starting...' : '▶ Start Scan'}
             </button>
@@ -180,13 +201,20 @@ export default function ScanRuns() {
         }
       />
 
+      {!scanEnabled && (
+        <div className="card bg-amber-500/10 border-amber-500/30 text-sm text-amber-400 flex items-start gap-2 p-3 mb-4">
+          <span className="mt-0.5">⚠</span>
+          <span>Scanning is currently disabled by an admin. Re-enable the "Full Scan" flag in Feature Flags to run new scans.</span>
+        </div>
+      )}
+
       {isLoading ? (
         <SkeletonTable rows={6} cols={5} />
       ) : allScans.length === 0 ? (
         <EmptyState
           message="No scans yet. Start a scan to collect data."
           action={
-            <button className="btn-primary" onClick={() => startScan.mutate(selectedOrgId)}>
+            <button className="btn-primary" disabled={!scanEnabled} onClick={() => startScan.mutate(selectedOrgId)}>
               Start First Scan
             </button>
           }
@@ -204,6 +232,7 @@ export default function ScanRuns() {
           />
 
           {expandedScanRun && scanDetail && (
+            <SectionGate featureKey="section.scans.collector_detail_panel">
             <div className="card">
               <h4 className="text-sm font-semibold text-ink mb-3">
                 Collector Results — {format(new Date(expandedScanRun.startedAt), 'MMM d, yyyy HH:mm')}
@@ -250,6 +279,7 @@ export default function ScanRuns() {
                 ))}
               </div>
             </div>
+            </SectionGate>
           )}
         </div>
       )}

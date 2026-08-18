@@ -3,6 +3,8 @@ import clsx from 'clsx';
 import { useQuery } from '@tanstack/react-query';
 import { analyticsApi } from '../services/api';
 import { useOrgAndScanFilters } from '../hooks/useFilters';
+import { useFeatureFlags } from '../hooks/useFeatureFlags';
+import SectionGate from '../components/SectionGate';
 import { ddBaseUrl, ddUrl } from '../utils/ddUrl';
 import { EmptyState } from '../components/common/LoadingState';
 import { AISectionInsight } from '../components/analytics/AISectionInsight';
@@ -214,8 +216,10 @@ const integrationColumns: Column<IntegrationRow>[] = [
   { key: 'name', header: 'Integration', sortable: true, render: (i) => <span className="text-xs font-medium text-ink">{i.name}</span> },
   { key: 'type', header: 'Type', sortable: true, render: (i) => <span className="text-xs text-ink-muted">{i.type ?? '—'}</span> },
   { key: 'status', header: 'Status', sortable: true, render: (i) => <span className="text-xs text-ink-muted">{i.status ?? '—'}</span> },
-  { key: 'isEnabled', header: 'Enabled', sortable: true, sortAccessor: (i) => (i.isEnabled ? 1 : 0), render: (i) => (
-    <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${i.isEnabled ? 'bg-green-500/15 text-green-400' : 'bg-surface-sunken text-ink-muted'}`}>{i.isEnabled ? 'Yes' : 'No'}</span>
+  { key: 'receivingData', header: 'Receiving Data', sortable: true, sortAccessor: (i) => (i.receivingData ? 1 : 0), render: (i) => (
+    <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${i.receivingData ? 'bg-green-500/15 text-green-400' : 'bg-surface-sunken text-ink-muted'}`}>
+      {i.receivingData ? '✓ Yes' : '✗ No'}{i.hostCount != null && i.hostCount > 0 ? ` (${i.hostCount} host${i.hostCount > 1 ? 's' : ''})` : ''}
+    </span>
   ) },
 ];
 
@@ -263,12 +267,37 @@ export default function Analytics() {
 
 const SEGMENTS_KEY = 'dd-hc:analytics-segment';
 
+// Maps each segment tab id to its section feature-flag key. Segment ids are
+// defined in the `segments` array below (infra, logs, synthetics, apm,
+// integrations, monitors, slo, governance, rum, fleet, security, proxies,
+// gaps, scorecard) — note several don't match the flag-key naming 1:1
+// (e.g. `slo` -> slo_reliability, `proxies` -> db_network, `security` ->
+// security_incidents, `gaps` -> scan_coverage_gaps, `monitors` ->
+// monitor_intelligence).
+const SEGMENT_FLAG_KEYS: Record<string, string> = {
+  infra: 'section.analytics.infra_allotment',
+  logs: 'section.analytics.log_pipeline',
+  synthetics: 'section.analytics.synthetics',
+  apm: 'section.analytics.apm_observability',
+  integrations: 'section.analytics.integrations',
+  monitors: 'section.analytics.monitor_intelligence',
+  slo: 'section.analytics.slo_reliability',
+  governance: 'section.analytics.governance_access',
+  rum: 'section.analytics.rum',
+  fleet: 'section.analytics.fleet_management',
+  security: 'section.analytics.security_incidents',
+  proxies: 'section.analytics.db_network',
+  gaps: 'section.analytics.scan_coverage_gaps',
+  scorecard: 'section.analytics.scorecard',
+};
+
 function AnalyticsBody({ data }: { data: AnalyticsData }) {
   const { infrastructure, customMetrics, logs, integrations, synthetics, apm, observability, monitorBreakdown, sloBreakdown, governance, scorecard, rum, fleet, security, incidents, costManagement, productProxies } = data;
   const { orgs, selectedOrgId } = useOrgAndScanFilters();
   const orgBase = ddBaseUrl(orgs.find((o) => o.id === selectedOrgId)?.site ?? 'datadoghq.com');
+  const { isPageEnabled } = useFeatureFlags();
 
-  const segments = [
+  const rawSegments = [
     { id: 'infra', label: 'Infrastructure', icon: '🖥️', available: true },
     { id: 'logs', label: 'Log Pipeline', icon: '📄', available: true },
     { id: 'synthetics', label: 'Synthetics', icon: '🌐', available: (synthetics.apiTests + synthetics.browserTests) > 0 },
@@ -287,6 +316,12 @@ function AnalyticsBody({ data }: { data: AnalyticsData }) {
     { id: 'gaps', label: 'Scan Coverage Gaps', icon: '❔', available: true },
     { id: 'scorecard', label: 'Scorecard', icon: '📋', available: Boolean(scorecard) },
   ];
+  // AND the data-availability check with the section feature flag, so a
+  // disabled section neither shows a tab nor renders its content.
+  const segments = rawSegments.map((s) => ({
+    ...s,
+    available: s.available && isPageEnabled(SEGMENT_FLAG_KEYS[s.id]),
+  }));
   const visibleSegments = segments.filter((s) => s.available);
 
   const [rawActiveSegment, setActiveSegment] = useState(() => {
@@ -319,7 +354,7 @@ function AnalyticsBody({ data }: { data: AnalyticsData }) {
           ]}
         />
         <StatCard
-          label="Integrations" value={integrations.total} sub={`${integrations.installed} installed`}
+          label="Integrations" value={integrations.total} sub={`${integrations.receivingData} receiving data`}
           breakdown={[
             { key: 'installed', label: 'installed', value: integrations.installed, color: STATUS.good },
             { key: 'idle', label: 'idle', value: integrations.idle, color: STATUS.warning },
@@ -381,6 +416,7 @@ function AnalyticsBody({ data }: { data: AnalyticsData }) {
 
       {/* ── Infrastructure & allotment ───────────────────────────────────── */}
       {activeSegment === 'infra' && (
+      <SectionGate featureKey={SEGMENT_FLAG_KEYS.infra}>
       <section className="section-card">
         <SectionHeader title="Infrastructure & Allotment" category="unified_tagging" cost={infrastructure.cost} aiPrompt="Analyze this org's infrastructure and allotment data. Review the host count and tier, UST tag coverage (env, service, version, team), custom metrics utilization vs allotment, and top cardinality drivers. Identify the key cost risks, gaps in observability coverage, and the top 3 actionable recommendations to optimize infrastructure spending and tagging hygiene." />
         <div className="grid grid-cols-3 gap-4">
@@ -483,10 +519,12 @@ function AnalyticsBody({ data }: { data: AnalyticsData }) {
           <RecommendationList items={customMetrics.recommendations} />
         </div>
       </section>
+      </SectionGate>
       )}
 
       {/* ── Log pipeline ────────────────────────────────────────────────────── */}
       {activeSegment === 'logs' && (
+      <SectionGate featureKey={SEGMENT_FLAG_KEYS.logs}>
       <section className="section-card">
         <SectionHeader title="Log Pipeline" category="logs_health" cost={logs.cost} aiPrompt="Analyze this org's log pipeline configuration. Review all log indexes, their retention periods, daily event limits, exclusion filters, and Flex tier usage. Identify indexes that are rate-limited, indexes without exclusion filters (cost risk), indexes with long retention that could be moved to Flex, and any pipeline gaps. Provide the top 3 recommendations to reduce log costs and improve pipeline efficiency." />
         <div className="space-y-4">
@@ -555,10 +593,12 @@ function AnalyticsBody({ data }: { data: AnalyticsData }) {
           />
         </div>
       </section>
+      </SectionGate>
       )}
 
       {/* ── Synthetics ──────────────────────────────────────────────────────── */}
       {activeSegment === 'synthetics' && (synthetics.apiTests + synthetics.browserTests) > 0 && (
+        <SectionGate featureKey={SEGMENT_FLAG_KEYS.synthetics}>
         <section className="section-card">
           <SectionHeader title="Synthetics Usage" category="synthetics_health" cost={synthetics.cost} aiPrompt="Analyze this org's Datadog Synthetics usage. Review the mix of API vs browser tests, estimated monthly run volumes, test status distribution, and location spread. Browser tests cost significantly more than API tests. Identify opportunities to replace or consolidate browser tests with API tests where appropriate, flag tests with unusually high run volumes, and provide the top 3 recommendations to optimize synthetic test coverage while reducing costs." />
           <div className="grid grid-cols-4 gap-3 mb-4">
@@ -594,10 +634,12 @@ function AnalyticsBody({ data }: { data: AnalyticsData }) {
             />
           )}
         </section>
+        </SectionGate>
       )}
 
       {/* ── APM & Observability ─────────────────────────────────────────────── */}
       {activeSegment === 'apm' && (
+      <SectionGate featureKey={SEGMENT_FLAG_KEYS.apm}>
       <section className="section-card">
         <SectionHeader title="APM & Observability" category="service_architecture" cost={apm.cost} aiPrompt="Analyze this org's APM and observability maturity. Review the APM service count and what percentage are registered in the Service Catalog, how many services have monitors and SLOs configured, and the overall monitor and dashboard counts. Identify observability gaps (services without monitors, missing SLOs, low catalog coverage) and provide the top 3 recommendations to improve APM coverage, reliability tracking, and operational readiness." />
         <div className="grid grid-cols-6 gap-3">
@@ -612,10 +654,12 @@ function AnalyticsBody({ data }: { data: AnalyticsData }) {
           <RecommendationList items={apm.recommendations} />
         </div>
       </section>
+      </SectionGate>
       )}
 
       {/* ── Integrations ────────────────────────────────────────────────────── */}
       {activeSegment === 'integrations' && (
+      <SectionGate featureKey={SEGMENT_FLAG_KEYS.integrations}>
       <section className="section-card">
         <SectionHeader title="Integrations" category="integration_hygiene" aiPrompt="Analyze this org's Datadog integration footprint. Review total integrations detected, how many are installed vs idle vs broken, the breakdown by integration type, and which specific integrations are present. Identify integrations that are configured but not enabled (potential waste or gaps), integrations with a broken/error status that need attention, critical integrations that may be missing based on the infrastructure in use (cloud providers, databases, etc.), and provide the top 3 recommendations to improve integration coverage and data collection." />
         <div className="grid grid-cols-3 gap-4">
@@ -623,7 +667,7 @@ function AnalyticsBody({ data }: { data: AnalyticsData }) {
             <div className="flex items-center justify-between">
               <div className="font-semibold text-ink text-sm flex items-center">
                 Summary
-                <InfoTip text="Installed: actively enabled and receiving data. Idle: configured but not enabled — a silent data gap. Broken: the last probe hit an error or permission problem. Not installed: nothing configured at all." />
+                <InfoTip text="Counted against the same catalog as app.datadoghq.com/integrations — both account-based integrations (AWS, Slack, PagerDuty) and Agent checks (Postgres, Nginx, etc.) detected running on your hosts. Installed: actively enabled and receiving data. Idle: configured but not enabled — a silent data gap. Broken: the last probe hit an error or permission problem. Not installed: nothing configured at all. Receiving Data: confirmed via host telemetry where available, otherwise via enabled status." />
               </div>
               <a
                 href={ddUrl.integrations(orgBase)}
@@ -637,6 +681,7 @@ function AnalyticsBody({ data }: { data: AnalyticsData }) {
             <div className="space-y-2">
               {[
                 { label: 'Total detected', value: integrations.total, color: 'text-ink' },
+                { label: 'Receiving data', value: integrations.receivingData, color: 'text-green-400' },
                 { label: 'Installed', value: integrations.installed, color: 'text-green-400' },
                 { label: 'Idle', value: integrations.idle, color: 'text-amber-400' },
                 { label: 'Broken', value: integrations.broken, color: 'text-red-400' },
@@ -648,6 +693,12 @@ function AnalyticsBody({ data }: { data: AnalyticsData }) {
                 </div>
               ))}
             </div>
+            <p className="text-[11px] text-ink-faint pt-1">
+              Cross-referenced against the{' '}
+              <a href={ddUrl.integrations(orgBase)} target="_blank" rel="noopener noreferrer" className="text-violet-400 hover:underline">
+                Datadog Integrations catalog
+              </a>.
+            </p>
             {integrations.byType.length > 0 && (
               <div className="pt-2 border-t border-border">
                 <div className="text-xs font-semibold text-ink-muted uppercase tracking-wide mb-2">By Type</div>
@@ -677,9 +728,11 @@ function AnalyticsBody({ data }: { data: AnalyticsData }) {
           </div>
         </div>
       </section>
+      </SectionGate>
       )}
       {/* ── Monitor Intelligence ─────────────────────────────────────────── */}
       {activeSegment === 'monitors' && monitorBreakdown.total > 0 && (
+        <SectionGate featureKey={SEGMENT_FLAG_KEYS.monitors}>
         <section className="section-card">
           <SectionHeader title="Monitor Intelligence" category="monitors_health" aiPrompt="Analyze this org's monitor configuration. Review the monitor state distribution (OK, Alert, No Data), type breakdown, muted monitors, monitors without notification channels, and monitors missing env/service/team tags. Identify the top risks (unnotified alerts, data gaps, muted monitors) and provide the top 3 recommendations to improve monitor coverage and reduce alert fatigue." />
           <div className="grid grid-cols-3 gap-4">
@@ -760,10 +813,12 @@ function AnalyticsBody({ data }: { data: AnalyticsData }) {
             <RecommendationList items={monitorBreakdown.recommendations} />
           </div>
         </section>
+        </SectionGate>
       )}
 
       {/* ── SLO & Reliability ───────────────────────────────────────────────── */}
       {activeSegment === 'slo' && (
+      <SectionGate featureKey={SEGMENT_FLAG_KEYS.slo}>
       <section className="section-card">
         <SectionHeader title="SLO & Reliability" aiPrompt="Analyze this org's SLO configuration. Review the SLO count, types (metric vs monitor-based), service coverage, and tagging hygiene on SLOs. Compare the number of SLOs against APM services to identify services missing reliability targets. Provide the top 3 recommendations to improve SLO coverage and reliability tracking." />
         <div className="grid grid-cols-4 gap-3">
@@ -814,10 +869,12 @@ function AnalyticsBody({ data }: { data: AnalyticsData }) {
           <RecommendationList items={sloBreakdown.recommendations} />
         </div>
       </section>
+      </SectionGate>
       )}
 
       {/* ── Governance & Access ─────────────────────────────────────────────── */}
       {activeSegment === 'governance' && (
+      <SectionGate featureKey={SEGMENT_FLAG_KEYS.governance}>
       <section className="section-card">
         <SectionHeader title="Governance & Access" category="governance" aiPrompt="Analyze this org's governance and access control posture. Review the user count, role count, RBAC configuration, team structure, and unified tagging compliance findings. Identify governance gaps (missing teams, poor tag coverage, access control risks) and provide the top 3 recommendations to improve governance hygiene and team ownership visibility." />
         <div className="grid grid-cols-3 gap-4">
@@ -877,10 +934,12 @@ function AnalyticsBody({ data }: { data: AnalyticsData }) {
           <RecommendationList items={governance.recommendations} />
         </div>
       </section>
+      </SectionGate>
       )}
 
       {/* ── RUM Applications ────────────────────────────────────────────────── */}
       {activeSegment === 'rum' && rum && (
+        <SectionGate featureKey={SEGMENT_FLAG_KEYS.rum}>
         <section className="section-card">
           <SectionHeader title="Real User Monitoring (RUM)" cost={rum.cost} aiPrompt="Analyze this org's RUM application configuration. Review the number of RUM applications, their types (browser, iOS, Android, Flutter, React Native), and framework coverage. Identify any missing application types that should be instrumented based on the org's tech stack, highlight gaps in mobile vs web coverage, and provide the top 3 recommendations to improve frontend observability and session replay value." />
           {rum.total === 0 ? (
@@ -919,10 +978,12 @@ function AnalyticsBody({ data }: { data: AnalyticsData }) {
             </div>
           )}
         </section>
+        </SectionGate>
       )}
 
       {/* ── Fleet Management ─────────────────────────────────────────────────── */}
       {activeSegment === 'fleet' && fleet && (Object.keys(fleet.agentVersions).length > 0 || Object.keys(fleet.platforms).length > 0 || fleet.installedChecks.length > 0) && (
+        <SectionGate featureKey={SEGMENT_FLAG_KEYS.fleet}>
         <section className="section-card">
           <SectionHeader title="Fleet Management" aiPrompt="Analyze this org's Datadog Agent fleet. Review the agent version distribution (outdated agents are a security and feature risk), OS platform breakdown, and the top installed agent checks (integrations running on hosts). Identify agents running outdated versions, unusual platform diversity that may indicate config drift, and checks that suggest installed technologies not yet configured as formal Datadog integrations. Provide the top 3 fleet hygiene recommendations." />
           <div className="grid grid-cols-3 gap-4">
@@ -997,10 +1058,12 @@ function AnalyticsBody({ data }: { data: AnalyticsData }) {
             <RecommendationList items={fleet.recommendations} />
           </div>
         </section>
+        </SectionGate>
       )}
 
       {/* ── Security Posture ─────────────────────────────────────────────────── */}
       {activeSegment === 'security' && security && (security.total > 0 || incidents.total > 0) && (
+        <SectionGate featureKey={SEGMENT_FLAG_KEYS.security}>
         <section className="section-card">
           <SectionHeader title="Security Posture & Incidents" category="security_posture" cost={security.cost} aiPrompt="Analyze this org's security findings (CSPM/AppSec/Cloud SIEM) and incident management data. Identify unresolved critical/high findings, stale open incidents, and any cloud providers missing Cloud Cost Management configuration. Provide the top 3 recommendations to reduce security risk and improve incident response hygiene." />
           <div className="grid grid-cols-3 gap-4 mb-4">
@@ -1056,10 +1119,12 @@ function AnalyticsBody({ data }: { data: AnalyticsData }) {
             <RecommendationList items={security.recommendations} />
           </div>
         </section>
+        </SectionGate>
       )}
 
       {/* ── Database / Network Monitoring proxy detection ─────────────────── */}
       {activeSegment === 'proxies' && (
+      <SectionGate featureKey={SEGMENT_FLAG_KEYS.proxies}>
       <section className="section-card">
         <SectionHeader title="Database & Network Monitoring Signals" category="network_cloud" cost={productProxies.cost} aiPrompt="Analyze the inferred DBM (Database Monitoring), CNM (Cloud Network Monitor, formerly Network Performance Monitoring), and NDM (Network Device Monitoring) signals, which are proxy-detected from matching integration names since there is no dedicated collector for these products. Note that a 0 count may mean the product isn't in use or simply isn't detectable by this heuristic. Suggest what to manually verify." />
         <div className="grid grid-cols-3 gap-4">
@@ -1071,10 +1136,12 @@ function AnalyticsBody({ data }: { data: AnalyticsData }) {
           <RecommendationList items={productProxies.recommendations} />
         </div>
       </section>
+      </SectionGate>
       )}
 
       {/* ── Honest gap list ─────────────────────────────────────────────────── */}
       {activeSegment === 'gaps' && (
+      <SectionGate featureKey={SEGMENT_FLAG_KEYS.gaps}>
       <section className="section-card">
         <div className="card">
           <h2 className="text-sm font-semibold text-ink mb-1">Not Yet Covered by This Scan</h2>
@@ -1089,10 +1156,12 @@ function AnalyticsBody({ data }: { data: AnalyticsData }) {
           </div>
         </div>
       </section>
+      </SectionGate>
       )}
 
       {/* ── Health Scorecard ─────────────────────────────────────────────────── */}
       {activeSegment === 'scorecard' && scorecard && (
+        <SectionGate featureKey={SEGMENT_FLAG_KEYS.scorecard}>
         <section className="section-card">
           <SectionHeader title="Health Scorecard" aiPrompt="Review this org's overall Datadog health scorecard. Analyze the overall score and grade, individual category scores (tagging, monitors, logs, dashboards, synthetics, integrations, governance), and the top findings across all categories. Prioritize the highest-severity issues and provide the top 3 most impactful improvements the team should tackle first to raise the overall health score." />
           <div className="space-y-4">
@@ -1155,6 +1224,7 @@ function AnalyticsBody({ data }: { data: AnalyticsData }) {
             )}
           </div>
         </section>
+        </SectionGate>
       )}
 
     </div>

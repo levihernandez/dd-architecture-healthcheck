@@ -1,0 +1,84 @@
+version: "3.8"
+
+# Base stack: frontend (nginx + built SPA) and backend (Node/Express API)
+# only. No Datadog Agent, no OpenBao — this alone is enough to run the app
+# with nothing else installed.
+#
+# Layer in observability and/or OpenBao secret resolution with overlay files
+# instead of editing this one:
+#   docker-compose.observability.yaml          adds the Datadog Agent, wires
+#                                               backend APM + DogStatsD to it
+#   docker-compose.openbao.yaml                 resolves ENC[] secrets in the
+#                                               backend via OpenBao transit
+#   docker-compose.observability-openbao.yaml   both of the above together —
+#                                               also lets the Agent decrypt
+#                                               DD_API_KEY/DD_APP_KEY itself
+#   docker-compose.https.yaml                   terminates TLS at the
+#                                               frontend nginx container
+#                                               (self-signed cert by default)
+#
+# `npm run init` asks what you want and writes the right combination to
+# .compose-files; scripts/compose.sh reads it so `npm run docker:up`/`:down`/
+# `:build` always pass the correct -f flags. Works with `docker compose` or
+# `podman compose` — compose.sh auto-detects whichever is installed.
+#
+# Version tagging: DD_VERSION/VITE_DD_VERSION track the deployed commit —
+# scripts/compose.sh computes GIT_SHA=$(git rev-parse --short HEAD) fresh on
+# every invocation.
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: dd-api-ai-backend
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      LOG_LEVEL: debug
+      DD_VERSION: ${GIT_SHA:-1.0.0}
+      # No agent linked by default — dd-trace honors DD_TRACE_ENABLED=false
+      # (set by `npm run init` when observability is skipped), and otherwise
+      # just drops traces silently if nothing is listening on DD_AGENT_HOST.
+      # Host-editable AI prompt files (chat/assessment/grounding/provider
+      # system prompts) — see backend/src/ai/prompt-store.ts. Matches the
+      # ./backend/prompts volume mount below so edits made via the AI
+      # Settings "Prompts" tab land on the host and can be git-diffed/committed.
+      PROMPTS_DIR: /app/backend/prompts
+    ports:
+      - "3001:3001"
+    volumes:
+      # SQLite file lives on the host — never baked into the image.
+      - ./backend/data:/app/backend/data
+      # AI prompt files — never baked into the image, seeded from bundled
+      # defaults on first boot if this directory is empty.
+      - ./backend/prompts:/app/backend/prompts
+    labels:
+      # No-op without an Agent present to autodiscover these; harmless to
+      # leave on so the observability overlay doesn't need to redefine them.
+      com.datadoghq.ad.logs: '[{"source":"nodejs","service":"${DD_SERVICE:-dd-health-check-api}"}]'
+      com.datadoghq.tags.env: "${DD_ENV:-development}"
+      com.datadoghq.tags.service: "${DD_SERVICE:-dd-health-check-api}"
+      com.datadoghq.tags.version: "${GIT_SHA:-1.0.0}"
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        VITE_DD_RUM_APP_ID: ${VITE_DD_RUM_APP_ID}
+        VITE_DD_RUM_CLIENT_TOKEN: ${VITE_DD_RUM_CLIENT_TOKEN}
+        VITE_DD_SERVICE: ${VITE_DD_SERVICE:-dd-health-check-ui}
+        VITE_DD_ENV: ${VITE_DD_ENV:-development}
+        VITE_DD_VERSION: ${GIT_SHA:-1.0.0}
+        VITE_DD_SITE: ${VITE_DD_SITE:-datadoghq.com}
+    container_name: dd-api-ai-frontend
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend
+    labels:
+      com.datadoghq.ad.logs: '[{"source":"nginx","service":"${VITE_DD_SERVICE:-dd-health-check-ui}"}]'
+      com.datadoghq.tags.env: "${VITE_DD_ENV:-development}"
+      com.datadoghq.tags.service: "${VITE_DD_SERVICE:-dd-health-check-ui}"
+      com.datadoghq.tags.version: "${GIT_SHA:-1.0.0}"

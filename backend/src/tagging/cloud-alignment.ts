@@ -1,5 +1,8 @@
 import { getDatabase } from '../db/database';
 import { SYNONYM_GROUPS } from './normalization';
+import { recommendationForTagKey, type BestPracticeRecommendation } from './recommendation';
+
+const AFFECTED_HOST_CAP = 50;
 
 // Known cloud provider source names as returned by Datadog tags_by_source
 const CLOUD_SOURCE_MAP: Record<string, string> = {
@@ -56,6 +59,9 @@ export interface CloudAlignmentRow {
   alignmentStatus: 'aligned' | 'missing_in_dd' | 'key_drift' | 'value_drift' | 'dd_only';
   mappingSuggestion: string | null;
   hostCount: number;
+  affectedHosts: Array<{ id: string; name: string }>;
+  affectedHostCount: number;
+  bestPractice: BestPracticeRecommendation;
 }
 
 export interface CloudAlignmentResult {
@@ -149,6 +155,8 @@ export function analyzeCloudAlignment(orgId: string, scanRunId: string): CloudAl
 
       const cloudValues = [...agg.values];
       const hostCount = agg.hosts.size;
+      const affectedHosts = [...agg.hosts].slice(0, AFFECTED_HOST_CAP).map((h) => ({ id: h, name: h }));
+      const bestPractice = recommendationForTagKey(mappedDdKey ?? cloudKey);
 
       if (!mappedDdKey) {
         // No known DD equivalent — check if similar key exists in DD
@@ -166,6 +174,9 @@ export function analyzeCloudAlignment(orgId: string, scanRunId: string): CloudAl
             alignmentStatus: 'key_drift',
             mappingSuggestion: `Normalize "${cloudKey}" → "${similarDdKey}" in Datadog`,
             hostCount,
+            affectedHosts,
+            affectedHostCount: hostCount,
+            bestPractice,
           });
         } else {
           rows.push({
@@ -177,6 +188,9 @@ export function analyzeCloudAlignment(orgId: string, scanRunId: string): CloudAl
             alignmentStatus: 'missing_in_dd',
             mappingSuggestion: `Add this ${provider.toUpperCase()} tag to Datadog Agent config or Auto Discovery annotations`,
             hostCount,
+            affectedHosts,
+            affectedHostCount: hostCount,
+            bestPractice,
           });
         }
         continue;
@@ -203,6 +217,9 @@ export function analyzeCloudAlignment(orgId: string, scanRunId: string): CloudAl
           alignmentStatus: 'missing_in_dd',
           mappingSuggestion: `Propagate ${provider.toUpperCase()} tag "${cloudKey}" as "${mappedDdKey}" via Agent extra_tags or integration config`,
           hostCount,
+          affectedHosts,
+          affectedHostCount: hostCount,
+          bestPractice,
         });
         // Track propagation gap
         const gapKey = `${cloudKey}→${mappedDdKey}`;
@@ -227,6 +244,9 @@ export function analyzeCloudAlignment(orgId: string, scanRunId: string): CloudAl
             alignmentStatus: 'value_drift',
             mappingSuggestion: `Align values: cloud="${cloudValues.slice(0, 2).join(',')}" vs dd="${ddValues.slice(0, 2).join(',')}"`,
             hostCount,
+            affectedHosts,
+            affectedHostCount: hostCount,
+            bestPractice,
           });
         } else {
           rows.push({
@@ -238,6 +258,9 @@ export function analyzeCloudAlignment(orgId: string, scanRunId: string): CloudAl
             alignmentStatus: 'aligned',
             mappingSuggestion: null,
             hostCount,
+            affectedHosts,
+            affectedHostCount: hostCount,
+            bestPractice,
           });
         }
       }

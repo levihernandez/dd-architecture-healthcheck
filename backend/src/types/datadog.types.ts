@@ -309,6 +309,56 @@ export interface DDTeam {
   };
 }
 
+export interface DDTeamLink {
+  type: string;
+  id: string;
+  attributes: {
+    label?: string;
+    url?: string;
+    position?: number;
+  };
+}
+
+export interface DDTeamMembership {
+  type: string;
+  id: string;
+  attributes: {
+    role?: string;
+  };
+  relationships?: {
+    user?: {
+      data?: { type: string; id: string };
+    };
+  };
+}
+
+export interface DDScorecardRule {
+  type: string;
+  id: string;
+  attributes: {
+    name?: string;
+    description?: string;
+    enabled?: boolean;
+    custom?: boolean;
+  };
+}
+
+export interface DDScorecardOutcome {
+  type: string;
+  id: string;
+  attributes: {
+    service?: string;
+    rule_id?: string;
+    outcome?: string; // e.g. 'PASSED' | 'FAILED' | 'SKIPPED' | 'N/A'
+    remarks?: Array<{ type: string; message?: string }>;
+  };
+  relationships?: {
+    rule?: {
+      data?: { type: string; id: string };
+    };
+  };
+}
+
 export interface DDUser {
   type: string;
   id: string;
@@ -414,5 +464,22 @@ export interface DDIncident {
     fields?: { severity?: { value?: string } };
     created?: string;
     resolved?: string;
+  };
+}
+
+export interface DDEvent {
+  id?: string;
+  type?: string;
+  attributes?: {
+    title?: string;
+    message?: string;
+    timestamp?: number;
+    tags?: string[];
+    status?: 'failure' | 'error' | 'warning' | 'info' | 'success' | 'user_update' | 'recommendation' | 'snapshot';
+    source_type_name?: string;
+    service?: string;
+    hostname?: string;
+    monitor_id?: number;
+    priority?: 'normal' | 'low';
   };
 }

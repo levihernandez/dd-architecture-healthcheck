@@ -23,6 +23,7 @@ import TagMappingDashboard from './pages/TagMappingDashboard';
 import CloudTagComparison from './pages/CloudTagComparison';
 import IndustryTemplates from './pages/IndustryTemplates';
 import TagGovernance from './pages/TagGovernance';
+import TaggingImplementationGuide from './pages/TaggingImplementationGuide';
 import AIChatAssistant from './pages/AIChatAssistant';
 import AISettings from './pages/AISettings';
 import Analytics from './pages/Analytics';
@@ -30,6 +31,10 @@ import Calculators from './pages/Calculators';
 import CloudInventory from './pages/CloudInventory';
 import OrgContext from './pages/OrgContext';
 import Usage from './pages/Usage';
+import EventsHealth from './pages/EventsHealth';
+import FeatureFlags from './pages/FeatureFlags';
+import ScanComparison from './pages/ScanComparison';
+import FeatureGate from './components/FeatureGate';
 
 export default function App() {
   return (
@@ -38,35 +43,39 @@ export default function App() {
         <Route path="/" element={<Layout />}>
           <Route index element={<Navigate to="/overview" replace />} />
           <Route path="overview" element={<Overview />} />
-          <Route path="orgs" element={<OrgConnections />} />
+          <Route path="orgs" element={<FeatureGate featureKey="page.orgs"><OrgConnections /></FeatureGate>} />
           <Route path="scans" element={<ScanRuns />} />
+          <Route path="scan-comparison" element={<FeatureGate featureKey="page.scan_comparison"><ScanComparison /></FeatureGate>} />
           <Route path="inventory" element={<InventoryExplorer />} />
-          <Route path="host-gaps" element={<HostInstrumentationGaps />} />
-          <Route path="products" element={<ProductUsage />} />
-          <Route path="tags" element={<TagExplorer />} />
-          <Route path="tagging-scorecard" element={<UnifiedTaggingScorecard />} />
-          <Route path="services" element={<ServicesServiceCatalog />} />
-          <Route path="integrations" element={<Integrations />} />
-          <Route path="logs" element={<LogsHealth />} />
-          <Route path="monitors" element={<MonitorsHealth />} />
-          <Route path="dashboards" element={<DashboardsHealth />} />
-          <Route path="synthetics" element={<SyntheticsHealth />} />
-          <Route path="network" element={<NetworkCloud />} />
-          <Route path="governance" element={<GovernanceSSOSummary />} />
-          <Route path="tag-mapping" element={<TagMappingDashboard />} />
-          <Route path="cloud-tags" element={<CloudTagComparison />} />
+          <Route path="host-gaps" element={<FeatureGate featureKey="page.host_gaps"><HostInstrumentationGaps /></FeatureGate>} />
+          <Route path="products" element={<FeatureGate featureKey="page.products"><ProductUsage /></FeatureGate>} />
+          <Route path="tags" element={<FeatureGate featureKey="page.tags"><TagExplorer /></FeatureGate>} />
+          <Route path="tagging-scorecard" element={<FeatureGate featureKey="page.tagging_scorecard"><UnifiedTaggingScorecard /></FeatureGate>} />
+          <Route path="services" element={<FeatureGate featureKey="page.services"><ServicesServiceCatalog /></FeatureGate>} />
+          <Route path="integrations" element={<FeatureGate featureKey="page.integrations"><Integrations /></FeatureGate>} />
+          <Route path="logs" element={<FeatureGate featureKey="page.logs"><LogsHealth /></FeatureGate>} />
+          <Route path="monitors" element={<FeatureGate featureKey="page.monitors"><MonitorsHealth /></FeatureGate>} />
+          <Route path="dashboards" element={<FeatureGate featureKey="page.dashboards"><DashboardsHealth /></FeatureGate>} />
+          <Route path="synthetics" element={<FeatureGate featureKey="page.synthetics"><SyntheticsHealth /></FeatureGate>} />
+          <Route path="network" element={<FeatureGate featureKey="page.network"><NetworkCloud /></FeatureGate>} />
+          <Route path="governance" element={<FeatureGate featureKey="page.governance"><GovernanceSSOSummary /></FeatureGate>} />
+          <Route path="events" element={<FeatureGate featureKey="page.events"><EventsHealth /></FeatureGate>} />
+          <Route path="tag-mapping" element={<FeatureGate featureKey="page.tag_mapping"><TagMappingDashboard /></FeatureGate>} />
+          <Route path="cloud-tags" element={<FeatureGate featureKey="page.cloud_tags"><CloudTagComparison /></FeatureGate>} />
           <Route path="tag-templates" element={<IndustryTemplates />} />
-          <Route path="tag-governance" element={<TagGovernance />} />
+          <Route path="tag-governance" element={<FeatureGate featureKey="page.tag_governance"><TagGovernance /></FeatureGate>} />
+          <Route path="tagging-implementation" element={<FeatureGate featureKey="page.tagging_implementation"><TaggingImplementationGuide /></FeatureGate>} />
           <Route path="org-context" element={<OrgContext />} />
-          <Route path="usage" element={<Usage />} />
-          <Route path="chat" element={<AIChatAssistant />} />
+          <Route path="usage" element={<FeatureGate featureKey="page.usage"><Usage /></FeatureGate>} />
+          <Route path="chat" element={<FeatureGate featureKey="page.chat"><AIChatAssistant /></FeatureGate>} />
           <Route path="ai-settings" element={<AISettings />} />
           <Route path="analytics" element={<Analytics />} />
-          <Route path="calculators" element={<Calculators />} />
-          <Route path="cloud" element={<CloudInventory />} />
+          <Route path="calculators" element={<FeatureGate featureKey="page.calculators"><Calculators /></FeatureGate>} />
+          <Route path="cloud" element={<FeatureGate featureKey="page.cloud"><CloudInventory /></FeatureGate>} />
           <Route path="ai" element={<AIAssessment />} />
-          <Route path="recommendations" element={<Recommendations />} />
-          <Route path="export" element={<ExportCenter />} />
+          <Route path="recommendations" element={<FeatureGate featureKey="page.recommendations"><Recommendations /></FeatureGate>} />
+          <Route path="export" element={<FeatureGate featureKey="page.export"><ExportCenter /></FeatureGate>} />
+          <Route path="feature-flags" element={<FeatureFlags />} />
         </Route>
       </Routes>
     </BrowserRouter>

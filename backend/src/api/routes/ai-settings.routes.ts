@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { AISettingsRepository } from '../../ai/settings-repository';
 import { getAIConfig } from '../../ai/config';
 import { logger } from '../../utils/logger';
+import { listPrompts, savePrompt, isKnownPromptKey } from '../../ai/prompt-store';
 
 const router = Router();
 
@@ -154,6 +155,46 @@ router.post('/test', async (req, res) => {
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Connection failed';
     res.json({ ok: false, message: msg });
+  }
+});
+
+// GET /api/ai-settings/prompts — list the 6 editable prompt files with their
+// current content and resolved on-disk path (for display, so the user knows
+// where to `git diff`/`git commit` on the host).
+router.get('/prompts', (_req, res) => {
+  try {
+    res.json(listPrompts());
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : 'Error' });
+  }
+});
+
+// PUT /api/ai-settings/prompts/:key — overwrite one prompt file's content.
+// Change history is handled entirely by git on the host — no DB versioning.
+const SavePromptSchema = z.object({
+  content: z.string().max(50_000),
+});
+
+router.put('/prompts/:key', (req, res) => {
+  const { key } = req.params;
+  if (!isKnownPromptKey(key)) {
+    res.status(404).json({ error: `Unknown prompt key: ${key}` });
+    return;
+  }
+
+  const parse = SavePromptSchema.safeParse(req.body);
+  if (!parse.success) {
+    res.status(400).json({ error: 'Invalid request', details: parse.error.flatten() });
+    return;
+  }
+
+  try {
+    savePrompt(key, parse.data.content);
+    logger.info(`[ai-settings] saved prompt key=${key}`);
+    const [descriptor] = listPrompts().filter((p) => p.key === key);
+    res.json(descriptor);
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : 'Error' });
   }
 });
 

@@ -6,6 +6,7 @@ import { EmptyState } from '../components/common/LoadingState';
 import MetricCard from '../components/common/MetricCard';
 import PageHeader from '../components/ui/PageHeader';
 import { SkeletonCards, SkeletonCard } from '../components/ui/Skeleton';
+import SectionGate from '../components/SectionGate';
 
 function DDLink({ href, label = 'Open in Datadog' }: { href: string; label?: string }) {
   return (
@@ -86,6 +87,7 @@ export default function NetworkCloud() {
 
           {/* Cloud accounts breakdown */}
           {cloudAccounts.length > 0 && (
+            <SectionGate featureKey="section.network.cloud_connections">
             <div className="card">
               <h2 className="text-base font-semibold text-ink mb-4">Cloud Provider Connections</h2>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -106,10 +108,12 @@ export default function NetworkCloud() {
                 })}
               </div>
             </div>
+            </SectionGate>
           )}
 
           {/* CNM status */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <SectionGate featureKey="section.network.cnm">
             <div className={`card ${npmEnabled ? 'border-green-500/30 bg-green-500/10' : 'border-border'}`}>
               <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-2">
@@ -138,7 +142,9 @@ export default function NetworkCloud() {
                 </div>
               )}
             </div>
+            </SectionGate>
 
+            <SectionGate featureKey="section.network.ndm">
             <div className={`card ${ndmEnabled ? 'border-green-500/30 bg-green-500/10' : 'border-border'}`}>
               <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-2">
@@ -163,6 +169,7 @@ export default function NetworkCloud() {
                 </div>
               )}
             </div>
+            </SectionGate>
           </div>
 
           {/* Investigation links */}

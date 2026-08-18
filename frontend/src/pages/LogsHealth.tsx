@@ -10,6 +10,7 @@ import { EmptyState } from '../components/common/LoadingState';
 import PageHeader from '../components/ui/PageHeader';
 import FilterChip, { FilterChipRow } from '../components/ui/FilterChip';
 import { SkeletonCards, SkeletonTable } from '../components/ui/Skeleton';
+import SectionGate from '../components/SectionGate';
 import type { FindingSeverity } from '../types';
 
 function DDLink({ href, label = 'Open in Datadog' }: { href: string; label?: string }) {
@@ -126,6 +127,7 @@ export default function LogsHealth() {
 
           {/* Side-effect banners */}
           {(noExclusionFilters.length > 0 || rateLimited.length > 0 || noDailyLimit.length > 0) && (
+            <SectionGate featureKey="section.logs.risk_signals">
             <div className="space-y-2">
               <h2 className="text-sm font-semibold text-ink-muted uppercase tracking-wide">Active Risk Signals</h2>
               {rateLimited.map(idx => (
@@ -153,10 +155,12 @@ export default function LogsHealth() {
                   hrefLabel="Set daily limits" />
               )}
             </div>
+            </SectionGate>
           )}
 
           {/* Findings */}
           {findings.length > 0 && (
+            <SectionGate featureKey="section.logs.findings">
             <div className="card">
               <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
                 <h2 className="text-lg font-semibold text-ink">
@@ -179,10 +183,12 @@ export default function LogsHealth() {
               </div>
               <EvidenceTable findings={filteredFindings} />
             </div>
+            </SectionGate>
           )}
 
           {/* Index breakdown table */}
           {indexDetails.length > 0 && (
+            <SectionGate featureKey="section.logs.index_breakdown">
             <div className="card p-0 overflow-hidden">
               <div className="px-4 py-3 border-b border-border flex items-center justify-between">
                 <h2 className="text-base font-semibold text-ink">Index Breakdown ({indexDetails.length})</h2>
@@ -226,10 +232,12 @@ export default function LogsHealth() {
                 pageSize={10}
               />
             </div>
+            </SectionGate>
           )}
 
           {/* Retention distribution */}
           {retEntries.length > 0 && (
+            <SectionGate featureKey="section.logs.retention_distribution">
             <div className="card">
               <div className="flex items-center justify-between mb-3">
                 <h2 className="text-base font-semibold text-ink">Retention Distribution</h2>
@@ -255,6 +263,7 @@ export default function LogsHealth() {
                 </p>
               )}
             </div>
+            </SectionGate>
           )}
 
           {/* Quick investigation links */}

@@ -8,6 +8,7 @@ import { SkeletonText } from '../components/ui/Skeleton';
 import PageHeader from '../components/ui/PageHeader';
 import { CATEGORY_LABELS } from '../types';
 import type { FindingCategory } from '../types';
+import SectionGate from '../components/SectionGate';
 
 // ── Collapsible section wrapper for progressive disclosure ────────────────────
 
@@ -111,6 +112,7 @@ export default function AIAssessment() {
       ) : (
         <div className="space-y-6">
           {/* Executive Summary */}
+          <SectionGate featureKey="section.ai_assessment.executive_summary">
           <div className="card border-l-4 border-dd-purple">
             <h2 className="text-lg font-semibold text-ink mb-2">Executive Summary</h2>
             <p className="text-ink-muted leading-relaxed">{assessment.executiveSummary}</p>
@@ -118,7 +120,9 @@ export default function AIAssessment() {
               Generated {new Date(assessment.generatedAt).toLocaleString()} · Based on {assessment.evidenceCount} findings
             </p>
           </div>
+          </SectionGate>
 
+          <SectionGate featureKey="section.ai_assessment.strengths_risks">
           <div className="grid md:grid-cols-2 gap-4">
             {/* Strengths */}
             <div className="card">
@@ -144,8 +148,10 @@ export default function AIAssessment() {
               </ul>
             </div>
           </div>
+          </SectionGate>
 
           {/* Recommendations */}
+          <SectionGate featureKey="section.ai_assessment.prioritized_recommendations">
           <CollapsibleSection
             title="Prioritized Recommendations"
             badge={<span className="badge bg-surface-sunken text-ink-muted">{assessment.prioritizedRecommendations.length}</span>}
@@ -184,8 +190,10 @@ export default function AIAssessment() {
               ))}
             </div>
           </CollapsibleSection>
+          </SectionGate>
 
           {/* Tagging strategy */}
+          <SectionGate featureKey="section.ai_assessment.tagging_strategy">
           <CollapsibleSection title="Recommended Tagging Strategy">
             <div className="grid md:grid-cols-2 gap-4 mb-4">
               <div>
@@ -229,8 +237,10 @@ export default function AIAssessment() {
               </div>
             )}
           </CollapsibleSection>
+          </SectionGate>
 
           {/* Remediation plan */}
+          <SectionGate featureKey="section.ai_assessment.remediation_plan">
           <CollapsibleSection title="Remediation Plan">
             <div className="space-y-4">
               {assessment.remediationPlan.map((phase) => (
@@ -248,8 +258,10 @@ export default function AIAssessment() {
               ))}
             </div>
           </CollapsibleSection>
+          </SectionGate>
 
           {/* Takeaways */}
+          <SectionGate featureKey="section.ai_assessment.takeaways">
           <CollapsibleSection title="Health Check Takeaways">
             <ul className="space-y-2">
               {assessment.healthCheckTakeaways.map((t, i) => (
@@ -259,6 +271,7 @@ export default function AIAssessment() {
               ))}
             </ul>
           </CollapsibleSection>
+          </SectionGate>
         </div>
       )}
     </div>

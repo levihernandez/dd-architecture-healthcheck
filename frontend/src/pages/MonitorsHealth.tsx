@@ -11,6 +11,7 @@ import { EmptyState } from '../components/common/LoadingState';
 import PageHeader from '../components/ui/PageHeader';
 import FilterChip, { FilterChipRow } from '../components/ui/FilterChip';
 import { SkeletonCards, SkeletonTable } from '../components/ui/Skeleton';
+import SectionGate from '../components/SectionGate';
 import type { FindingSeverity } from '../types';
 
 function DDLink({ href, label = 'Open in Datadog' }: { href: string; label?: string }) {
@@ -141,6 +142,7 @@ export default function MonitorsHealth() {
           </div>
 
           {/* Quality risk signals */}
+          <SectionGate featureKey="section.monitors.quality_signals">
           <div className="space-y-2">
             <h2 className="text-sm font-semibold text-ink-muted uppercase tracking-wide">Monitor Quality Signals</h2>
             <RiskRow icon="🔕" label="Muted monitors" count={mutedCount} total={totalMonitors}
@@ -178,9 +180,11 @@ export default function MonitorsHealth() {
               </div>
             )}
           </div>
+          </SectionGate>
 
           {/* Monitor type breakdown */}
           {byTypeEntries.length > 0 && (
+            <SectionGate featureKey="section.monitors.monitor_types">
             <div className="card">
               <div className="flex items-center justify-between mb-3">
                 <h2 className="text-base font-semibold text-ink">Monitor Types</h2>
@@ -203,10 +207,12 @@ export default function MonitorsHealth() {
                 })}
               </div>
             </div>
+            </SectionGate>
           )}
 
           {/* Findings */}
           {findings.length > 0 && (
+            <SectionGate featureKey="section.monitors.findings">
             <div className="card">
               <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
                 <h2 className="text-lg font-semibold text-ink">
@@ -229,10 +235,12 @@ export default function MonitorsHealth() {
               </div>
               <EvidenceTable findings={filteredFindings} />
             </div>
+            </SectionGate>
           )}
 
           {/* Monitor inventory table */}
           {monitorData.length > 0 && (
+            <SectionGate featureKey="section.monitors.monitor_inventory">
             <div className="card p-0 overflow-hidden">
               <div className="px-4 py-3 border-b border-border flex items-center justify-between">
                 <h2 className="text-base font-semibold text-ink">Monitor Inventory ({totalMonitors})</h2>
@@ -287,6 +295,7 @@ export default function MonitorsHealth() {
                 pageSize={15}
               />
             </div>
+            </SectionGate>
           )}
 
           {/* Investigation quick links */}

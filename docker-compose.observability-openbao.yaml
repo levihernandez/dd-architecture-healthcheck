@@ -1,0 +1,24 @@
+version: "3.8"
+
+# Overlay: on top of observability + openbao, lets the Datadog Agent itself
+# decrypt ENC[vault:v1:...] DD_API_KEY/DD_APP_KEY via decrypt-entrypoint.sh
+# before the real Agent entrypoint runs. Apply with all three:
+#   -f docker-compose.yaml -f docker-compose.observability.yaml
+#   -f docker-compose.openbao.yaml -f docker-compose.observability-openbao.yaml
+# (scripts/compose.sh does this automatically when both are enabled).
+services:
+  datadog-agent:
+    entrypoint: ["/decrypt-entrypoint.sh"]
+    command: ["/bin/entrypoint.sh"]
+    environment:
+      BAO_NAMESPACE: ${BAO_NAMESPACE}
+      BAO_USERNAME: ${BAO_USERNAME}
+      BAO_PASSWORD: ${BAO_PASSWORD}
+      BAO_ADDR: "https://openbao:8200"
+      BAO_CACERT: /etc/openbao/ca.pem
+    networks:
+      - default
+      - openbao
+    volumes:
+      - ./docker/datadog-agent/decrypt-entrypoint.sh:/decrypt-entrypoint.sh:ro
+      - ${BAO_CACERT}:/etc/openbao/ca.pem:ro

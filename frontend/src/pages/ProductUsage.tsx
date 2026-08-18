@@ -4,6 +4,7 @@ import { useOrgAndScanFilters } from '../hooks/useFilters';
 import { EmptyState } from '../components/common/LoadingState';
 import PageHeader from '../components/ui/PageHeader';
 import { SkeletonCards } from '../components/ui/Skeleton';
+import SectionGate from '../components/SectionGate';
 
 interface ProductSignal { product: string; signal: string; value: string; detected: number; }
 
@@ -106,82 +107,88 @@ export default function ProductUsage() {
        isLoading ? <SkeletonCards count={6} /> : (
         <>
           {/* Inferred from inventory + analytics */}
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-            {inferredProducts.map(({ product, count, label }) => {
-              const config = PRODUCT_CONFIG[product] ?? { label: product, icon: '⬡', description: '' };
-              return (
-                <div key={product} className={`card ${count > 0 ? 'border-green-500/30' : 'border-border opacity-60'}`}>
-                  <div className="flex items-center gap-3 mb-2">
-                    <span className="text-2xl">{config.icon}</span>
-                    <div>
-                      <div className="text-sm font-semibold text-ink">{config.label}</div>
-                      <div className={`text-xs font-medium ${count > 0 ? 'text-green-400' : 'text-ink-faint'}`}>
-                        {count > 0 ? `✓ ${count} ${label}` : 'Not detected'}
+          <SectionGate featureKey="section.products.product_grid">
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+              {inferredProducts.map(({ product, count, label }) => {
+                const config = PRODUCT_CONFIG[product] ?? { label: product, icon: '⬡', description: '' };
+                return (
+                  <div key={product} className={`card ${count > 0 ? 'border-green-500/30' : 'border-border opacity-60'}`}>
+                    <div className="flex items-center gap-3 mb-2">
+                      <span className="text-2xl">{config.icon}</span>
+                      <div>
+                        <div className="text-sm font-semibold text-ink">{config.label}</div>
+                        <div className={`text-xs font-medium ${count > 0 ? 'text-green-400' : 'text-ink-faint'}`}>
+                          {count > 0 ? `✓ ${count} ${label}` : 'Not detected'}
+                        </div>
                       </div>
                     </div>
                   </div>
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+          </SectionGate>
 
           {/* Governance signals */}
           {byProduct.governance && (
-            <div className="card">
-              <h2 className="text-lg font-semibold text-ink mb-3">Governance Signals</h2>
-              <div className="space-y-2">
-                {byProduct.governance.map((sig) => {
-                  let displayValue = sig.value;
-                  let parsedValue: Record<string, unknown> | null = null;
-                  try { parsedValue = JSON.parse(sig.value); } catch { /* ignore */ }
+            <SectionGate featureKey="section.products.governance_signals">
+              <div className="card">
+                <h2 className="text-lg font-semibold text-ink mb-3">Governance Signals</h2>
+                <div className="space-y-2">
+                  {byProduct.governance.map((sig) => {
+                    let displayValue = sig.value;
+                    let parsedValue: Record<string, unknown> | null = null;
+                    try { parsedValue = JSON.parse(sig.value); } catch { /* ignore */ }
 
-                  return (
-                    <div key={sig.signal} className="flex items-start gap-4 bg-surface-subtle rounded p-3">
-                      <div className="flex-1">
-                        <div className="text-sm font-medium text-ink-muted capitalize">
-                          {sig.signal.replace(/_/g, ' ')}
-                        </div>
-                        {parsedValue ? (
-                          <div className="mt-1 flex flex-wrap gap-2">
-                            {Object.entries(parsedValue).map(([k, v]) => (
-                              <span key={k} className={`text-xs px-2 py-0.5 rounded ${v ? 'bg-green-500/15 text-green-400' : 'bg-surface-sunken text-ink-muted'}`}>
-                                {k}: {String(v)}
-                              </span>
-                            ))}
+                    return (
+                      <div key={sig.signal} className="flex items-start gap-4 bg-surface-subtle rounded p-3">
+                        <div className="flex-1">
+                          <div className="text-sm font-medium text-ink-muted capitalize">
+                            {sig.signal.replace(/_/g, ' ')}
                           </div>
-                        ) : (
-                          <div className="text-sm text-ink-muted mt-0.5">{displayValue}</div>
-                        )}
+                          {parsedValue ? (
+                            <div className="mt-1 flex flex-wrap gap-2">
+                              {Object.entries(parsedValue).map(([k, v]) => (
+                                <span key={k} className={`text-xs px-2 py-0.5 rounded ${v ? 'bg-green-500/15 text-green-400' : 'bg-surface-sunken text-ink-muted'}`}>
+                                  {k}: {String(v)}
+                                </span>
+                              ))}
+                            </div>
+                          ) : (
+                            <div className="text-sm text-ink-muted mt-0.5">{displayValue}</div>
+                          )}
+                        </div>
+                        <span className={`badge ${sig.detected ? 'bg-green-500/15 text-green-400' : 'bg-surface-sunken text-ink-muted'}`}>
+                          {sig.detected ? 'Detected' : 'Not detected'}
+                        </span>
                       </div>
-                      <span className={`badge ${sig.detected ? 'bg-green-500/15 text-green-400' : 'bg-surface-sunken text-ink-muted'}`}>
-                        {sig.detected ? 'Detected' : 'Not detected'}
-                      </span>
-                    </div>
-                  );
-                })}
+                    );
+                  })}
+                </div>
               </div>
-            </div>
+            </SectionGate>
           )}
 
           {/* Honest gap list — Datadog products this scan cannot detect yet */}
-          <div className="card">
-            <h2 className="text-lg font-semibold text-ink mb-1">Not Yet Covered by This Scan</h2>
-            <p className="text-xs text-ink-faint mb-3">
-              These Datadog products have no dedicated collector in this tool yet, so they can't be marked detected/not-detected above —
-              that's a gap in this app's scan coverage, not necessarily in your org.
-            </p>
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-              {UNDETECTED_PRODUCTS.map((p) => (
-                <div key={p.label} className="flex items-center gap-2 bg-surface-subtle rounded-lg px-3 py-2">
-                  <span className="text-base shrink-0">{p.icon}</span>
-                  <div className="min-w-0">
-                    <div className="text-xs font-medium text-ink leading-tight">{p.label}</div>
-                    <div className="text-[10px] text-ink-faint leading-tight">{p.note}</div>
+          <SectionGate featureKey="section.products.not_covered">
+            <div className="card">
+              <h2 className="text-lg font-semibold text-ink mb-1">Not Yet Covered by This Scan</h2>
+              <p className="text-xs text-ink-faint mb-3">
+                These Datadog products have no dedicated collector in this tool yet, so they can't be marked detected/not-detected above —
+                that's a gap in this app's scan coverage, not necessarily in your org.
+              </p>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                {UNDETECTED_PRODUCTS.map((p) => (
+                  <div key={p.label} className="flex items-center gap-2 bg-surface-subtle rounded-lg px-3 py-2">
+                    <span className="text-base shrink-0">{p.icon}</span>
+                    <div className="min-w-0">
+                      <div className="text-xs font-medium text-ink leading-tight">{p.label}</div>
+                      <div className="text-[10px] text-ink-faint leading-tight">{p.note}</div>
+                    </div>
                   </div>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
-          </div>
+          </SectionGate>
         </>
       )}
     </div>

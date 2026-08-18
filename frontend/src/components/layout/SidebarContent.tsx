@@ -10,6 +10,7 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import { HUBS, NAV_ITEMS, findNavItem } from '../../lib/navigation';
 import { usePinnedPages, useRecentPages } from '../../hooks/usePinnedPages';
+import { useFeatureFlags } from '../../hooks/useFeatureFlags';
 
 const COLLAPSED_GROUPS_KEY = 'dd-hc:collapsed-nav-groups';
 
@@ -72,6 +73,7 @@ export default function SidebarContent({ onNavigate }: { onNavigate?: () => void
   const [collapsedGroups, setCollapsedGroups] = useState<string[]>(readCollapsed);
   const { pinned, togglePin, isPinned, reorderPinned } = usePinnedPages();
   const { recent } = useRecentPages();
+  const { isPageEnabled } = useFeatureFlags();
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
@@ -96,14 +98,18 @@ export default function SidebarContent({ onNavigate }: { onNavigate?: () => void
     const q = search.trim().toLowerCase();
     return HUBS.map((hub) => ({
       hub,
-      items: NAV_ITEMS.filter((i) => i.hub === hub.id && (!q || i.label.toLowerCase().includes(q))),
+      items: NAV_ITEMS.filter((i) =>
+        i.hub === hub.id && (!q || i.label.toLowerCase().includes(q)) && isPageEnabled(i.featureKey)
+      ),
     })).filter((g) => g.items.length > 0);
-  }, [search]);
+  }, [search, isPageEnabled]);
 
   const recentItems = recent
     .map((path) => findNavItem(path))
-    .filter((i): i is (typeof NAV_ITEMS)[number] => Boolean(i) && i?.path !== pathname)
+    .filter((i): i is (typeof NAV_ITEMS)[number] => Boolean(i) && i?.path !== pathname && isPageEnabled(i?.featureKey))
     .slice(0, 4);
+
+  const visiblePinned = pinned.filter((path) => isPageEnabled(NAV_ITEMS.find((i) => i.path === path)?.featureKey));
 
   return (
     <div className="flex flex-col h-full">
@@ -136,13 +142,13 @@ export default function SidebarContent({ onNavigate }: { onNavigate?: () => void
 
       <nav className="flex-1 overflow-y-auto px-2 pb-4">
         {/* Pinned */}
-        {pinned.length > 0 && (
+        {visiblePinned.length > 0 && (
           <div className="mb-4">
             <div className="px-3 py-1 text-xs font-semibold text-ink-faint uppercase tracking-wider mb-1">Pinned</div>
             <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handlePinDragEnd}>
-              <SortableContext items={pinned} strategy={verticalListSortingStrategy}>
+              <SortableContext items={visiblePinned} strategy={verticalListSortingStrategy}>
                 <div className="space-y-0.5">
-                  {pinned.map((path) => (
+                  {visiblePinned.map((path) => (
                     <PinnedRow key={path} path={path} onUnpin={() => togglePin(path)} onNavigate={onNavigate ?? (() => {})} />
                   ))}
                 </div>

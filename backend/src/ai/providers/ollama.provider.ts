@@ -1,5 +1,7 @@
 import OpenAI from 'openai';
 import { logger } from '../../utils/logger';
+import { getGroundingInstructions } from '../grounding';
+import { getPrompt } from '../prompt-store';
 import type { AIAssessmentResponse } from '../../types/assessment.types';
 
 export async function runOllamaAssessment(
@@ -17,12 +19,11 @@ export async function runOllamaAssessment(
     messages: [
       {
         role: 'system',
-        content:
-          'You are a Datadog Solutions Engineer expert. Respond only with valid JSON matching the requested schema. Do not include any text outside the JSON object. Do not use markdown code blocks.',
+        content: `${getGroundingInstructions()}\n\n${getPrompt('ollama-system')}`,
       },
       { role: 'user', content: prompt },
     ],
-    temperature: 0.2,
+    temperature: 0.1,
     max_tokens: 4096,
   });
 

@@ -4,7 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "ts-node-dev --respawn --transpile-only --exit-child src/server.ts",
-    "build": "tsc",
+    "build": "tsc && npm run copy:prompt-defaults",
+    "copy:prompt-defaults": "mkdir -p dist/ai/prompt-defaults && cp -R src/ai/prompt-defaults/. dist/ai/prompt-defaults/",
     "start": "node dist/server.js",
     "test": "jest --runInBand",
     "test:watch": "jest --watch"

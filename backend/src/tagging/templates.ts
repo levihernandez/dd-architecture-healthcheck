@@ -11,6 +11,15 @@ export interface TemplateTag {
   /** Exact per-platform setup syntax — populated for env/service/version per
    * https://docs.datadoghq.com/getting_started/tagging/unified_service_tagging */
   platformGuides?: Array<{ platform: string; method: string }>;
+  /** Concrete per-Datadog-product setup examples (RUM/Logs/APM/Agent/Integrations) for
+   * this tag — surfaced in the "resource examples" modal in the frontend. Populated for
+   * the shared globalBaseline tags on every template, plus select high-value required
+   * tags on newer templates. */
+  resourceExamples?: Array<{
+    resource: 'rum' | 'logs' | 'apm' | 'agent' | 'integrations';
+    example: string;
+    description?: string;
+  }>;
 }
 
 /**
@@ -147,6 +156,13 @@ const GLOBAL_BASELINE: TemplateTag[] = [
       { platform: 'VM / plain host (single service)', method: 'Agent datadog.yaml: env: <ENV> plus tags: [service:<SERVICE>].' },
       { platform: 'VM / plain host (multi-service)', method: 'Set env: <ENV> in datadog.yaml, then per-process DD_ENV=<env> DD_SERVICE=<service> DD_VERSION=<version> /bin/my-service.' },
     ],
+    resourceExamples: [
+      { resource: 'rum', example: 'DD_RUM_INIT env: "production"  // datadogRum.init({ ..., env: "production" })', description: 'Set in the RUM SDK init config so every session/view carries env — filters the RUM Overview and Core Web Vitals dashboards by environment.' },
+      { resource: 'logs', example: 'DD_TAGS=env:production  # or a log pipeline "Env" mapping processor on the raw log attribute', description: 'Either inject via the Agent-wide DD_TAGS env var, or use a Log Pipeline remapper/attribute processor to normalize an existing field (e.g. "environment") into the reserved env facet.' },
+      { resource: 'apm', example: 'DD_ENV=production  // or tracer.init({ env: "production" }) in code', description: 'Required unified service tag — the tracer reads DD_ENV at startup and stamps it on every span; cannot be changed per-span at runtime.' },
+      { resource: 'agent', example: '# datadog.yaml\nenv: production', description: 'Sets the host-level env tag applied to all Agent-collected metrics/checks on that host.' },
+      { resource: 'integrations', example: 'ad.datadoghq.com/<container>.tags: \'{"env":"production"}\'', description: 'Autodiscovery annotation for per-container overrides when a single pod hosts containers from more than one environment (rare, but supported).' },
+    ],
   },
   {
     key: 'service',
@@ -161,6 +177,13 @@ const GLOBAL_BASELINE: TemplateTag[] = [
       { platform: 'Docker', method: 'DD_SERVICE env var or com.datadoghq.tags.service label.' },
       { platform: 'Amazon ECS', method: 'DD_SERVICE env var or com.datadoghq.tags.service label in the task definition (application container, not the Agent container on Fargate).' },
       { platform: 'VM / plain host', method: 'tags: [service:<SERVICE>] in datadog.yaml for single-service hosts; per-process DD_SERVICE for multi-service hosts; or a Process Check config with a service: field.' },
+    ],
+    resourceExamples: [
+      { resource: 'rum', example: 'datadogRum.init({ ..., service: "checkout-web" })', description: 'Names the RUM application\'s underlying service so front-end sessions correlate 1:1 with the backend APM service of the same name.' },
+      { resource: 'logs', example: 'DD_TAGS=service:checkout-api  # or a Service Remapper pipeline processor', description: 'A Log Pipeline "Service Remapper" processor can promote an existing log attribute (e.g. "app" or "logger_name") to the reserved service facet for sources that don\'t set DD_SERVICE directly.' },
+      { resource: 'apm', example: 'DD_SERVICE=checkout-api  // tracer.init({ service: "checkout-api" })', description: 'Powers the Service Map and Service Catalog entry; must exactly match across every instance of the service — one span can only carry one service name.' },
+      { resource: 'agent', example: '# datadog.yaml\ntags:\n  - service:checkout-api', description: 'Only appropriate for single-service hosts; multi-service hosts should set DD_SERVICE per-process instead so the host-level tag doesn\'t misattribute traffic.' },
+      { resource: 'integrations', example: 'ad.datadoghq.com/<container>.tags: \'{"service":"checkout-api"}\'', description: 'Per-container Autodiscovery override — falls back to the tags.datadoghq.com/service pod label when not set explicitly.' },
     ],
   },
   {
@@ -177,6 +200,13 @@ const GLOBAL_BASELINE: TemplateTag[] = [
       { platform: 'Amazon ECS', method: 'DD_VERSION env var or com.datadoghq.tags.version label in the task definition, updated by the CI/CD pipeline on every deploy.' },
       { platform: 'VM / plain host', method: 'Per-process DD_VERSION env var injected by the deploy script; no static Agent config option since it changes every release.' },
     ],
+    resourceExamples: [
+      { resource: 'rum', example: 'datadogRum.init({ ..., version: "2.1.3" })', description: 'Enables RUM Deployment Tracking — compares Core Web Vitals and error rate between the current and previous front-end release.' },
+      { resource: 'logs', example: '# Inject at build time into the structured log formatter\n{"version": "2.1.3", "msg": "..."}', description: 'No dedicated remapper — most teams emit version as a structured JSON field and let the Log Pipeline\'s standard attribute mapping pick it up as the reserved version facet.' },
+      { resource: 'apm', example: 'DD_VERSION=2.1.3  // set from CI at build time, e.g. $(git rev-parse --short HEAD)', description: 'Powers APM Deployment Tracking — auto-compares error rate/latency between the current and previous version after a release.' },
+      { resource: 'agent', example: '# Not a static datadog.yaml field — inject per-process\nDD_VERSION=2.1.3 /bin/my-service', description: 'Version changes every deploy, so it is set per-process at launch time rather than baked into the static Agent config.' },
+      { resource: 'integrations', example: 'ad.datadoghq.com/<container>.tags: \'{"version":"2.1.3"}\'', description: 'Set by the CI/CD pipeline templating the Kubernetes manifest at deploy time, not hand-maintained.' },
+    ],
   },
   {
     key: 'team',
@@ -186,6 +216,13 @@ const GLOBAL_BASELINE: TemplateTag[] = [
     when: 'At service/resource creation. Update immediately on team re-orgs.',
     where: 'All resources: hosts, containers, APM services, monitors, synthetics, dashboards, SLOs, service catalog.',
     exampleValues: ['payments-team', 'platform-sre', 'integrations'],
+    resourceExamples: [
+      { resource: 'rum', example: 'datadogRum.init({ ..., env: "production", service: "checkout-web" });\n// then set additional context: datadogRum.setGlobalContextProperty("team", "checkout-team")', description: 'team is not a first-class RUM init field — set it as a global context property so it appears as a facet on every RUM event.' },
+      { resource: 'logs', example: 'DD_TAGS=team:checkout-team  # or a pipeline processor mapping kube_namespace -> team', description: 'Most orgs derive team from kube_namespace via a Log Pipeline processor rather than asking every service to set it explicitly.' },
+      { resource: 'apm', example: 'DD_TAGS=team:checkout-team  // additional custom tag alongside DD_ENV/DD_SERVICE/DD_VERSION', description: 'Not a unified service tag, but universally supported via DD_TAGS — attaches to every span, metric, and log the tracer/Agent emits from that process.' },
+      { resource: 'agent', example: '# datadog.yaml\ntags:\n  - team:checkout-team', description: 'Applies to all host-level metrics and checks; container workloads should prefer the Kubernetes label below so it travels with the workload, not the host.' },
+      { resource: 'integrations', example: 'tags.datadoghq.com/team: "checkout-team"  # pod/deployment label', description: 'Kubernetes label picked up automatically by the Datadog Cluster Agent and applied to pods, containers, and their metrics/logs/traces.' },
+    ],
   },
   {
     key: 'owner',
@@ -195,6 +232,13 @@ const GLOBAL_BASELINE: TemplateTag[] = [
     when: 'At service onboarding. Update when ownership transfers.',
     where: 'Service catalog (primary), monitors, APM services.',
     exampleValues: ['platform-oncall@company.com', 'jane.doe', 'payments-oncall'],
+    resourceExamples: [
+      { resource: 'rum', example: 'datadogRum.setGlobalContextProperty("owner", "checkout-oncall@company.com")', description: 'Useful mainly for internal-tooling RUM applications where a specific rotation, not the whole team, is the escalation point.' },
+      { resource: 'logs', example: 'DD_TAGS=owner:checkout-oncall  # rarely set at the telemetry level — usually lives in the Service Catalog entry instead', description: 'owner is most valuable as Service Catalog metadata (see service.datadog.yaml below) rather than a raw log tag on every line.' },
+      { resource: 'apm', example: 'DD_TAGS=owner:checkout-oncall@company.com', description: 'Supplements team on high-tier services where the on-call contact needs to be reachable directly from a trace without checking a separate rotation lookup.' },
+      { resource: 'agent', example: '# Not typically an Agent/host-level tag — set via the Service Catalog entry (service.datadog.yaml) instead', description: 'Host-level owner tagging is uncommon; ownership is almost always modeled at the service, not the host.' },
+      { resource: 'integrations', example: '# service.datadog.yaml (Service Catalog / Software Catalog)\ncontacts:\n  - type: email\n    contact: checkout-oncall@company.com', description: 'The canonical place to declare owner today is the Service Catalog entry, which every product (APM, monitors, incidents) reads from.' },
+    ],
   },
   {
     key: 'cost_center',
@@ -204,6 +248,13 @@ const GLOBAL_BASELINE: TemplateTag[] = [
     when: 'At resource provisioning. Required before any cloud billing data is useful for attribution.',
     where: 'All resources. Priority: hosts, cloud instances, database instances.',
     exampleValues: ['CC-1234', 'eng-platform', 'finops-42'],
+    resourceExamples: [
+      { resource: 'rum', example: '// Not applicable — RUM/browser telemetry has no direct cloud billing line item to allocate', description: 'Cost allocation is a cloud-resource and host/container concern; RUM sessions don\'t individually incur billable infra cost, so cost_center is generally omitted here.' },
+      { resource: 'logs', example: '# Usually attributed indirectly via host/service tags rather than set per-log-line', description: 'Log ingestion cost is more often allocated via Cost Management\'s tag pipelines against the source host/service\'s cost_center than a per-log tag.' },
+      { resource: 'apm', example: 'DD_TAGS=cost_center:CC-1234', description: 'Attaches trace-level cost allocation for orgs doing granular chargeback of APM ingestion by service, on top of host-level allocation.' },
+      { resource: 'agent', example: '# datadog.yaml\ntags:\n  - cost_center:CC-1234', description: 'The primary place to set this — host-level cost_center rolls up compute, and most Datadog product usage, to a chargeback code.' },
+      { resource: 'integrations', example: '# Usually synced automatically from the cloud provider\'s own cost_center tag via the AWS/GCP/Azure integration rather than set at the container level', description: 'Reuse the cloud account/resource-level tag your FinOps team already applies for billing — avoid a second manual tag that can drift from the source of truth.' },
+    ],
   },
 ];
 
@@ -751,6 +802,135 @@ export const INDUSTRY_TEMPLATES: IndustryTemplate[] = [
       { key: 'compliance_scope', standard: 'CMMC', note: 'Required for defense contractors handling Controlled Unclassified Information (CUI).' },
     ],
   },
+
+  // ─ Travel & Hospitality sector ────────────────────────────────────────────
+  {
+    id: 'hospitality-hotels',
+    name: 'Hotels & Resorts',
+    category: 'industry',
+    sector: 'Travel & Hospitality',
+    description: 'For hotel chains, resorts, and property management platforms handling reservations, guest services, and multi-property operations.',
+    icon: '🏨',
+    detectSignals: ['property_id', 'pms_system', 'booking_channel', 'guest_tier'],
+    globalBaseline: GLOBAL_BASELINE,
+    required: [
+      { key: 'property_id', description: 'Individual hotel property or resort identifier', why: 'Multi-property chains need per-property uptime and booking-funnel visibility — a single property\'s PMS or Wi-Fi outage should be scoped to that property, not read as a chain-wide incident.', how: 'Add property_id:<code> to all systems and edge devices deployed at that property (PMS terminals, kiosks, in-room tech).', when: 'At property onboarding.', where: 'PMS hosts, front-desk terminals, in-room technology, edge network devices.', exampleValues: ['prop-nyc-042', 'resort-maui-01'],
+        resourceExamples: [
+          { resource: 'rum', example: 'datadogRum.setGlobalContextProperty("property_id", "prop-nyc-042")', description: 'Scopes guest-facing booking-widget or in-room portal RUM sessions to the specific property, so a single hotel\'s Wi-Fi/portal issue doesn\'t skew chain-wide Core Web Vitals.' },
+          { resource: 'logs', example: 'DD_TAGS=property_id:prop-nyc-042  # set on PMS interface hosts at that property', description: 'Applied at the PMS/edge host level so all logs from that property\'s systems carry consistent scoping.' },
+          { resource: 'apm', example: 'DD_TAGS=property_id:prop-nyc-042', description: 'Lets reservation and folio-payment spans be filtered per property without needing a separate service per hotel.' },
+          { resource: 'agent', example: '# datadog.yaml on the property\'s PMS/edge host\ntags:\n  - property_id:prop-nyc-042', description: 'Set once per property\'s on-prem or edge host — every check/metric from that host inherits it.' },
+          { resource: 'integrations', example: 'ad.datadoghq.com/<container>.tags: \'{"property_id":"prop-nyc-042"}\'', description: 'For containerized PMS integration services running per-property, e.g. in a property-local edge cluster.' },
+        ] },
+      { key: 'pci_scope', description: 'PCI scope indicator', why: 'Front-desk check-in, folio payment, and F&B point-of-sale all touch card data — mandatory for any system in that path.', how: 'Apply pci_scope:in-scope to PMS payment modules, POS terminals, and booking-engine payment pages.', when: 'At provisioning.', where: 'PMS payment modules, POS terminals, booking engine.', exampleValues: ['in-scope', 'out-of-scope'] },
+    ],
+    recommended: [
+      { key: 'brand', description: 'Hotel brand or flag', why: 'Multi-brand operators (a management company running several flags) need brand-level reliability and guest-satisfaction reporting distinct from any single property.', how: 'Add brand:<name> to all resources serving properties under that brand.', when: 'At property onboarding.', where: 'PMS hosts, booking engine, loyalty services.', exampleValues: ['brand-luxury-collection', 'brand-select-service'] },
+      { key: 'booking_channel', description: 'Reservation channel (direct, OTA, GDS, call-center)', why: 'Direct-booking and OTA (Expedia, Booking.com) traffic route through very different integration paths with different latency and rate-limit behavior — a degraded OTA channel integration looks like a general booking-engine outage without this tag.', how: 'Inject booking_channel as a span tag at the reservation-creation service based on the request source.', when: 'At instrumentation time.', where: 'APM spans for reservation and booking-engine services.', exampleValues: ['direct', 'ota', 'gds', 'call-center'] },
+      { key: 'pms_system', description: 'Property Management System (PMS) vendor/integration', why: 'PMS integrations (Opera, Infor HMS, Cloudbeds) are frequently the root cause of check-in/check-out and folio incidents — vendor-level tagging isolates one integration\'s outage from platform-wide health.', how: 'Tag PMS integration services and interface hosts with the PMS vendor name.', when: 'At PMS integration onboarding.', where: 'APM services and hosts for PMS integrations.', exampleValues: ['opera', 'infor-hms', 'cloudbeds', 'protel'] },
+      { key: 'guest_tier', description: 'Loyalty/guest tier', why: 'Elite loyalty tiers expect faster service recovery and dedicated support paths — tier-level dashboards let support triage by contractual/loyalty commitment during an incident, not just raw severity.', how: 'Inject guest_tier from the loyalty/CRM system as a span tag on guest-facing services.', when: 'At instrumentation time.', where: 'APM spans, RUM sessions for guest-facing booking and loyalty services.', exampleValues: ['standard', 'silver', 'gold', 'diamond'] },
+    ],
+    optional: [
+      { key: 'room_type', description: 'Room/inventory category', why: 'Inventory-availability and rate-shopping latency can vary by room category during high-demand searches — useful for capacity-planning the booking engine\'s search path.', how: 'Inject room_type as a span tag from the availability/rate-shopping service.', when: 'At instrumentation time.', where: 'APM spans for availability and rate-shopping services.', exampleValues: ['standard', 'suite', 'accessible', 'all-inclusive'] },
+    ],
+    complianceTags: [
+      { key: 'pci_scope', standard: 'PCI DSS', note: 'Required for all front-desk, folio, and POS payment acceptance across properties.' },
+    ],
+  },
+  {
+    id: 'hospitality-cruise',
+    name: 'Cruise Lines',
+    category: 'industry',
+    sector: 'Travel & Hospitality',
+    description: 'For cruise operators managing shipboard systems, guest services, and itinerary operations across a fleet, with satellite-constrained connectivity.',
+    icon: '🛳️',
+    detectSignals: ['vessel_id', 'fleet', 'itinerary', 'deck_system', 'port_of_call'],
+    globalBaseline: GLOBAL_BASELINE,
+    required: [
+      { key: 'vessel_id', description: 'Individual ship identifier', why: 'Each vessel is effectively its own isolated network segment at sea — vessel-level tagging is required to distinguish a single ship\'s connectivity or system incident from a fleet-wide platform issue.', how: 'Add vessel_id:<name> to all onboard systems, edge hosts, and satellite gateway devices for that ship.', when: 'At vessel commissioning or system onboarding.', where: 'Onboard hosts, edge network devices, satellite gateway systems.', exampleValues: ['vessel-horizon-01', 'vessel-odyssey-03'],
+        resourceExamples: [
+          { resource: 'rum', example: 'datadogRum.setGlobalContextProperty("vessel_id", "vessel-horizon-01")', description: 'Scopes guest-facing onboard portal/entertainment-system RUM sessions to the ship, so a single vessel\'s satellite-link degradation doesn\'t skew fleet-wide RUM metrics.' },
+          { resource: 'logs', example: 'DD_TAGS=vessel_id:vessel-horizon-01  # set on the onboard Agent/gateway host', description: 'Applied once on the ship\'s onboard log-forwarding gateway so every onboard system\'s logs inherit it before transmission over the satellite link.' },
+          { resource: 'apm', example: 'DD_TAGS=vessel_id:vessel-horizon-01', description: 'Lets guest-services and POS spans be filtered per vessel for both incident response and fleet-wide performance comparison.' },
+          { resource: 'agent', example: '# datadog.yaml on the onboard Agent host\ntags:\n  - vessel_id:vessel-horizon-01', description: 'Set once on the vessel\'s onboard Agent/gateway host — batches and forwards telemetry over the satellite uplink with this tag already attached.' },
+          { resource: 'integrations', example: 'ad.datadoghq.com/<container>.tags: \'{"vessel_id":"vessel-horizon-01"}\'', description: 'For containerized onboard services (POS, entertainment platform) running on the ship\'s local edge compute.' },
+        ] },
+      { key: 'deck_system', description: 'Shipboard operational system category', why: 'Guest-facing systems (POS, entertainment, Wi-Fi) and safety/navigation systems have completely different criticality and monitoring requirements — conflating them risks either under-alerting on safety-adjacent systems or drowning them in guest-Wi-Fi noise.', how: 'Tag onboard hosts and services by the deck system category they belong to; safety-adjacent systems should also carry tier:0.', when: 'At system provisioning.', where: 'Onboard hosts and services.', exampleValues: ['guest-wifi', 'pos-retail', 'entertainment', 'navigation-support', 'galley-ops'] },
+    ],
+    recommended: [
+      { key: 'fleet', description: 'Fleet or brand grouping within a cruise operator', why: 'Multi-brand cruise operators (running several fleets under one parent company) need brand-level rollups distinct from any single vessel\'s performance.', how: 'Add fleet:<name> to all resources tied to vessels in that fleet.', when: 'At vessel/fleet onboarding.', where: 'Fleet management services, shore-side systems tracking fleet-wide data.', exampleValues: ['fleet-premium', 'fleet-family'] },
+      { key: 'itinerary', description: 'Current voyage/itinerary identifier', why: 'System load and guest activity patterns shift dramatically between sea days and port days on a given itinerary — itinerary-level context helps distinguish expected load shifts from genuine anomalies.', how: 'Inject itinerary as a tag from the voyage-management system, updated at the start of each sailing.', when: 'At voyage start.', where: 'Onboard guest-services APM spans, shore-side voyage tracking.', exampleValues: ['itin-caribbean-7night', 'itin-mediterranean-10night'] },
+      { key: 'connectivity_link', description: 'Satellite/maritime connectivity link type in use', why: 'VSAT and low-earth-orbit satellite links have very different latency, bandwidth, and weather-related outage profiles than shore-side connectivity — link-blind dashboards can\'t distinguish "the ship\'s satellite link degraded" from an application-level problem.', how: 'Inject connectivity_link as a tag from the onboard network gateway\'s active-link status.', when: 'At instrumentation time, continuously updated as the active link changes.', where: 'Onboard network gateway hosts, NDM for shipboard network equipment.', exampleValues: ['vsat', 'leo-satellite', 'port-wifi-uplink'] },
+      { key: 'port_of_call', description: 'Current or upcoming port of call', why: 'Connectivity, POS transaction volume (shore excursions, port shopping), and guest disembarkation-system load are all port-specific — port-level context distinguishes expected in-port load spikes from genuine incidents.', how: 'Inject port_of_call as a tag from the voyage-management system based on the ship\'s current position/schedule.', when: 'At each port call.', where: 'Onboard guest-services APM spans, shore-excursion booking services.', exampleValues: ['port-nassau', 'port-cozumel', 'port-barcelona'] },
+    ],
+    optional: [
+      { key: 'muster_station_system', description: 'Safety/muster-station tracking system flag', why: 'Passenger safety and muster-drill tracking systems carry maritime safety-regulation weight and should never share alert thresholds or maintenance windows with entertainment/guest-Wi-Fi systems.', how: 'Tag muster-station and safety-drill tracking hosts/services; set tier:0.', when: 'At system provisioning.', where: 'Onboard safety-system hosts.', exampleValues: ['yes', 'no'] },
+    ],
+    // Deliberately omitted: cruise safety regulation is real (e.g. SOLAS-derived flag-state
+    // and class-society requirements) but the specific compliance tag/standard names vary by
+    // flag state and class society, so no complianceTags list is fabricated here — track
+    // that mapping with your safety/regulatory team rather than a guessed tag taxonomy.
+  },
+  {
+    id: 'maritime-shipping',
+    name: 'Maritime & Shipping / Logistics',
+    category: 'industry',
+    sector: 'Travel & Hospitality',
+    description: 'For cargo shipping lines, freight operators, and port logistics platforms tracking vessels, cargo, and fleet operations — distinct from passenger cruise operations.',
+    icon: '🚢',
+    detectSignals: ['vessel_id', 'route', 'cargo_type', 'port', 'fleet_operator'],
+    globalBaseline: GLOBAL_BASELINE,
+    required: [
+      { key: 'vessel_id', description: 'Individual cargo vessel identifier', why: 'Vessel-level tracking and telemetry is the core unit of freight operations — a single vessel\'s system or connectivity incident must be isolated from fleet-wide dashboards to avoid mis-scoped incident response.', how: 'Add vessel_id:<name-or-imo> to all onboard systems and shore-side tracking records for that vessel. Prefer the vessel\'s IMO number for cross-system consistency.', when: 'At vessel onboarding or system provisioning.', where: 'Onboard hosts, shore-side fleet-tracking services, NDM for vessel network equipment.', exampleValues: ['vessel-imo-9321483', 'vessel-pacific-trader'],
+        resourceExamples: [
+          { resource: 'rum', example: '// Not applicable — cargo vessels have no guest-facing web/app surface to instrument with RUM', description: 'Freight/logistics operations have no consumer-facing browser or mobile surface analogous to guest-facing hospitality apps.' },
+          { resource: 'logs', example: 'DD_TAGS=vessel_id:vessel-imo-9321483  # set on the onboard log-forwarding gateway', description: 'Applied once on the vessel\'s onboard gateway host so all onboard telemetry inherits it before transmission over the satellite link.' },
+          { resource: 'apm', example: 'DD_TAGS=vessel_id:vessel-imo-9321483', description: 'Lets shore-side voyage-tracking and cargo-manifest spans be filtered per vessel across the fleet-tracking platform.' },
+          { resource: 'agent', example: '# datadog.yaml on the onboard Agent/gateway host\ntags:\n  - vessel_id:vessel-imo-9321483', description: 'Set once on the vessel\'s onboard Agent host for all onboard system telemetry.' },
+          { resource: 'integrations', example: 'ad.datadoghq.com/<container>.tags: \'{"vessel_id":"vessel-imo-9321483"}\'', description: 'For containerized onboard/edge services running fleet-tracking or reefer-monitoring agents.' },
+        ] },
+      { key: 'route', description: 'Shipping route or trade lane', why: 'Route-level on-time performance is the primary commercial metric in freight shipping — route-blind system monitoring can\'t be tied back to the SLAs that actually matter to customers.', how: 'Inject route as a tag from the voyage-planning system, at voyage assignment.', when: 'At voyage assignment.', where: 'Shore-side voyage-tracking and route-planning services.', exampleValues: ['route-transpacific', 'route-asia-europe'] },
+    ],
+    recommended: [
+      { key: 'cargo_type', description: 'Cargo category carried', why: 'Container, bulk, tanker, and refrigerated (reefer) cargo have distinct monitoring needs — reefer cargo in particular requires continuous temperature-telemetry monitoring with much stricter alerting than dry cargo.', how: 'Inject cargo_type as a tag from the cargo-manifest system per voyage or per container.', when: 'At cargo loading / manifest creation.', where: 'Cargo-tracking services, reefer-monitoring systems.', exampleValues: ['container', 'bulk', 'tanker', 'reefer'] },
+      { key: 'port', description: 'Port of departure, arrival, or transshipment', why: 'Port-side systems (terminal operating systems, customs integration) are a frequent source of delay-causing incidents — port-level tagging isolates a single port\'s integration issue from a route-wide delay pattern.', how: 'Inject port as a tag from the voyage-tracking system at each port call.', when: 'At each port call.', where: 'Shore-side voyage tracking, terminal-operating-system integrations.', exampleValues: ['port-shanghai', 'port-rotterdam', 'port-los-angeles'] },
+      { key: 'fleet_operator', description: 'Fleet operator or charterer', why: 'Chartered/leased vessels operated on behalf of another company need clear operator-level attribution for both cost allocation and incident ownership — a vessel\'s owner and its operator are frequently different entities.', how: 'Tag vessel records with the current operating entity from the charter agreement.', when: 'At charter assignment.', where: 'Shore-side fleet-management services.', exampleValues: ['operator-maersk', 'operator-msc', 'operator-cosco'] },
+      { key: 'connectivity_link', description: 'Satellite/maritime connectivity link type in use', why: 'As with cruise vessels, cargo ships rely on VSAT or satellite links with distinct latency and outage characteristics from shore-side connectivity — necessary context for distinguishing a link outage from an application fault when telemetry gaps appear.', how: 'Inject connectivity_link as a tag from the onboard network gateway\'s active-link status.', when: 'At instrumentation time, continuously updated.', where: 'Onboard network gateway hosts, NDM for vessel network equipment.', exampleValues: ['vsat', 'leo-satellite', 'port-wifi-uplink'] },
+    ],
+    optional: [
+      { key: 'container_tracking_provider', description: 'IoT/container-tracking telemetry provider', why: 'Container-level GPS/temperature tracking is frequently outsourced to a third-party IoT provider — provider-level tagging isolates a vendor-side telemetry gap from a genuine cargo incident.', how: 'Tag container-tracking ingestion services with the telemetry provider name.', when: 'At integration onboarding.', where: 'APM services for container-tracking ingestion.', exampleValues: ['tracker-vendor-a', 'tracker-vendor-b'] },
+    ],
+  },
+  {
+    id: 'travel-airlines',
+    name: 'Airlines',
+    category: 'industry',
+    sector: 'Travel & Hospitality',
+    description: 'For airline carriers with reservation, check-in, and flight-operations systems. More specific than the general Transportation & Logistics template: covers passenger/booking-class economics and airport/flight-leg operational structure rather than fleet dispatch and freight routing.',
+    icon: '✈️',
+    detectSignals: ['flight_route', 'fleet_type', 'airport_code', 'booking_class'],
+    globalBaseline: GLOBAL_BASELINE,
+    required: [
+      { key: 'flight_route', description: 'Origin-destination flight route/city pair', why: 'Reservation-system and check-in load, plus weather/ATC-driven disruption, are fundamentally route-scoped — route-blind dashboards can\'t distinguish a single lane\'s disruption from a systemic reservation-system outage.', how: 'Inject flight_route as a span tag from the reservation and check-in services based on the itinerary segment.', when: 'At instrumentation time.', where: 'APM spans for reservation, check-in, and flight-operations services.', exampleValues: ['jfk-lhr', 'ord-lax', 'sfo-nrt'],
+        resourceExamples: [
+          { resource: 'rum', example: 'datadogRum.setGlobalContextProperty("flight_route", "jfk-lhr")', description: 'Scopes booking-site and mobile check-in RUM sessions to the route being searched/booked, useful for spotting route-specific search-latency regressions.' },
+          { resource: 'logs', example: 'DD_TAGS=flight_route:jfk-lhr  # injected as a structured field by the reservation service, not set at the Agent level', description: 'Set programmatically by the reservation/check-in service per request rather than statically per host.' },
+          { resource: 'apm', example: 'DD_TAGS=flight_route:jfk-lhr', description: 'Injected per-span from the itinerary context; enables route-level latency and error-rate comparison across the reservation and check-in services.' },
+          { resource: 'agent', example: '# Not a host-level tag — flight_route is per-request, set by the application, not the Agent config', description: 'Route varies per request on the same hosts, so it is injected in application code rather than statically in datadog.yaml.' },
+          { resource: 'integrations', example: '# Not an Autodiscovery-level tag — set in application code from the request/itinerary context', description: 'Route-level tagging happens inside the reservation service\'s own instrumentation, not via container-level annotations.' },
+        ] },
+      { key: 'airport_code', description: 'Airport (IATA/ICAO) code for airport-side systems', why: 'Kiosk, gate, and baggage-handling systems are deployed per-airport — airport-level tagging is required to isolate a single station\'s outage (e.g. a local network issue at one airport) from an airline-wide systems incident.', how: 'Add airport_code:<IATA> to all kiosk, gate-system, and baggage-handling hosts at that station.', when: 'At station system provisioning.', where: 'Kiosk hosts, gate-system hosts, baggage-handling systems.', exampleValues: ['jfk', 'lhr', 'ord', 'nrt'] },
+    ],
+    recommended: [
+      { key: 'booking_class', description: 'Fare/booking class', why: 'Premium cabin and elite-tier passengers have different rebooking/service-recovery SLAs during irregular operations (IROPs) — class-blind dashboards can\'t prioritize the passenger segments with the tightest contractual expectations.', how: 'Inject booking_class as a span tag from the reservation system at booking or check-in.', when: 'At instrumentation time.', where: 'APM spans for reservation and check-in services.', exampleValues: ['economy', 'premium-economy', 'business', 'first'] },
+      { key: 'fleet_type', description: 'Aircraft type/fleet family', why: 'Different aircraft types have different in-flight connectivity systems (IFE, Wi-Fi) and turnaround-time profiles at the gate — fleet-blind dashboards average away fleet-specific connectivity or ground-ops regressions.', how: 'Inject fleet_type as a tag from the flight-operations system based on the assigned aircraft.', when: 'At flight assignment.', where: 'Flight-operations services, in-flight-connectivity monitoring.', exampleValues: ['a320', 'b737', 'b777', 'a350'] },
+      { key: 'distribution_channel', description: 'Booking distribution channel (direct, OTA, GDS, travel-agent)', why: 'GDS (Sabre/Amadeus/Travelport) and OTA integrations have very different latency and rate-limit profiles than the airline\'s own direct-booking site — a degraded GDS connection looks like a reservation-system-wide outage without this tag.', how: 'Inject distribution_channel as a span tag at the reservation-creation service based on the request source.', when: 'At instrumentation time.', where: 'APM spans for reservation services.', exampleValues: ['direct', 'ota', 'gds', 'travel-agent'] },
+      { key: 'irregular_ops_flag', description: 'Irregular operations (IROPs) status flag', why: 'During IROPs (weather, ATC ground stops, mechanical issues), rebooking and customer-service system load spikes by an order of magnitude in a way that is entirely expected — this flag lets on-call teams distinguish expected IROPs-driven load from a genuine application regression.', how: 'Set irregular_ops_flag from the flight-operations system when a disruption event is declared, cleared when resolved.', when: 'During declared IROPs events.', where: 'Reservation, rebooking, and customer-service APM spans during the event window.', exampleValues: ['yes', 'no'] },
+    ],
+    optional: [
+      { key: 'codeshare_partner', description: 'Codeshare/alliance partner airline for the flight', why: 'Codeshare flights operated by a partner airline route through interline system integrations with distinct failure modes from the airline\'s own operated flights.', how: 'Inject codeshare_partner as a tag from the flight-operations system when the flight is a codeshare.', when: 'At instrumentation time for codeshare flights.', where: 'APM spans for reservation and flight-operations services handling codeshares.', exampleValues: ['partner-star-alliance', 'partner-oneworld'] },
+    ],
+  },
 ];
 
 // ─── Organizational templates ─────────────────────────────────────────────────
@@ -834,6 +1014,122 @@ export const ORG_TEMPLATES: IndustryTemplate[] = [
     ],
     optional: [
       { key: 'sensitivity', description: 'Data sensitivity (pii, anonymous, aggregate)', why: 'Drives data access controls and masking requirements.', how: 'Apply based on data classification policy.', when: 'At data asset registration.', where: 'Database instances, APM services handling sensitive data.', exampleValues: ['pii', 'anonymous', 'aggregate'] },
+    ],
+  },
+  {
+    id: 'org-devops',
+    name: 'DevOps / Platform Teams',
+    category: 'org',
+    description: 'Tagging model for DevOps and platform-operations teams centered on pipelines, deployment automation, and infrastructure-as-code.',
+    icon: '🔧',
+    detectSignals: ['pipeline', 'deployment_group', 'on_call_team', 'iac_module'],
+    globalBaseline: GLOBAL_BASELINE,
+    required: [
+      { key: 'pipeline', description: 'CI/CD pipeline name that built/deployed the resource', why: 'Ties every deployed resource back to the exact pipeline that shipped it — essential for tracing a bad deploy to its build and for pipeline-level DORA metrics (deployment frequency, change failure rate).', how: 'Inject pipeline:<name> from the CI/CD system as a tag on the deployment event and propagate it to the resulting hosts/containers via IaC variables.', when: 'At every deployment. Should be automatic, not hand-typed.', where: 'CI Visibility spans, hosts, containers, deployment events.', exampleValues: ['pipeline-checkout-deploy', 'pipeline-infra-terraform-apply'],
+        resourceExamples: [
+          { resource: 'rum', example: '// Not applicable directly — correlate via deployment markers instead:\ndatadogRum.init({ ..., version: "<pipeline-run-sha>" })', description: 'RUM has no native pipeline tag; teams typically encode the pipeline run\'s output version and cross-reference it against CI Visibility separately.' },
+          { resource: 'logs', example: 'DD_TAGS=pipeline:pipeline-checkout-deploy  # set by the deploy step, on the deployed process/container', description: 'Injected by the CI/CD job itself as a runtime env var on the artifact it deploys, not set by hand on the log source.' },
+          { resource: 'apm', example: 'DD_TAGS=pipeline:pipeline-checkout-deploy', description: 'A custom tag (not a unified service tag) that lets a bad-deploy investigation filter APM error spikes by the exact pipeline run that shipped the regression.' },
+          { resource: 'agent', example: '# Set by the CI/CD job at deploy time, not a static datadog.yaml field\nDD_TAGS=pipeline:pipeline-checkout-deploy', description: 'Applied per-deploy from the pipeline\'s own context, analogous to how version is injected.' },
+          { resource: 'integrations', example: '# CI Visibility auto-tags pipeline runs — see docs.datadoghq.com/continuous_integration', description: 'CI Visibility is the native product surface for pipeline-level tagging; propagate the same pipeline name to deployed resources for cross-product correlation.' },
+        ] },
+      { key: 'deployment_group', description: 'Deployment/release group or wave', why: 'Progressive delivery (canary waves, ring deployments) needs group-level rollback scope — without this tag, a bad rollout can only be rolled back all-or-nothing.', how: 'Set from the deployment orchestrator (Argo Rollouts, Spinnaker, custom pipeline) at rollout time as a host/pod label.', when: 'At deployment time, for every progressive rollout.', where: 'Hosts, Kubernetes pods, APM services during a rollout window.', exampleValues: ['wave-1', 'ring-canary', 'ring-broad'] },
+    ],
+    recommended: [
+      { key: 'on_call_team', description: 'On-call team responsible for pipeline/infra incidents', why: 'DevOps/platform incidents (a broken pipeline, a bad Terraform apply) often need a different on-call rotation than the application team that owns the affected service.', how: 'Add on_call_team:<handle> to CI/CD infrastructure, IaC state-management systems, and shared platform hosts. Must match the PagerDuty/OpsGenie handle.', when: 'At platform service onboarding.', where: 'CI/CD infrastructure, IaC runners, shared platform hosts, monitors.', exampleValues: ['oncall-platform-infra', 'oncall-cicd'] },
+      { key: 'iac_module', description: 'Infrastructure-as-code module or stack that provisioned the resource', why: 'When a Terraform/Pulumi module misbehaves (wrong instance size, missing security group), module-level tagging finds every resource it touched without re-reading the whole state file.', how: 'Inject iac_module:<name> as a default_tags block (Terraform) or resource tag (Pulumi/CloudFormation) at the module level.', when: 'At resource provisioning via IaC.', where: 'All cloud resources provisioned via IaC.', exampleValues: ['module-eks-cluster', 'module-rds-postgres', 'stack-networking-vpc'] },
+      { key: 'runner_pool', description: 'CI/CD runner pool or agent fleet', why: 'Flaky or slow builds are frequently isolated to one self-hosted runner pool (e.g. a specific instance type or availability zone) — pool-level tagging catches that before blaming the pipeline definition itself.', how: 'Tag self-hosted runner hosts/containers with the pool they belong to at provisioning time.', when: 'At runner fleet provisioning.', where: 'Hosts and containers running CI/CD runners/agents.', exampleValues: ['runner-pool-linux-arm64', 'runner-pool-gpu'] },
+      { key: 'deployment_strategy', description: 'Rollout strategy in effect', why: 'Blue-green, canary, and rolling deployments fail differently and need different anomaly-detection sensitivity during the rollout window — a strategy-blind alert either fires too often on canaries or misses a slow-burning blue-green regression.', how: 'Set from the CI/CD pipeline or deployment orchestrator at rollout time.', when: 'At deployment time.', where: 'Hosts, APM services during a rollout.', exampleValues: ['canary', 'blue-green', 'rolling', 'recreate'] },
+    ],
+    optional: [
+      { key: 'terraform_workspace', description: 'Terraform workspace or state file identifier', why: 'Multi-workspace Terraform setups (per-env or per-team state) benefit from tracing a resource back to the exact state file managing it, especially during drift investigations.', how: 'Add terraform_workspace as a default tag in the workspace\'s provider block.', when: 'At workspace creation.', where: 'Cloud resources managed by that workspace.', exampleValues: ['ws-prod-us-east', 'ws-staging'] },
+    ],
+  },
+  {
+    id: 'org-sre',
+    name: 'Site Reliability Engineering (SRE)',
+    category: 'org',
+    description: 'Tagging model for SRE teams centered on error budgets, SLO ownership, and incident escalation.',
+    icon: '🛰️',
+    detectSignals: ['slo_target', 'error_budget_policy', 'escalation_tier', 'runbook'],
+    globalBaseline: GLOBAL_BASELINE,
+    required: [
+      { key: 'slo_target', description: 'SLO target this service is measured against', why: 'SRE\'s core discipline is managing to an explicit reliability target — without a tagged target, dashboards can show uptime but not whether it meets the commitment that was actually made.', how: 'Add slo_target:<percentage> to services tied to a defined SLO. Keep in sync with the actual Datadog SLO object definition.', when: 'At SLO definition and whenever it is renegotiated.', where: 'APM services, SLOs, monitors.', exampleValues: ['99.9', '99.95', '99.99'],
+        resourceExamples: [
+          { resource: 'rum', example: 'datadogRum.setGlobalContextProperty("slo_target", "99.9")', description: 'Lets a front-end availability/Core Web Vitals SLO be filtered and compared against its own committed target directly from RUM data.' },
+          { resource: 'logs', example: 'DD_TAGS=slo_target:99.9', description: 'Rarely set per-log-line; more useful attached to the service context so log-based SLI queries can be scoped per target tier.' },
+          { resource: 'apm', example: 'DD_TAGS=slo_target:99.9', description: 'Complements the Datadog SLO object (which defines the target formally) by making the target queryable as a facet directly on spans for ad hoc analysis.' },
+          { resource: 'agent', example: '# Not a host-level concept — set on the owning APM service/SLO object instead', description: 'SLO targets are service-scoped, not host-scoped; avoid duplicating this at the infrastructure layer.' },
+          { resource: 'integrations', example: '# Define formally as a Datadog SLO object via Service Management → SLOs, then mirror the target as a service tag', description: 'The Datadog SLO object is the source of truth for alerting on burn rate; the tag is a convenience facet layered on top.' },
+        ] },
+      { key: 'error_budget_policy', description: 'Error budget policy/action tier in effect', why: 'What happens when a budget is exhausted (freeze releases, page a VP, require an incident review) is a documented policy, not a judgment call — tagging it makes escalation automation possible instead of relying on someone remembering the runbook.', how: 'Set error_budget_policy from the SLO error-budget policy document as a tag on the SLO and its owning service.', when: 'At SLO definition.', where: 'SLOs, APM services with a defined error budget.', exampleValues: ['freeze-releases', 'page-lead', 'standard-review'] },
+    ],
+    recommended: [
+      { key: 'escalation_tier', description: 'Incident escalation tier', why: 'SRE on-call structures typically have a primary/secondary/manager escalation chain — tagging the tier lets paging automation and incident tooling route correctly without a separate lookup table.', how: 'Add escalation_tier to monitors and services, matching the PagerDuty/OpsGenie escalation policy tier.', when: 'At on-call rotation setup.', where: 'Monitors, SLOs, service catalog.', exampleValues: ['primary', 'secondary', 'manager-escalation'] },
+      { key: 'runbook', description: 'Link or identifier for the incident runbook', why: 'Time-to-mitigate during an incident depends on the responder finding the right runbook immediately — attaching it as a tag on the monitor/service puts it one click away from the alert itself.', how: 'Add runbook:<url-or-id> to monitors and service catalog entries. Keep the underlying doc current — a stale runbook is worse than none.', when: 'At monitor creation and service onboarding.', where: 'Monitors, service catalog.', exampleValues: ['runbook-checkout-latency', 'https://wiki.company.com/runbooks/checkout'] },
+      { key: 'toil_category', description: 'Category of recurring operational toil this resource generates', why: 'SRE teams track toil explicitly to justify automation investment — tagging the category on recurring manual-intervention alerts turns "we keep doing this by hand" into a quantifiable backlog item.', how: 'Tag monitors/runbooks that represent known manual-intervention toil with a category from your toil taxonomy.', when: 'When a recurring manual intervention is identified.', where: 'Monitors representing known toil sources.', exampleValues: ['manual-restart', 'manual-scaling', 'manual-failover'] },
+      { key: 'slo_consumer', description: 'Downstream team or service consuming this SLO as a dependency', why: 'When an upstream SLO is breached, knowing exactly which downstream teams depend on it turns a vague "who does this affect" incident question into an immediate, accurate stakeholder list.', how: 'Tag the SLO with each known downstream consumer as it\'s onboarded as a dependency.', when: 'When a new consumer takes a dependency on the SLO.', where: 'SLOs.', exampleValues: ['consumer-checkout', 'consumer-mobile-api'] },
+    ],
+    optional: [
+      { key: 'blameless_postmortem_id', description: 'Linked postmortem/incident-review document identifier', why: 'Traces a service\'s current mitigations directly back to the incident that produced them, useful when re-evaluating whether a fix is still relevant.', how: 'Add after an incident review is published, linking the affected service or monitor to the postmortem doc.', when: 'After a postmortem is completed.', where: 'Service catalog entries, monitors with a known incident history.', exampleValues: ['pm-2025-041', 'pm-checkout-outage-q1'] },
+    ],
+  },
+  {
+    id: 'org-platform-engineering',
+    name: 'Platform Engineering / Internal Developer Platform',
+    category: 'org',
+    description: 'Tagging model for internal developer platform (IDP) teams offering self-service infrastructure and golden paths.',
+    icon: '🧩',
+    detectSignals: ['platform_team', 'service_tier', 'golden_path', 'scaffold_template'],
+    globalBaseline: GLOBAL_BASELINE,
+    required: [
+      { key: 'platform_team', description: 'Platform team providing the underlying capability', why: 'IDPs are built and run by a distinct platform org from the product teams consuming them — this tag separates "who owns the golden path" from "who owns the service built on it" so incidents route to the right owner.', how: 'Add platform_team:<name> to shared platform infrastructure (the IDP control plane, shared clusters, self-service provisioning services).', when: 'At platform capability launch.', where: 'IDP control-plane services, shared Kubernetes clusters, provisioning APIs.', exampleValues: ['platform-team-core', 'platform-team-data-infra'] },
+      { key: 'service_tier', description: 'Service tier as declared in the platform\'s service catalog/scaffolding', why: 'IDPs typically gate capabilities (production access, higher quotas, on-call requirements) by declared tier at scaffold time — this tag is the source of truth the platform used to make those decisions, not a duplicate of a manually-set tier elsewhere.', how: 'Populate service_tier automatically from the scaffolding tool/service catalog entry at service creation — never hand-edit after the fact without updating the catalog.', when: 'At service scaffolding.', where: 'Service catalog entries, APM services, monitors.', exampleValues: ['tier-1', 'tier-2', 'tier-3'],
+        resourceExamples: [
+          { resource: 'rum', example: 'datadogRum.setGlobalContextProperty("service_tier", "tier-1")', description: 'Surfaces the platform-declared tier on front-end telemetry so RUM alert thresholds can match the same tier-based policy as backend services.' },
+          { resource: 'logs', example: 'DD_TAGS=service_tier:tier-1  # set automatically by the scaffolding tool\'s generated deployment manifest', description: 'Propagated from the catalog entry into the generated manifest, not typed manually per log source.' },
+          { resource: 'apm', example: 'DD_TAGS=service_tier:tier-1', description: 'Lets Service Catalog and APM Service pages both reflect the same platform-declared tier without a second source of truth drifting out of sync.' },
+          { resource: 'agent', example: '# datadog.yaml (templated by the scaffolding tool)\ntags:\n  - service_tier:tier-1', description: 'Generated as part of the scaffolded service\'s Agent config, not hand-maintained.' },
+          { resource: 'integrations', example: 'ad.datadoghq.com/<container>.tags: \'{"service_tier":"tier-1"}\'', description: 'Templated into the Kubernetes manifest produced by the scaffolding CLI at generation time.' },
+        ] },
+    ],
+    recommended: [
+      { key: 'golden_path', description: 'Golden path/paved-road template the service was created from', why: 'Services built from the same golden path share failure modes and upgrade needs — when a platform team patches a golden path (e.g. a security fix in the base image), this tag finds every service that needs the same fix applied.', how: 'Inject golden_path:<name> automatically at scaffold time from the internal developer portal (Backstage, Port, custom IDP).', when: 'At service scaffolding.', where: 'Service catalog entries, hosts, APM services.', exampleValues: ['golden-path-node-service', 'golden-path-python-worker'] },
+      { key: 'scaffold_template', description: 'Exact scaffolding template version used to generate the service', why: 'Distinguishes services on an outdated scaffold version from ones on the latest — critical for tracking golden-path migration/deprecation campaigns and for security patch rollout.', how: 'Set scaffold_template:<name>@<version> automatically by the scaffolding CLI/portal at generation time.', when: 'At service scaffolding, and updated when the service upgrades its template.', where: 'Service catalog entries.', exampleValues: ['node-service@v3.2.0', 'python-worker@v1.8.1'] },
+      { key: 'self_service_provisioned', description: 'Flag for infrastructure provisioned through the self-service platform (vs. manually)', why: 'IDP adoption metrics depend on distinguishing self-service-provisioned resources from legacy manually-provisioned ones — without this tag, adoption reporting requires manual reconciliation against ticket history.', how: 'Set self_service_provisioned:yes automatically for any resource created through the IDP\'s provisioning API/UI.', when: 'At resource provisioning.', where: 'Cloud resources, Kubernetes namespaces, databases provisioned via the platform.', exampleValues: ['yes', 'no'] },
+      { key: 'capability', description: 'Self-service platform capability consumed (database, queue, cache, etc.)', why: 'Platform teams need capability-level reliability and cost data (e.g. "the managed Postgres capability" across every consuming team) to prioritize platform investment — service-level tags alone can\'t answer "how is this shared capability doing overall."', how: 'Tag provisioned resources with the capability name from the platform\'s service catalog.', when: 'At resource provisioning via the platform.', where: 'Databases, queues, caches, and other platform-provisioned resources.', exampleValues: ['managed-postgres', 'managed-kafka', 'managed-redis'] },
+    ],
+    optional: [
+      { key: 'backstage_entity_ref', description: 'Backstage (or equivalent) catalog entity reference', why: 'Provides a direct, unambiguous link back to the developer-portal entity for a resource, useful for cross-referencing ownership and documentation without a separate lookup.', how: 'Set from the entity\'s catalog-info.yaml annotations at registration time.', when: 'At service catalog registration.', where: 'Service catalog entries.', exampleValues: ['component:default/checkout-api', 'component:default/payments-worker'] },
+    ],
+  },
+  {
+    id: 'org-product-led',
+    name: 'Product-Led / Squad & Pod Structure',
+    category: 'org',
+    description: 'Tagging model for organizations structured around product pods/squads mapped to feature areas rather than technical layers.',
+    icon: '🧭',
+    detectSignals: ['product_area', 'feature_team', 'squad', 'pod'],
+    globalBaseline: GLOBAL_BASELINE,
+    required: [
+      { key: 'product_area', description: 'Product area or business capability the resource serves', why: 'Product-led orgs report reliability and cost by product area to product leadership, not by technical team — without this tag, an engineering-org rollup (team) can\'t answer a product-org question (how is Search doing?).', how: 'Add product_area:<name> to all resources serving that product area, aligned with the product roadmap taxonomy.', when: 'At service onboarding.', where: 'All resources.', exampleValues: ['search', 'checkout', 'recommendations', 'onboarding'],
+        resourceExamples: [
+          { resource: 'rum', example: 'datadogRum.init({ ..., service: "checkout-web" });\ndatadogRum.setGlobalContextProperty("product_area", "checkout")', description: 'Lets product leadership view front-end Core Web Vitals and error rate rolled up by product area rather than by technical service name.' },
+          { resource: 'logs', example: 'DD_TAGS=product_area:checkout  # or a pipeline processor mapping service -> product_area via a lookup table', description: 'Often derived via a Log Pipeline lookup-table processor mapping known service names to their product area, so individual services don\'t need to set it by hand.' },
+          { resource: 'apm', example: 'DD_TAGS=product_area:checkout', description: 'Enables product-area rollup dashboards and SLOs distinct from the technical service/team view already provided by the Service Map.' },
+          { resource: 'agent', example: '# datadog.yaml\ntags:\n  - product_area:checkout', description: 'Reasonable for hosts dedicated to a single product area; multi-tenant hosts should set it per-process instead.' },
+          { resource: 'integrations', example: 'ad.datadoghq.com/<container>.tags: \'{"product_area":"checkout"}\'', description: 'Set via Autodiscovery annotation, typically templated by the service\'s Kubernetes manifest from its Service Catalog entry.' },
+        ] },
+      { key: 'pod', description: 'Cross-functional pod (eng + product + design) owning the resource', why: 'Pods are the actual unit of ownership and on-call in a pod-based org — team alone is often too coarse (multiple pods can share one "team" label in the org chart) to route an alert to the right daily standup.', how: 'Add pod:<name> to all resources a pod owns, alongside (not instead of) team.', when: 'At service onboarding and pod re-formation.', where: 'All resources.', exampleValues: ['pod-search-relevance', 'pod-checkout-conversion'] },
+    ],
+    recommended: [
+      { key: 'feature_team', description: 'Feature team within a larger product area', why: 'Large product areas (e.g. Checkout) often split into multiple feature teams (payments, shipping, promotions) — this tag gives finer-grained ownership than product_area alone without requiring a full pod re-tagging exercise.', how: 'Add feature_team:<name> to resources owned by a specific feature team within a product area.', when: 'At service onboarding.', where: 'All resources.', exampleValues: ['feature-team-payments', 'feature-team-shipping'] },
+      { key: 'squad', description: 'Squad grouping within a pod/tribe model', why: 'In Spotify-style squad/tribe structures, squad is the smallest addressable ownership unit — needed for squad-level velocity and reliability metrics that roll up into tribe/pod-level executive reporting.', how: 'Add squad:<name> to all resources owned by the squad.', when: 'At service onboarding.', where: 'All resources.', exampleValues: ['squad-search-ranking', 'squad-checkout-payments'] },
+      { key: 'okr_alignment', description: 'Company/product OKR this resource\'s work is aligned to', why: 'Product-led orgs frequently need to show which infrastructure investment ties to which OKR for roadmap prioritization conversations — this tag makes that traceable without a separate spreadsheet.', how: 'Tag resources built specifically to support an active OKR initiative; remove or update when the OKR cycle ends.', when: 'At project kickoff for OKR-aligned initiatives.', where: 'Resources built for a specific OKR initiative.', exampleValues: ['okr-2025-q3-checkout-conversion', 'okr-2025-q3-search-latency'] },
+      { key: 'experiment_id', description: 'Active product experiment/A-B test identifier', why: 'Product-led teams run frequent experiments — correlating system performance and error rates with the specific experiment variant serving traffic is essential to avoid attributing a bug to "the checkout flow" when it\'s really one experiment arm.', how: 'Inject experiment_id as a span/RUM tag from the experimentation platform SDK.', when: 'At instrumentation time, for services participating in experiments.', where: 'APM spans, RUM sessions.', exampleValues: ['exp-checkout-onepage-v2', 'exp-search-ranking-ml'] },
+    ],
+    optional: [
+      { key: 'tribe', description: 'Tribe grouping multiple pods/squads around a broader mission', why: 'Provides the top-level rollup above pod/squad for VP-level product-org reporting, mirroring the tribe concept already used in org-engineering but scoped to product missions rather than technical domains.', how: 'Add tribe tag at the shared-infrastructure or namespace level covering multiple pods.', when: 'At org structure provisioning.', where: 'Shared resources spanning multiple pods within the tribe.', exampleValues: ['tribe-growth', 'tribe-core-shopping'] },
     ],
   },
 ];
@@ -931,6 +1227,27 @@ export const TAG_POLICY_GUIDANCE: TagPolicyLayer[] = [
     mechanism: 'For sources you don\'t control (vendor agents, legacy hosts), use a remapper/mapping processor to normalize synonyms (environment→env, application→service) at ingest instead of asking every producer to change — the last-resort catch for tags that can\'t be fixed at the source.',
     catchesAt: 'runtime',
     outcome: 'Legacy and third-party sources you can\'t modify still end up with normalized tags, without a multi-team migration project.',
+  },
+  {
+    layer: 'Configuration Management (Ansible / Puppet / Chef)',
+    where: 'Ansible playbooks, Puppet manifests, or Chef cookbooks that manage the Datadog Agent',
+    mechanism: 'Set required tags through the Agent\'s `tags:` config list (or `DD_TAGS` env var) as a mandatory role/playbook variable with no default, and re-run the play across the fleet whenever the tag set changes — the standard hard-tagging path for hosts that aren\'t provisioned by cloud-native IaC.',
+    catchesAt: 'deploy',
+    outcome: 'Hosts managed by traditional config-management tooling get the same enforced, no-default tagging guarantee as cloud-provisioned resources, without needing a Terraform migration first.',
+  },
+  {
+    layer: 'On-Prem Fleet Management (SCOM)',
+    where: 'Microsoft SCOM (System Center Configuration Manager) management packs',
+    mechanism: 'Map SCOM custom properties/object attributes for each managed Windows host to the Datadog Agent\'s `tags:` configuration (or `DD_TAGS`) via a management pack, then push a configuration refresh to affected hosts — the practical hard-tagging path for on-prem Windows estates that predate cloud/container tooling.',
+    catchesAt: 'deploy',
+    outcome: 'On-prem Windows hosts inherit tags from the same asset data SCOM already tracks, instead of requiring a separate manual tagging process.',
+  },
+  {
+    layer: 'Datadog Fleet Automation',
+    where: 'Fleet Automation → Configuration Management',
+    mechanism: 'Push an updated Agent configuration (including the `tags:` list) to some or all Agents in the fleet directly from Datadog, in bulk, without touching each host\'s config file or waiting for a redeploy pipeline.',
+    catchesAt: 'runtime',
+    outcome: 'Tag gaps across an existing fleet can be closed in one action, independent of whichever provisioning tool (or none) originally stood the host up.',
   },
 ];
 

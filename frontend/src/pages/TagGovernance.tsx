@@ -5,6 +5,7 @@ import PageHeader from '../components/ui/PageHeader';
 import { SkeletonCards } from '../components/ui/Skeleton';
 import { DrawerRoot, DrawerTrigger, DrawerContent } from '../components/ui/Drawer';
 import OrgQuickLink from '../components/common/OrgQuickLink';
+import SectionGate from '../components/SectionGate';
 
 function ConsistencyRing({ score }: { score: number }) {
   const color = score >= 80 ? '#22c55e' : score >= 50 ? '#f59e0b' : '#ef4444';
@@ -91,6 +92,7 @@ export default function TagGovernance() {
 
       {/* Per-org overview */}
       {orgSummaries.length > 0 && (
+        <SectionGate featureKey="section.tag_governance.org_profiles">
         <section>
           <h2 className="text-lg font-bold text-ink mb-3">Organization Tag Profiles</h2>
           <div className="grid grid-cols-2 gap-4">
@@ -135,10 +137,12 @@ export default function TagGovernance() {
             })}
           </div>
         </section>
+        </SectionGate>
       )}
 
       {/* UST inconsistencies */}
       {inconsistencies.length > 0 && (
+        <SectionGate featureKey="section.tag_governance.standard_inconsistencies">
         <section>
           <h2 className="text-lg font-bold text-ink mb-1">Standard Tag Inconsistencies</h2>
           <p className="text-sm text-ink-muted mb-3">
@@ -198,10 +202,12 @@ export default function TagGovernance() {
             })}
           </div>
         </section>
+        </SectionGate>
       )}
 
       {/* Value drift */}
       {valueDrift.length > 0 && (
+        <SectionGate featureKey="section.tag_governance.value_drift">
         <section>
           <h2 className="text-lg font-bold text-ink mb-1">Value Drift Across Orgs</h2>
           <p className="text-sm text-ink-muted mb-3">
@@ -252,10 +258,12 @@ export default function TagGovernance() {
             ))}
           </div>
         </section>
+        </SectionGate>
       )}
 
       {/* Common tag keys */}
       {commonTagKeys.length > 0 && (
+        <SectionGate featureKey="section.tag_governance.common_tags">
         <section>
           <h2 className="text-lg font-bold text-ink mb-1">Tags Common to All Orgs</h2>
           <p className="text-sm text-ink-muted mb-3">These keys are consistently present across every connected org — they form your de facto global tagging standard.</p>
@@ -265,10 +273,12 @@ export default function TagGovernance() {
             ))}
           </div>
         </section>
+        </SectionGate>
       )}
 
       {/* Orphan tags */}
       {Object.keys(orphanTagKeys).length > 0 && (
+        <SectionGate featureKey="section.tag_governance.orphan_tags">
         <section>
           <h2 className="text-lg font-bold text-ink mb-1">Orphan Tag Keys</h2>
           <p className="text-sm text-ink-muted mb-3">
@@ -306,6 +316,7 @@ export default function TagGovernance() {
             })}
           </div>
         </section>
+        </SectionGate>
       )}
     </div>
   );

@@ -7,6 +7,7 @@ import { useCurrentPage } from '../hooks/useCurrentPage';
 import { aiSettingsApi } from '../services/api';
 import { streamChat } from '../lib/chat-client';
 import PageHeader from '../components/ui/PageHeader';
+import MarkdownMessage from '../components/chat/MarkdownMessage';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -68,127 +69,6 @@ const QUICK_PROMPTS = [
   },
 ];
 
-// Simple markdown renderer — handles code blocks, inline code, bold, lists, headings
-function MarkdownContent({ content }: { content: string }) {
-  const lines = content.split('\n');
-  const elements: React.ReactNode[] = [];
-  let i = 0;
-
-  while (i < lines.length) {
-    const line = lines[i];
-
-    // Fenced code block
-    if (line.startsWith('```')) {
-      const lang = line.slice(3).trim();
-      const codeLines: string[] = [];
-      i++;
-      while (i < lines.length && !lines[i].startsWith('```')) {
-        codeLines.push(lines[i]);
-        i++;
-      }
-      elements.push(
-        <pre key={i} className="bg-gray-800 text-green-300 text-xs rounded-lg p-3 overflow-x-auto my-2 font-mono">
-          {lang && <div className="text-ink-faint text-xs mb-1">{lang}</div>}
-          <code>{codeLines.join('\n')}</code>
-        </pre>
-      );
-      i++;
-      continue;
-    }
-
-    // Heading
-    const headingMatch = line.match(/^(#{1,3})\s+(.+)/);
-    if (headingMatch) {
-      const level = headingMatch[1].length;
-      const text = headingMatch[2];
-      const cls = level === 1 ? 'text-base font-bold text-ink mt-3 mb-1'
-        : level === 2 ? 'text-sm font-bold text-ink mt-2 mb-1'
-        : 'text-sm font-semibold text-ink-muted mt-2';
-      elements.push(<p key={i} className={cls}>{text}</p>);
-      i++;
-      continue;
-    }
-
-    // Horizontal rule
-    if (line.match(/^---+$/)) {
-      elements.push(<hr key={i} className="my-3 border-border" />);
-      i++;
-      continue;
-    }
-
-    // Bullet list
-    if (line.match(/^[\-\*]\s/)) {
-      const items: string[] = [];
-      while (i < lines.length && lines[i].match(/^[\-\*]\s/)) {
-        items.push(lines[i].slice(2));
-        i++;
-      }
-      elements.push(
-        <ul key={i} className="list-none space-y-1 my-1">
-          {items.map((item, j) => (
-            <li key={j} className="flex gap-2 text-sm text-ink-muted">
-              <span className="text-dd-purple-light mt-0.5 shrink-0">▸</span>
-              <span>{renderInline(item)}</span>
-            </li>
-          ))}
-        </ul>
-      );
-      continue;
-    }
-
-    // Numbered list
-    if (line.match(/^\d+\.\s/)) {
-      const items: string[] = [];
-      while (i < lines.length && lines[i].match(/^\d+\.\s/)) {
-        items.push(lines[i].replace(/^\d+\.\s/, ''));
-        i++;
-      }
-      elements.push(
-        <ol key={i} className="space-y-1 my-1">
-          {items.map((item, j) => (
-            <li key={j} className="flex gap-2 text-sm text-ink-muted">
-              <span className="text-dd-purple font-semibold shrink-0 w-4">{j + 1}.</span>
-              <span>{renderInline(item)}</span>
-            </li>
-          ))}
-        </ol>
-      );
-      continue;
-    }
-
-    // Empty line → spacer
-    if (line.trim() === '') {
-      elements.push(<div key={i} className="h-1.5" />);
-      i++;
-      continue;
-    }
-
-    // Regular paragraph
-    elements.push(
-      <p key={i} className="text-sm text-ink-muted leading-relaxed">
-        {renderInline(line)}
-      </p>
-    );
-    i++;
-  }
-
-  return <div className="space-y-0.5">{elements}</div>;
-}
-
-function renderInline(text: string): React.ReactNode {
-  // Split on **bold**, `code`, and normal text
-  const parts = text.split(/(\*\*[^*]+\*\*|`[^`]+`)/g);
-  return parts.map((part, i) => {
-    if (part.startsWith('**') && part.endsWith('**')) {
-      return <strong key={i} className="font-semibold text-ink">{part.slice(2, -2)}</strong>;
-    }
-    if (part.startsWith('`') && part.endsWith('`')) {
-      return <code key={i} className="bg-dd-purple/5 text-dd-purple-dark text-xs px-1 py-0.5 rounded font-mono border border-dd-purple/10">{part.slice(1, -1)}</code>;
-    }
-    return part;
-  });
-}
-
 export default function AIChatAssistant() {
   const { orgs, scans, selectedOrgId, selectedScanId } = useOrgAndScanFilters();
   const currentPage = useCurrentPage();
@@ -196,6 +76,8 @@ export default function AIChatAssistant() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
+  const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  const [editDraft, setEditDraft] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -215,12 +97,14 @@ export default function AIChatAssistant() {
     }
   }, [selectedOrgId, selectedScanId]);
 
-  const send = useCallback(async (text: string) => {
+  // `baseHistory` lets an edited-and-resent user message replace the tail of
+  // the conversation (itself + the old reply) instead of appending after it.
+  const send = useCallback(async (text: string, baseHistory?: Message[]) => {
     if (!text.trim() || isStreaming) return;
     if (!selectedOrgId) { toast.error('Select an org first'); return; }
 
     const userMessage: Message = { role: 'user', content: text.trim() };
-    const nextMessages = [...messages, userMessage];
+    const nextMessages = [...(baseHistory ?? messages), userMessage];
     setMessages([...nextMessages, { role: 'assistant', content: '', streaming: true }]);
     setInput('');
     setIsStreaming(true);
@@ -287,6 +171,22 @@ export default function AIChatAssistant() {
 
   const stop = () => {
     abortRef.current?.abort();
+  };
+
+  // Drop the edited message and everything after it (its old reply included),
+  // then resend the edited text as a fresh turn.
+  const editAndResend = (index: number, newText: string) => {
+    if (isStreaming || !newText.trim()) return;
+    send(newText, messages.slice(0, index));
+  };
+
+  const copyToClipboard = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success('Copied to clipboard');
+    } catch {
+      toast.error('Could not copy to clipboard');
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -376,11 +276,51 @@ export default function AIChatAssistant() {
                   }`}
                 >
                   {msg.role === 'user' ? (
-                    <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
+                    editingIndex === i ? (
+                      <div className="space-y-1.5 min-w-[16rem]">
+                        <textarea
+                          value={editDraft}
+                          onChange={(e) => setEditDraft(e.target.value)}
+                          rows={Math.min(10, Math.max(2, editDraft.split('\n').length))}
+                          autoFocus
+                          className="w-full resize-y text-sm rounded-lg border border-white/30 bg-white/10 text-white placeholder-white/50 px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-white/60"
+                        />
+                        <div className="flex gap-1.5 justify-end">
+                          <button onClick={() => setEditingIndex(null)} className="text-xs px-2 py-1 rounded text-white/70 hover:text-white">Cancel</button>
+                          <button
+                            onClick={() => { setEditingIndex(null); editAndResend(i, editDraft); }}
+                            className="text-xs px-2 py-1 rounded font-medium bg-white text-dd-purple-dark hover:bg-white/90"
+                          >
+                            Save &amp; resend
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="group/msg relative">
+                        <p className="text-sm whitespace-pre-wrap pr-1">{msg.content}</p>
+                        <div className="absolute -top-2.5 right-0 hidden group-hover/msg:flex items-center gap-0.5 bg-white rounded-full shadow-xs px-1 py-0.5">
+                          <button
+                            onClick={() => { setEditingIndex(i); setEditDraft(msg.content); }}
+                            disabled={isStreaming}
+                            title="Edit and resend"
+                            className="px-1.5 py-0.5 rounded-full hover:bg-surface-sunken text-ink-faint hover:text-ink-muted text-[10px] leading-none disabled:opacity-40"
+                          >
+                            ✎
+                          </button>
+                          <button
+                            onClick={() => copyToClipboard(msg.content)}
+                            title="Copy"
+                            className="px-1.5 py-0.5 rounded-full hover:bg-surface-sunken text-ink-faint hover:text-ink-muted text-[10px] leading-none"
+                          >
+                            ⧉
+                          </button>
+                        </div>
+                      </div>
+                    )
                   ) : (
                     <>
                       {msg.content ? (
-                        <MarkdownContent content={msg.content} />
+                        <MarkdownMessage content={msg.content} accent="purple" size="sm" />
                       ) : (
                         <div className="flex gap-1 py-1">
                           <div className="w-1.5 h-1.5 rounded-full bg-dd-purple-light animate-bounce" style={{ animationDelay: '0ms' }} />

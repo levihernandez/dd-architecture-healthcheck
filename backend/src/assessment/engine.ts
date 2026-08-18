@@ -13,6 +13,7 @@ import { governanceRules } from './rules/governance.rules';
 import { costOptimizationRules } from './rules/cost-optimization.rules';
 import { securityPostureRules } from './rules/security-posture.rules';
 import { computeScorecard } from './scorer';
+import { FeatureFlagRepository } from '../feature-flags/repository';
 import type { AssessmentRule, AssessmentContext, Finding, FindingCategory } from '../types/assessment.types';
 
 const ALL_RULES: AssessmentRule[] = [
@@ -35,6 +36,9 @@ export async function runAssessment(orgId: string, scanRunId: string): Promise<n
   const allFindings: Omit<Finding, 'id' | 'createdAt'>[] = [];
 
   for (const rule of ALL_RULES) {
+    if (!FeatureFlagRepository.isRuleCategoryEnabled(rule.category)) {
+      continue;
+    }
     try {
       const result = await rule.run(ctx);
       for (const f of result.findings) {

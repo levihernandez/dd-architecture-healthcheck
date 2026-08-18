@@ -22,15 +22,35 @@ import tagTemplateRouter from './api/routes/tag-template.routes';
 import usageRouter from './api/routes/usage.routes';
 import pricingSnapshotsRouter from './api/routes/pricing-snapshots.routes';
 import sizingSnapshotsRouter from './api/routes/sizing-snapshots.routes';
+import idpRouter from './api/routes/idp.routes';
+import eventsRouter from './api/routes/events.routes';
+import featureFlagsRouter from './api/routes/feature-flags.routes';
+import { FeatureFlagRepository } from './feature-flags/repository';
 import { logger } from './utils/logger';
 import { resolveEncryptedEnv } from './utils/secrets';
+import { ensureTlsCredentials } from './utils/tls';
+import { ensurePromptsSeeded } from './ai/prompt-store';
 import fs from 'fs';
+import https from 'https';
 
 // Ensure log directory exists
 if (!fs.existsSync('logs')) fs.mkdirSync('logs', { recursive: true });
 
+// Ensure PROMPTS_DIR exists and every known prompt file is seeded from the
+// bundled defaults (backend/src/ai/prompt-defaults) — a fresh checkout or a
+// fresh (empty) mounted volume in prod must never boot with missing prompts.
+// Never overwrites a file that already exists, so host edits survive restarts.
+ensurePromptsSeeded();
+
 const app = express();
 const PORT = parseInt(process.env.PORT ?? '3001');
+const HTTPS_ENABLED = process.env.HTTPS_ENABLED === 'true';
+
+// Trust exactly one hop — the nginx reverse proxy in front of this container
+// (see frontend/nginx.conf). Without this, express-rate-limit throws on the
+// X-Forwarded-For header nginx adds (ERR_ERL_UNEXPECTED_X_FORWARDED_FOR), and
+// req.ip would resolve to nginx's container IP instead of the real client.
+app.set('trust proxy', 1);
 
 // Security
 app.use(helmet({
@@ -42,7 +62,20 @@ app.use(helmet({
 app.use(cors({
   origin: process.env.CORS_ORIGIN ?? 'http://localhost:5173',
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  allowedHeaders: [
+    'Content-Type',
+    'Authorization',
+    // Datadog RUM trace-propagation headers — needed so browser fetch/XHR
+    // requests to /api aren't blocked by CORS preflight, which would sever
+    // the RUM<->APM trace link (see allowedTracingUrls in frontend/src/lib/datadog.ts)
+    'x-datadog-origin',
+    'x-datadog-parent-id',
+    'x-datadog-sampling-priority',
+    'x-datadog-trace-id',
+    'x-datadog-tags',
+    'traceparent',
+    'tracestate',
+  ],
 }));
 
 // Body parsing
@@ -76,6 +109,9 @@ app.use('/api/orgs', tagTemplateRouter);
 app.use('/api/usage', usageRouter);
 app.use('/api/pricing-snapshots', pricingSnapshotsRouter);
 app.use('/api/sizing-snapshots', sizingSnapshotsRouter);
+app.use('/api/idp', idpRouter);
+app.use('/api/events', eventsRouter);
+app.use('/api/feature-flags', featureFlagsRouter);
 
 // Health check
 app.get('/health', (req, res) => {
@@ -93,28 +129,43 @@ app.use(errorMiddleware);
 async function start() {
   await resolveEncryptedEnv(); // decrypts any ENC[...] values (e.g. DD_API_KEY/DD_APP_KEY) before the DB or routes touch them
 
-  getDatabase();
+  getDatabase(); // runs runMigrations() on first access
 
-  const server = app.listen(PORT, () => {
-    logger.info(`Datadog Health Check backend running on http://localhost:${PORT}`);
+  FeatureFlagRepository.seedDefaults();
+
+  const protocol = HTTPS_ENABLED ? 'https' : 'http';
+  const listening = () => {
+    logger.info(`Datadog Health Check backend running on ${protocol}://localhost:${PORT}`);
     logger.info(`AI provider: ${process.env.AI_PROVIDER ?? 'none'}`);
-  });
+  };
 
-  process.on('SIGTERM', () => {
-    logger.info('SIGTERM received, shutting down gracefully');
+  const server = HTTPS_ENABLED
+    ? https
+        .createServer(
+          ensureTlsCredentials(
+            process.env.SSL_CERT_PATH ?? './certs/cert.pem',
+            process.env.SSL_KEY_PATH ?? './certs/key.pem'
+          ),
+          app
+        )
+        .listen(PORT, listening)
+    : app.listen(PORT, listening);
+
+  const shutdown = (signal: string) => {
+    logger.info(`${signal} received, shutting down gracefully`);
+    // server.close()'s callback only fires once every open connection closes.
+    // A lingering keep-alive/SSE connection would otherwise hang shutdown
+    // forever, leaving this process holding the port on the next `npm run dev`.
+    server.closeAllConnections();
     server.close(() => {
       closeDatabase();
       process.exit(0);
     });
-  });
+    setTimeout(() => process.exit(1), 5000).unref();
+  };
 
-  process.on('SIGINT', () => {
-    logger.info('SIGINT received, shutting down gracefully');
-    server.close(() => {
-      closeDatabase();
-      process.exit(0);
-    });
-  });
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => shutdown('SIGINT'));
 }
 
 start();

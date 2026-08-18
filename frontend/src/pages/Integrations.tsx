@@ -7,6 +7,7 @@ import { EmptyState } from '../components/common/LoadingState';
 import PageHeader from '../components/ui/PageHeader';
 import FilterChip, { FilterChipRow } from '../components/ui/FilterChip';
 import { SkeletonCards, SkeletonCard } from '../components/ui/Skeleton';
+import SectionGate from '../components/SectionGate';
 import type { FindingSeverity } from '../types';
 
 export default function Integrations() {
@@ -49,28 +50,30 @@ export default function Integrations() {
             <div className="card"><div className="text-2xl font-bold text-ink">{inventory?.cloudAccounts ?? 0}</div><div className="text-sm text-ink-muted">Cloud Accounts</div></div>
           </div>
           {findings.length > 0 ? (
-            <div className="card">
-              <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-                <h2 className="text-lg font-semibold text-ink">
-                  Integration Findings ({filteredFindings.length}{filteredFindings.length !== findings.length ? ` of ${findings.length}` : ''})
-                </h2>
-                <FilterChipRow>
-                  <FilterChip label="All" active={severityFilter === 'all'} count={findings.length} onClick={() => setSeverityFilter('all')} />
-                  {(['critical', 'high', 'medium', 'low', 'info'] as FindingSeverity[])
-                    .filter((s) => severityCounts[s] > 0)
-                    .map((s) => (
-                      <FilterChip
-                        key={s}
-                        label={s[0].toUpperCase() + s.slice(1)}
-                        active={severityFilter === s}
-                        count={severityCounts[s]}
-                        onClick={() => setSeverityFilter(s)}
-                      />
-                    ))}
-                </FilterChipRow>
+            <SectionGate featureKey="section.integrations.findings_table">
+              <div className="card">
+                <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+                  <h2 className="text-lg font-semibold text-ink">
+                    Integration Findings ({filteredFindings.length}{filteredFindings.length !== findings.length ? ` of ${findings.length}` : ''})
+                  </h2>
+                  <FilterChipRow>
+                    <FilterChip label="All" active={severityFilter === 'all'} count={findings.length} onClick={() => setSeverityFilter('all')} />
+                    {(['critical', 'high', 'medium', 'low', 'info'] as FindingSeverity[])
+                      .filter((s) => severityCounts[s] > 0)
+                      .map((s) => (
+                        <FilterChip
+                          key={s}
+                          label={s[0].toUpperCase() + s.slice(1)}
+                          active={severityFilter === s}
+                          count={severityCounts[s]}
+                          onClick={() => setSeverityFilter(s)}
+                        />
+                      ))}
+                  </FilterChipRow>
+                </div>
+                <EvidenceTable findings={filteredFindings} />
               </div>
-              <EvidenceTable findings={filteredFindings} />
-            </div>
+            </SectionGate>
           ) : <div className="card text-center py-8"><div className="text-green-400 text-2xl mb-2">✓</div><p className="text-ink">Integrations look healthy</p></div>}
         </>
       )}

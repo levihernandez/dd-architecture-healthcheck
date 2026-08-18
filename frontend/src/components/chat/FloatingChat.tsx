@@ -6,6 +6,7 @@ import { useOrgAndScanFilters } from '../../hooks/useFilters';
 import { useCurrentPage } from '../../hooks/useCurrentPage';
 import { aiSettingsApi } from '../../services/api';
 import { streamChat } from '../../lib/chat-client';
+import MarkdownMessage from './MarkdownMessage';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -22,85 +23,6 @@ const QUICK_CHIPS = [
   { icon: '💰', label: 'FinOps Plan', prompt: 'Generate a comprehensive FinOps action plan. Quantify my estimated spend profile by product area, identify the top 10 cost reduction levers, and create a phased 90-day optimization roadmap.' },
 ];
 
-function renderInline(text: string): React.ReactNode {
-  const parts = text.split(/(\*\*[^*]+\*\*|`[^`]+`)/g);
-  return parts.map((part, i) => {
-    if (part.startsWith('**') && part.endsWith('**'))
-      return <strong key={i} className="font-semibold text-ink">{part.slice(2, -2)}</strong>;
-    if (part.startsWith('`') && part.endsWith('`'))
-      return <code key={i} className="bg-violet-500/10 text-violet-400 text-xs px-1 py-0.5 rounded font-mono">{part.slice(1, -1)}</code>;
-    return part;
-  });
-}
-
-function MarkdownContent({ content }: { content: string }) {
-  const lines = content.split('\n');
-  const elements: React.ReactNode[] = [];
-  let i = 0;
-
-  while (i < lines.length) {
-    const line = lines[i];
-
-    if (line.startsWith('```')) {
-      const codeLines: string[] = [];
-      i++;
-      while (i < lines.length && !lines[i].startsWith('```')) { codeLines.push(lines[i]); i++; }
-      elements.push(
-        <pre key={i} className="bg-gray-900 text-green-300 text-xs rounded p-2 overflow-x-auto my-1 font-mono">
-          <code>{codeLines.join('\n')}</code>
-        </pre>
-      );
-      i++; continue;
-    }
-
-    const hm = line.match(/^(#{1,3})\s+(.+)/);
-    if (hm) {
-      const cls = hm[1].length === 1 ? 'text-sm font-bold text-ink mt-2 mb-0.5' : 'text-xs font-bold text-ink mt-1.5';
-      elements.push(<p key={i} className={cls}>{hm[2]}</p>);
-      i++; continue;
-    }
-
-    if (line.match(/^[\-\*]\s/)) {
-      const items: string[] = [];
-      while (i < lines.length && lines[i].match(/^[\-\*]\s/)) { items.push(lines[i].slice(2)); i++; }
-      elements.push(
-        <ul key={i} className="space-y-0.5 my-0.5">
-          {items.map((it, j) => (
-            <li key={j} className="flex gap-1.5 text-xs text-ink-muted">
-              <span className="text-violet-400 shrink-0">▸</span>
-              <span>{renderInline(it)}</span>
-            </li>
-          ))}
-        </ul>
-      );
-      continue;
-    }
-
-    if (line.match(/^\d+\.\s/)) {
-      const items: string[] = [];
-      while (i < lines.length && lines[i].match(/^\d+\.\s/)) { items.push(lines[i].replace(/^\d+\.\s/, '')); i++; }
-      elements.push(
-        <ol key={i} className="space-y-0.5 my-0.5">
-          {items.map((it, j) => (
-            <li key={j} className="flex gap-1.5 text-xs text-ink-muted">
-              <span className="text-violet-400 font-semibold shrink-0 w-3">{j + 1}.</span>
-              <span>{renderInline(it)}</span>
-            </li>
-          ))}
-        </ol>
-      );
-      continue;
-    }
-
-    if (line.trim() === '') { elements.push(<div key={i} className="h-1" />); i++; continue; }
-
-    elements.push(<p key={i} className="text-xs text-ink-muted leading-relaxed">{renderInline(line)}</p>);
-    i++;
-  }
-
-  return <div className="space-y-0.5">{elements}</div>;
-}
-
 export default function FloatingChat() {
   const [open, setOpen] = useState(false);
   const { orgs, scans, selectedOrgId, selectedScanId, setSelectedOrgId, setSelectedScanId } = useOrgAndScanFilters();
@@ -110,6 +32,8 @@ export default function FloatingChat() {
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
   const [unread, setUnread] = useState(0);
+  const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  const [editDraft, setEditDraft] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -125,12 +49,12 @@ export default function FloatingChat() {
     if (open) messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, open]);
 
-  const send = useCallback(async (text: string) => {
+  const send = useCallback(async (text: string, baseHistory?: Message[]) => {
     if (!text.trim() || isStreaming) return;
     if (!selectedOrgId) { toast.error('Select an org first'); return; }
 
     const userMessage: Message = { role: 'user', content: text.trim() };
-    const nextMessages = [...messages, userMessage];
+    const nextMessages = [...(baseHistory ?? messages), userMessage];
     setMessages([...nextMessages, { role: 'assistant', content: '', streaming: true }]);
     setInput('');
     setIsStreaming(true);
@@ -193,6 +117,20 @@ export default function FloatingChat() {
   }, [messages, isStreaming, selectedOrgId, selectedScanId, open, currentPage]);
 
   const aiConfigured = aiSettings && (aiSettings.provider !== 'none' || aiSettings.envProvider);
+
+  const editAndResend = (index: number, newText: string) => {
+    if (isStreaming || !newText.trim()) return;
+    send(newText, messages.slice(0, index));
+  };
+
+  const copyToClipboard = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success('Copied to clipboard');
+    } catch {
+      toast.error('Could not copy to clipboard');
+    }
+  };
 
   return (
     <>
@@ -293,11 +231,51 @@ export default function FloatingChat() {
                   }`}
                 >
                   {msg.role === 'user' ? (
-                    <p className="text-xs whitespace-pre-wrap">{msg.content}</p>
+                    editingIndex === i ? (
+                      <div className="space-y-1 min-w-[12rem]">
+                        <textarea
+                          value={editDraft}
+                          onChange={(e) => setEditDraft(e.target.value)}
+                          rows={Math.min(8, Math.max(2, editDraft.split('\n').length))}
+                          autoFocus
+                          className="w-full resize-y text-xs rounded-lg border border-white/30 bg-white/10 text-white placeholder-white/50 px-2 py-1 focus:outline-none focus:ring-1 focus:ring-white/60"
+                        />
+                        <div className="flex gap-1 justify-end">
+                          <button onClick={() => setEditingIndex(null)} className="text-[10px] px-1.5 py-0.5 rounded text-white/70 hover:text-white">Cancel</button>
+                          <button
+                            onClick={() => { setEditingIndex(null); editAndResend(i, editDraft); }}
+                            className="text-[10px] px-1.5 py-0.5 rounded font-medium bg-white text-violet-700 hover:bg-white/90"
+                          >
+                            Save &amp; resend
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="group/msg relative">
+                        <p className="text-xs whitespace-pre-wrap pr-1">{msg.content}</p>
+                        <div className="absolute -top-2 right-0 hidden group-hover/msg:flex items-center gap-0.5 bg-white rounded-full shadow-xs px-1 py-0.5">
+                          <button
+                            onClick={() => { setEditingIndex(i); setEditDraft(msg.content); }}
+                            disabled={isStreaming}
+                            title="Edit and resend"
+                            className="px-1 py-0.5 rounded-full hover:bg-surface-sunken text-ink-faint hover:text-ink-muted text-[9px] leading-none disabled:opacity-40"
+                          >
+                            ✎
+                          </button>
+                          <button
+                            onClick={() => copyToClipboard(msg.content)}
+                            title="Copy"
+                            className="px-1 py-0.5 rounded-full hover:bg-surface-sunken text-ink-faint hover:text-ink-muted text-[9px] leading-none"
+                          >
+                            ⧉
+                          </button>
+                        </div>
+                      </div>
+                    )
                   ) : (
                     <>
                       {msg.content ? (
-                        <MarkdownContent content={msg.content} />
+                        <MarkdownMessage content={msg.content} accent="violet" size="xs" />
                       ) : (
                         <div className="flex gap-1 py-0.5">
                           {[0, 150, 300].map(d => (

@@ -8,6 +8,7 @@ import { SkeletonCards, SkeletonTable } from '../components/ui/Skeleton';
 import DataTable, { type Column } from '../components/common/DataTable';
 import EvidenceTable from '../components/common/EvidenceTable';
 import { CATEGORICAL, CHART_INK, trackTint } from '../lib/chartColors';
+import SectionGate from '../components/SectionGate';
 
 function fmt(value: number | null, unit: string): string {
   if (value === null) return '—';
@@ -233,17 +234,17 @@ export default function Usage() {
       {/* Cost summary cards */}
       {totalCost > 0 && (
         <div className="grid grid-cols-3 gap-4">
-          <div className="card text-center py-4">
+          <div className="card border-l-4 border-dd-purple text-center py-4">
             <div className="text-xs text-ink-muted uppercase tracking-wide mb-1">Total Estimated Cost</div>
             <div className="text-2xl font-bold text-ink">{money(totalCost)}</div>
             <div className="text-xs text-ink-faint mt-1">{data.reportMonth}</div>
           </div>
-          <div className="card text-center py-4">
-            <div className="text-xs text-green-400 uppercase tracking-wide mb-1">Committed Spend</div>
+          <div className="card border-l-4 border-green-400 bg-green-500/5 text-center py-4">
+            <div className="text-xs text-green-500 uppercase tracking-wide mb-1">Committed Spend</div>
             <div className="text-2xl font-bold text-green-400">{money(totalCommitted)}</div>
             <div className="text-xs text-ink-faint mt-1">In-allotment usage</div>
           </div>
-          <div className={`card text-center py-4 ${totalOnDemand > 0 ? 'bg-red-500/10 border-red-500/30' : ''}`}>
+          <div className={`card border-l-4 text-center py-4 ${totalOnDemand > 0 ? 'border-red-400 bg-red-500/10' : 'border-border'}`}>
             <div className="text-xs text-red-500 uppercase tracking-wide mb-1">On-Demand Charges</div>
             <div className={`text-2xl font-bold ${totalOnDemand > 0 ? 'text-red-400' : 'text-ink-faint'}`}>{totalOnDemand > 0 ? money(totalOnDemand) : '$0'}</div>
             <div className="text-xs text-ink-faint mt-1">{totalOnDemand > 0 ? 'Overage charges' : 'No overages'}</div>
@@ -275,46 +276,50 @@ export default function Usage() {
 
       {/* Cost insights — root-cause correlation with tagging/config data, informational only */}
       {costFindings.length > 0 && (
-        <div className="space-y-2">
-          <div>
-            <h2 className="font-bold text-ink">Cost Insights</h2>
-            <p className="text-xs text-ink-muted mt-0.5">
-              Contributing factors behind this spend, correlated from tagging and configuration data collected in this scan. Informational — does not affect the overall health score.
-            </p>
+        <SectionGate featureKey="section.usage.cost_insights">
+          <div className="card border-l-4 border-amber-400 bg-amber-500/5 space-y-2">
+            <div>
+              <h2 className="font-bold text-ink">Cost Insights</h2>
+              <p className="text-xs text-ink-muted mt-0.5">
+                Contributing factors behind this spend, correlated from tagging and configuration data collected in this scan. Informational — does not affect the overall health score.
+              </p>
+            </div>
+            <EvidenceTable findings={costFindings} />
           </div>
-          <EvidenceTable findings={costFindings} />
-        </div>
+        </SectionGate>
       )}
 
       {/* Product table */}
-      <div className="space-y-2">
-        <div className="flex items-center justify-between">
-          <div>
-            <h2 className="font-bold text-ink">Product Usage Breakdown</h2>
-            <p className="text-xs text-ink-muted mt-0.5">Usage metrics and estimated costs by product for {data.reportMonth}</p>
+      <SectionGate featureKey="section.usage.product_breakdown">
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="font-bold text-ink">Product Usage Breakdown</h2>
+              <p className="text-xs text-ink-muted mt-0.5">Usage metrics and estimated costs by product for {data.reportMonth}</p>
+            </div>
+            {data.products.length > 0 && (
+              <div className="flex items-center gap-3 text-xs">
+                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-green-500 inline-block" /> In allotment</span>
+                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-500 inline-block" /> On-demand</span>
+              </div>
+            )}
           </div>
-          {data.products.length > 0 && (
-            <div className="flex items-center gap-3 text-xs">
-              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-green-500 inline-block" /> In allotment</span>
-              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-500 inline-block" /> On-demand</span>
+          {data.products.length > 0 ? (
+            <DataTable
+              columns={productColumns}
+              data={orderedProducts}
+              rowKey={(p) => p.name}
+              tableId="usage-products"
+              searchable
+              pageSize={10}
+            />
+          ) : (
+            <div className="card text-center py-10 text-ink-faint text-sm">
+              No product usage data found in this scan.
             </div>
           )}
         </div>
-        {data.products.length > 0 ? (
-          <DataTable
-            columns={productColumns}
-            data={orderedProducts}
-            rowKey={(p) => p.name}
-            tableId="usage-products"
-            searchable
-            pageSize={10}
-          />
-        ) : (
-          <div className="card text-center py-10 text-ink-faint text-sm">
-            No product usage data found in this scan.
-          </div>
-        )}
-      </div>
+      </SectionGate>
 
       {/* Usage trends (history sparklines) */}
       {data.usageHistory.length > 1 && (() => {
@@ -334,41 +339,45 @@ export default function Usage() {
         if (tiles.length === 0) return null;
 
         return (
-          <div className="card">
-            <h2 className="font-bold text-ink mb-4">Usage Trends — Last {data.usageHistory.length} Months</h2>
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-6">
-              {tiles.map(({ label, key, unit }) => {
-                const latestVal = typeof data.latestUsage[key] === 'number' ? (data.latestUsage[key] as number) : null;
-                if (latestVal === null) return null;
-                return (
-                  <div key={key}>
-                    <div className="text-xs font-semibold text-ink-muted mb-1">{label}</div>
-                    <div className="text-lg font-bold text-ink font-mono mb-1">{fmt(latestVal, unit)}</div>
-                    <UsageBarChart history={data.usageHistory} metricKey={key} unit={unit} />
-                  </div>
-                );
-              })}
+          <SectionGate featureKey="section.usage.usage_trends">
+            <div className="card border-l-4 border-dd-purple">
+              <h2 className="font-bold text-ink mb-4">Usage Trends — Last {data.usageHistory.length} Months</h2>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-6">
+                {tiles.map(({ label, key, unit }) => {
+                  const latestVal = typeof data.latestUsage[key] === 'number' ? (data.latestUsage[key] as number) : null;
+                  if (latestVal === null) return null;
+                  return (
+                    <div key={key}>
+                      <div className="text-xs font-semibold text-ink-muted mb-1">{label}</div>
+                      <div className="text-lg font-bold text-ink font-mono mb-1">{fmt(latestVal, unit)}</div>
+                      <UsageBarChart history={data.usageHistory} metricKey={key} unit={unit} />
+                    </div>
+                  );
+                })}
+              </div>
             </div>
-          </div>
+          </SectionGate>
         );
       })()}
 
       {/* Raw charges table (if cost data available) */}
       {data.costCharges.length > 0 && (
-        <div className="space-y-2">
-          <div>
-            <h2 className="font-bold text-ink">All Charges — {data.reportMonth}</h2>
-            <p className="text-xs text-ink-muted mt-0.5">From Datadog estimated cost API (committed + on-demand)</p>
+        <SectionGate featureKey="section.usage.all_charges">
+          <div className="space-y-2">
+            <div>
+              <h2 className="font-bold text-ink">All Charges — {data.reportMonth}</h2>
+              <p className="text-xs text-ink-muted mt-0.5">From Datadog estimated cost API (committed + on-demand)</p>
+            </div>
+            <DataTable
+              columns={chargeColumns}
+              data={[...data.costCharges].sort((a, b) => b.cost - a.cost)}
+              rowKey={(c) => `${c.product_name}-${c.charge_type}`}
+              tableId="usage-charges"
+              searchable
+              pageSize={10}
+            />
           </div>
-          <DataTable
-            columns={chargeColumns}
-            data={[...data.costCharges].sort((a, b) => b.cost - a.cost)}
-            rowKey={(c) => `${c.product_name}-${c.charge_type}`}
-            tableId="usage-charges"
-            searchable
-            pageSize={10}
-          />
-        </div>
+        </SectionGate>
       )}
 
       {/* Permission note */}

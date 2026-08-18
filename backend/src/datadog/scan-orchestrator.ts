@@ -11,12 +11,15 @@ import { collectIntegrations } from './collectors/integrations.collector';
 import { collectServiceCatalog } from './collectors/service-catalog.collector';
 import { collectSLOs } from './collectors/slos.collector';
 import { collectGovernance } from './collectors/governance.collector';
+import { collectIdp } from './collectors/idp.collector';
 import { collectRUM } from './collectors/rum.collector';
 import { collectUsage } from './collectors/usage.collector';
 import { collectSecurityFindings } from './collectors/security-findings.collector';
 import { collectCostManagement } from './collectors/cost-management.collector';
 import { collectIncidents } from './collectors/incidents.collector';
+import { collectEvents } from './collectors/events.collector';
 import { runAssessment } from '../assessment/engine';
+import { FeatureFlagRepository } from '../feature-flags/repository';
 import { logger } from '../utils/logger';
 import type { CollectorResultSummary, CollectionLimits } from '../types/api.types';
 
@@ -38,11 +41,13 @@ const ALL_COLLECTORS: Array<{ name: string; fn: CollectorFn }> = [
   { name: 'integrations', fn: collectIntegrations },
   { name: 'slos', fn: collectSLOs },
   { name: 'governance', fn: collectGovernance },
+  { name: 'idp', fn: collectIdp },
   { name: 'rum', fn: collectRUM },
   { name: 'usage', fn: collectUsage },
   { name: 'security_findings', fn: collectSecurityFindings },
   { name: 'cost_management', fn: collectCostManagement },
   { name: 'incidents', fn: collectIncidents },
+  { name: 'events', fn: collectEvents },
 ];
 
 export async function runScan(orgId: string, scanRunId: string, requestedCollectors?: string[]): Promise<void> {
@@ -62,12 +67,21 @@ export async function runScan(orgId: string, scanRunId: string, requestedCollect
     maxRetries: parseInt(process.env.DATADOG_MAX_RETRIES ?? '3'),
   });
 
+  // Feature-flag gate first: a collector disabled via the admin feature-flag tree
+  // (or effectively disabled because its 'scan' ancestor is off) never runs,
+  // regardless of what the caller explicitly requested.
+  const flagEnabledCollectors = ALL_COLLECTORS.filter((c) => FeatureFlagRepository.isCollectorEnabled(c.name));
+
   const collectors = requestedCollectors
-    ? ALL_COLLECTORS.filter((c) => requestedCollectors.includes(c.name))
-    : ALL_COLLECTORS;
+    ? flagEnabledCollectors.filter((c) => requestedCollectors.includes(c.name))
+    : flagEnabledCollectors;
 
   const limits: CollectionLimits = {
-    maxPagesHosts: parseInt(process.env.DATADOG_MAX_PAGES_HOSTS ?? '300'),
+    // 1000 pages * 1000 hosts/page = up to 1M hosts before truncating (was 300k) —
+    // raised now that rate-limit pacing is tracked per-endpoint (see client.ts)
+    // rather than a single global counter, so a long hosts pagination run no
+    // longer risks starving/misleading unrelated collectors that run after it.
+    maxPagesHosts: parseInt(process.env.DATADOG_MAX_PAGES_HOSTS ?? '1000'),
     maxPagesServices: parseInt(process.env.DATADOG_MAX_PAGES_SERVICES ?? '100'),
   };
 
