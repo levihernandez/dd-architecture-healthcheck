@@ -70,7 +70,6 @@ export const FEATURE_TREE: FeatureNode[] = [
   { key: 'page.tag_mapping', parentKey: 'rule.unified_tagging', nodeType: 'page', label: 'Tag Normalization', pagePath: '/tag-mapping' },
   { key: 'page.cloud_tags', parentKey: 'rule.unified_tagging', nodeType: 'page', label: 'Cloud Alignment', pagePath: '/cloud-tags' },
   { key: 'page.tag_governance', parentKey: 'rule.unified_tagging', nodeType: 'page', label: 'Multi-Org Governance', pagePath: '/tag-governance' },
-  { key: 'page.tagging_implementation', parentKey: 'rule.unified_tagging', nodeType: 'page', label: 'Tagging Implementation Guide', pagePath: '/tagging-implementation' },
   { key: 'page.host_gaps', parentKey: 'collector.infrastructure', nodeType: 'page', label: 'Instrumentation Gaps', pagePath: '/host-gaps' },
   { key: 'page.cloud', parentKey: 'collector.infrastructure', nodeType: 'page', label: 'Cloud Inventory', pagePath: '/cloud' },
   { key: 'page.products', parentKey: 'collector.usage', nodeType: 'page', label: 'Product Usage', pagePath: '/products' },

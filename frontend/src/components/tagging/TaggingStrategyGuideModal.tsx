@@ -1,5 +1,9 @@
 import { useState } from 'react';
 import { toast } from 'sonner';
+import { useQuery } from '@tanstack/react-query';
+import { taggingApi } from '../../services/api';
+import { useOrgAndScanFilters } from '../../hooks/useFilters';
+import type { MaturityAssessmentResult } from '../../types';
 
 interface ContextTag {
   key: string;
@@ -581,21 +585,27 @@ function TagAccumulationCard({ industryName, industryTags, provider }: { industr
 
 function buildConfigExamples(industryTags: ContextTag[], instanceKey: string): { datadogYaml: string; confYaml: string; kubernetesYaml: string } {
   const instanceTag = industryTags.find((t) => t.key === instanceKey);
-  const instanceLine = instanceTag ? `\n  - ${instanceTag.key}:${instanceTag.example}` : '';
+  // Each document nests its tags: list at a different depth (2 spaces at the
+  // host level, 6 spaces under instances[0].tags), so the appended line must
+  // match whichever list it's actually joining — a single shared indent here
+  // previously landed the instance tag as a sibling of `instances:` itself
+  // instead of inside that instance's own tags: list.
+  const datadogInstanceLine = instanceTag ? `\n  - ${instanceTag.key}:${instanceTag.example}` : '';
+  const confInstanceLine = instanceTag ? `\n      - ${instanceTag.key}:${instanceTag.example}` : '';
   const datadogYaml = `# /etc/datadog-agent/datadog.yaml — host-level tags, every check inherits these
-env:prod
+env: prod
 tags:
   - service:checkout
   - version:1.4.2
   - team:payments
-  - datacenter:dc-nyc1${instanceLine}`;
+  - datacenter:dc-nyc1${datadogInstanceLine}`;
   const confYaml = `# /etc/datadog-agent/conf.d/postgres.d/conf.yaml — check-specific, added on top of datadog.yaml
 instances:
   - host: localhost
     port: 5432
     tags:
       - env:prod
-      - service:checkout-db${instanceLine}`;
+      - service:checkout-db${confInstanceLine}`;
   const kubernetesYaml = `# Kubernetes Deployment — unified service tagging via labels + env vars
 metadata:
   labels:
@@ -994,8 +1004,9 @@ function buildPrintableHtml(opts: {
   provider: CloudProvider;
   steps: TimelineStep[];
   resources: ResourceCard[];
+  maturityAssessment?: { industry: string; promptText: string; hasScanData: boolean };
 }): string {
-  const { industryName, industryTags, instanceKey, instanceExample, provider, steps, resources } = opts;
+  const { industryName, industryTags, instanceKey, instanceExample, provider, steps, resources, maturityAssessment } = opts;
   const instanceLabel = humanizeInstanceLabel(instanceKey);
   const cloudTag = PROVIDER_CONFIG[provider].cloudProviderTag;
   const generatedOn = new Date().toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
@@ -1060,6 +1071,12 @@ function buildPrintableHtml(opts: {
       <p>This is your organization's tagging policy. Its tags are woven into the examples below.</p>
       <div>${industryTags.map((t) => `<span class="tag">${escapeHtml(t.key)}</span>`).join(' ')}</div>
     </div>` : '';
+
+  const maturityPromptHtml = maturityAssessment ? `
+    <h2>7. Bits AI tagging maturity assessment prompt</h2>
+    <p>Paste this into Bits AI to score this org's Unified Service Tagging maturity, using the industry-specific tags above.</p>
+    <p class="small muted">Industry: ${escapeHtml(maturityAssessment.industry)}${maturityAssessment.hasScanData ? '' : ' · no Architecture Health Check scan on file yet for this org'}</p>
+    <pre class="code">${escapeHtml(maturityAssessment.promptText)}</pre>` : '';
 
   return `<!DOCTYPE html>
 <html>
@@ -1192,9 +1209,305 @@ function buildPrintableHtml(opts: {
     <p>Cloud tags describe <em>where</em>; env/service/version describe <em>what</em>. The cloud provider gives you the "where" tags for free — you only ever hand-write the "what" tags, and you write them identically whether the host is in AWS or your own datacenter.</p>
   </div>
 
+  ${maturityPromptHtml}
+
   <footer>How Tagging Works — Cloud, Datacenter &amp; Mixed Environments</footer>
 </body>
 </html>`;
+}
+
+// Markdown-safe: escapes pipe characters so tag values/labels containing them
+// (rare, but tag values are free text) don't break table row parsing.
+function escapeMdCell(s: string): string {
+  return s.replace(/\|/g, '\\|');
+}
+
+// A fenced block's opening/closing ``` must sit directly against its content
+// lines (no blank line between fence and code) — this keeps that single-string
+// invariant instead of joining fence + lines with the same '\n\n' used for
+// paragraph spacing elsewhere, which would otherwise leave blank lines inside the block.
+function fence(content: string, lang = ''): string {
+  return `\`\`\`${lang}\n${content}\n\`\`\``;
+}
+
+// Mermaid labels sit inside "..." quotes — escape the one character that
+// would terminate the quote early, and turn newlines into <br/> since mermaid
+// node labels are single-line unless HTML-broken.
+function escapeMermaidLabel(s: string): string {
+  return s.replace(/"/g, '&quot;').replace(/\n/g, '<br/>');
+}
+
+// Same five sources InheritanceWaterfall/SOURCE_SVG_COLOR use on-screen,
+// translated to hex classDefs so the exported diagram reads as the same
+// color language as the app (blue=cloud, violet=agent, amber=datacenter,
+// green=unified, rose=industry) instead of mermaid's default gray boxes.
+const MERMAID_SOURCE_CLASSDEFS = [
+  'classDef cloud fill:#dbeafe,stroke:#3b82f6,color:#1e3a8a,stroke-width:2px;',
+  'classDef agent fill:#ede9fe,stroke:#8b5cf6,color:#4c1d95,stroke-width:2px;',
+  'classDef datacenter fill:#fef3c7,stroke:#f59e0b,color:#78350f,stroke-width:2px;',
+  'classDef unified fill:#dcfce7,stroke:#22c55e,color:#14532d,stroke-width:2px;',
+  'classDef industry fill:#ffe4e6,stroke:#f43f5e,color:#881337,stroke-width:2px;',
+].join('\n');
+
+function layerFlowchartMermaid(title: string, layers: AccumulationLayer[]): string {
+  const nodeLines = layers.map((layer, i) => {
+    const label = [layer.label, ...layer.newTags].map(escapeMermaidLabel).join('<br/>');
+    return `    L${i + 1}["${label}"]:::${layer.source}`;
+  });
+  const edgeLines = layers.slice(1).map((_, i) => `    L${i + 1} --> L${i + 2}`);
+  return [
+    `#### ${title}`,
+    fence(['flowchart TD', ...nodeLines, ...edgeLines, MERMAID_SOURCE_CLASSDEFS].join('\n'), 'mermaid'),
+  ].join('\n\n');
+}
+
+// Mirrors the HTML export's "umbrella" diagram (cloud path + datacenter path
+// merging into one Datadog view) as an actual flowchart instead of a static
+// icon row, since that merge is the single idea this whole guide builds to.
+function unifiedPathMermaid(sharedKeys: string[]): string {
+  const sharedLabel = escapeMermaidLabel(sharedKeys.length ? sharedKeys.join(', ') : 'shared keys');
+  return fence([
+    'flowchart LR',
+    '    cloudPath("☁ Cloud path<br/>auto cloud tags"):::cloud',
+    '    dcPath("🖥 Datacenter path<br/>manually configured tags"):::datacenter',
+    `    unified(["Unified in Datadog<br/>${sharedLabel}"]):::unified`,
+    '    cloudPath --> unified',
+    '    dcPath --> unified',
+    MERMAID_SOURCE_CLASSDEFS,
+  ].join('\n'), 'mermaid');
+}
+
+// GitHub-flavored alert blockquotes (`> [!WARNING]` etc.) only render with
+// color on viewers that specifically support that GFM extension — plenty of
+// Markdown viewers (including VS Code's built-in preview) just show the
+// literal "[!WARNING]" text with no styling. Raw inline-styled HTML is the one
+// thing virtually every Markdown renderer passes through unchanged, so these
+// color cards use the PDF's exact `.pitfall-*`/`.callout-*` hex values instead,
+// guaranteeing the same red/green/rose/violet boxes regardless of viewer.
+const CARD_PALETTE = {
+  red: { bg: '#fdecec', border: '#f2b8b8', text: '#b23636' },
+  green: { bg: '#eaf7ee', border: '#b7e2c4', text: '#2c8a4b' },
+  rose: { bg: '#fbeef1', border: '#eec4cf', text: '#b2325a' },
+  violet: { bg: '#f2ecfb', border: '#d9c8f0', text: '#632ca6' },
+  blue: { bg: '#eef4ff', border: '#b8d0f2', text: '#1d4ed8' },
+  amber: { bg: '#fdf6e8', border: '#f0dfa8', text: '#6b5410' },
+} as const;
+
+// Raw HTML blocks in CommonMark are passed through verbatim — no inline
+// Markdown (backticks, **bold**) gets processed inside them — so card bodies
+// must be built from real HTML tags (<code>, <strong>, <pre>) rather than
+// Markdown syntax, and any user-facing text needs escapeHtml.
+function colorCard(kind: keyof typeof CARD_PALETTE, titleHtml: string, bodyHtml: string): string {
+  const p = CARD_PALETTE[kind];
+  return `<div style="background:${p.bg};border:1px solid ${p.border};border-radius:8px;padding:10px 14px;margin:10px 0;">\n<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.02em;color:${p.text};margin-bottom:6px;">${titleHtml}</div>\n${bodyHtml}\n</div>`;
+}
+
+function htmlPre(content: string): string {
+  return `<pre style="background:#f6f6f9;border:1px solid #e2e2ea;border-radius:6px;padding:8px 10px;font-size:12px;margin:6px 0;overflow-x:auto;"><code>${escapeHtml(content)}</code></pre>`;
+}
+
+function htmlP(content: string): string {
+  return `<div style="font-size:12px;color:#333;">${content}</div>`;
+}
+
+function htmlCode(s: string): string {
+  return `<code style="background:#f2f2f5;padding:1px 4px;border-radius:3px;">${escapeHtml(s)}</code>`;
+}
+
+// Mirrors InheritanceWaterfall's tier stack (WaterfallTier: source/label/tags)
+// as a flowchart — same data buildWaterfall/buildAggregateWaterfall feed the
+// on-screen "One instance, tagged" and "Whole fleet, aggregated" cards.
+function waterfallMermaid(tiers: WaterfallTier[]): string {
+  const nodeLines = tiers.map((tier, i) => {
+    const label = [tier.label, ...tier.tags].map(escapeMermaidLabel).join('<br/>');
+    return `    W${i + 1}["${label}"]:::${tier.source}`;
+  });
+  const edgeLines = tiers.slice(1).map((_, i) => `    W${i + 1} --> W${i + 2}`);
+  return fence(['flowchart TD', ...nodeLines, ...edgeLines, MERMAID_SOURCE_CLASSDEFS].join('\n'), 'mermaid');
+}
+
+// Mirrors EnvUmbrellaSection's fan-out visual (one env:prod canopy over every
+// interrelated service) as a flowchart instead of a static "↓ ↓ ↓ ↓ ↓" row.
+function envUmbrellaFanoutMermaid(): string {
+  return fence([
+    'flowchart TD',
+    '    envprod(["env:prod<br/>one shared umbrella — every interrelated service sits under it"]):::unified',
+    ...ENV_UMBRELLA_SERVICES.map((s, i) => `    svc${i}["service:${s}"]:::agent`),
+    ...ENV_UMBRELLA_SERVICES.map((_, i) => `    envprod --> svc${i}`),
+    MERMAID_SOURCE_CLASSDEFS,
+  ].join('\n'), 'mermaid');
+}
+
+function buildPrintableMarkdown(opts: {
+  industryName?: string;
+  industryTags: ContextTag[];
+  instanceKey: string;
+  instanceExample: string;
+  provider: CloudProvider;
+  steps: TimelineStep[];
+  resources: ResourceCard[];
+  tiers: WaterfallTier[];
+  aggregateTiers: WaterfallTier[];
+  maturityAssessment?: { industry: string; promptText: string; hasScanData: boolean };
+}): string {
+  const { industryName, industryTags, instanceKey, instanceExample, provider, steps, resources, tiers, aggregateTiers, maturityAssessment } = opts;
+  const instanceLabel = humanizeInstanceLabel(instanceKey);
+  const cloudTag = PROVIDER_CONFIG[provider].cloudProviderTag;
+  const generatedOn = new Date().toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
+
+  const industryBannerMd = industryName && industryTags.length > 0
+    ? colorCard('rose', `Showing examples for: ${escapeHtml(industryName)}`, [
+        htmlP("This is your organization's tagging policy. Its tags are woven into the examples below."),
+        `<div>${industryTags.map((t) => htmlCode(t.key)).join(' ')}</div>`,
+      ].join('\n'))
+    : '';
+
+  const stepsMd = steps.map((s) => [
+    `#### Step ${s.step}: ${s.title}`,
+    `_${s.when}_`,
+    fence(s.example),
+    s.description,
+    s.namingNote ? `> ${s.namingNote}` : '',
+  ].filter(Boolean).join('\n\n')).join('\n\n');
+
+  const cloudLayers = buildTrackLayers('cloud', industryName, industryTags, undefined, provider);
+  const dcBareMetalLayers = buildTrackLayers('datacenter', industryName, industryTags, 'bare-metal', provider);
+  const dcHybridLayers = buildTrackLayers('datacenter', industryName, industryTags, 'hybrid-cloud', provider);
+
+  const { datadogYaml, confYaml, kubernetesYaml } = buildConfigExamples(industryTags, instanceKey);
+  const configExamplesMd = [
+    '#### How to actually set these tags',
+    '**Agent host tags — datadog.yaml**',
+    fence(datadogYaml, 'yaml'),
+    '**Integration check tags — conf.yaml**',
+    fence(confYaml, 'yaml'),
+    '**Kubernetes — labels + env vars**',
+    fence(kubernetesYaml, 'yaml'),
+  ].join('\n\n');
+
+  const equivalentsRows = KEY_EQUIVALENTS.map((k) =>
+    `| \`${k.ddKey}\` | ${escapeMdCell(k.aws)} | ${escapeMdCell(k.azure)} | ${escapeMdCell(k.gcp)} | ${escapeMdCell(k.datacenterNote)} |`
+  ).join('\n');
+
+  const resourcesMd = resources.map((r) =>
+    `- **${r.category} — ${r.name}**: ${r.tags.map((t) => `\`${t.tag}\`${t.required ? ' ✅' : ''}`).join(', ')}`
+  ).join('\n');
+
+  const maturityMd = maturityAssessment ? [
+    '## 8. Bits AI tagging maturity assessment prompt',
+    'Paste this into Bits AI to score this org\'s Unified Service Tagging maturity, using the industry-specific tags above.',
+    colorCard(
+      maturityAssessment.hasScanData ? 'blue' : 'amber',
+      maturityAssessment.hasScanData ? 'Note' : 'Heads up',
+      htmlP(`Industry: ${escapeHtml(maturityAssessment.industry)}${maturityAssessment.hasScanData ? '' : ' · no Architecture Health Check scan on file yet for this org'}`),
+    ),
+    fence(maturityAssessment.promptText),
+  ].join('\n\n') : '';
+
+  const cloudKeysSet = new Set(cloudLayers.flatMap((l) => l.newTags).map(keyOf));
+  const dcKeysSet = new Set(dcHybridLayers.flatMap((l) => l.newTags).map(keyOf));
+  const sharedKeysList = [...cloudKeysSet].filter((k) => dcKeysSet.has(k));
+  const cloudOnlyKeys = [...cloudKeysSet].filter((k) => !dcKeysSet.has(k));
+  const dcOnlyKeys = [...dcKeysSet].filter((k) => !cloudKeysSet.has(k));
+
+  const legendMd = '**Legend:** ✅ required · plain = suggested\n\n' +
+    `<span style="color:#3b82f6">■</span> cloud &nbsp; <span style="color:#8b5cf6">■</span> agent &nbsp; <span style="color:#f59e0b">■</span> datacenter &nbsp; <span style="color:#22c55e">■</span> unified &nbsp; <span style="color:#f43f5e">■</span> industry template`;
+
+  const mixBreakdownMd = [
+    '#### Unified in Datadog — mix mode',
+    `**Shared keys (query across both):** ${sharedKeysList.length ? sharedKeysList.map((k) => `\`${k}\``).join(', ') : '—'}`,
+    cloudOnlyKeys.length ? `**Cloud-only:** ${cloudOnlyKeys.map((k) => `\`${k}\``).join(', ')}` : '',
+    dcOnlyKeys.length ? `**Datacenter-only:** ${dcOnlyKeys.map((k) => `\`${k}\``).join(', ')}` : '',
+  ].filter(Boolean).join('\n\n');
+
+  const waterfallsMd = [
+    '## 3. Tag inheritance, visualized',
+    '#### One instance, tagged',
+    '_Follow a single host from raw cloud tags down to its final merged tag set._',
+    waterfallMermaid(tiers),
+    '#### Whole fleet, aggregated in Datadog',
+    `_Same tiers, same order — but this is what Tag Explorer shows once every ${instanceLabel} is reporting: one key, many values._`,
+    waterfallMermaid(aggregateTiers),
+  ].join('\n\n');
+
+  return [
+    '# How Tagging Works: Cloud, Datacenter & Mixed Environments',
+    'A reference guide to Datadog tagging for engineers new to the concept.',
+    `_Generated ${generatedOn}${industryName ? ` · Template: ${industryName}` : ''}_`,
+    industryBannerMd,
+    '## 1. The #1 beginner mistake: one tag trying to answer two questions',
+    `Say your **Checkout** service runs at every ${instanceLabel}, and you need to know which ${instanceLabel} each instance belongs to. The natural instinct is to squeeze both facts — "which app" and "which ${instanceLabel}" — into one made-up value. Don't.`,
+    colorCard('red', "✗ Don't: mash two facts into one value", [
+      htmlPre([`${instanceKey}:${instanceExample}_${cloudTag}`, `application:${instanceExample}_checkout`].join('\n')),
+      htmlP(`Each value secretly encodes two answers at once. There is no single tag that just means "Checkout" — so you can never ask "show me every ${instanceLabel} running Checkout" in one query. Every new ${instanceLabel} means inventing yet another one-off string.`),
+    ].join('\n')),
+    colorCard('green', '✓ Do: one key per question', [
+      htmlPre(['service:checkout', `${instanceKey}:${instanceExample}`, `cloud_provider:${cloudTag} (already automatic)`].join('\n')),
+      htmlP(`"Which app?" and "which ${instanceLabel}?" are two different questions, so they get two different keys. Query ${htmlCode('service:checkout')} for everything, or ${htmlCode(`${instanceKey}:${instanceExample}`)} for one ${instanceLabel}, or both together for one exact instance. A new ${instanceLabel} is just one new value on ${htmlCode(instanceKey)} — nothing else to invent or maintain.`),
+    ].join('\n')),
+    '## 2. env is an umbrella, not a per-team label',
+    'A related mistake, specific to `env`: folding the team or service into the environment value itself — `env:payments_prod`, `env:nonprod-utilities`. It feels more precise, but it quietly breaks the one job env has: letting every interrelated service be filtered, alerted on, and correlated together as "production," regardless of which team owns it.',
+    colorCard('red', "✗ Don't: one env value per team", [
+      htmlPre(['env:payments_prod', 'env:checkout-prod', 'env:nonprod-utilities'].join('\n')),
+      htmlP(`Now no single value means "production." Every dashboard filter, monitor, and notification rule that assumes one ${htmlCode('env:prod')} has to special-case each team's spelling — or, more often, silently misses them.`),
+    ].join('\n')),
+    colorCard('green', '✓ Do: a small shared vocabulary', [
+      htmlPre(['env:prod', 'env:staging', 'env:dev'].join('\n')),
+      htmlP(`Every team uses the same handful of values. "Which team, which service" is a separate question, answered by ${htmlCode('service')} and ${htmlCode('team')} — not by env.`),
+    ].join('\n')),
+    envUmbrellaFanoutMermaid(),
+    '**Why this umbrella matters:**',
+    '| Impact area | Why a shared env matters |\n|---|---|\n' +
+      '| 📊 **Dashboards** | One `$env` template variable drives every dashboard org-wide. Fragment env and a "Production Overview" dashboard silently excludes any team that spelled it differently. |\n' +
+      '| 🔔 **Monitors & notifications** | One monitor scoped to `env:prod`, and one on-call escalation policy, can cover every service. Fragmented env means either N near-duplicate monitors, or alerts that never fire. |\n' +
+      '| 🤖 **Bits AI Root Cause** | Root cause analysis correlates traces, logs, and deploys across every service sharing an environment to find blast radius. A private env value per team turns each team into an island Bits AI can\'t cross. |',
+    waterfallsMd,
+    '## 4. Rollout timeline',
+    stepsMd,
+    '## 5. Tags accumulated at each layer',
+    legendMd,
+    unifiedPathMermaid(sharedKeysList),
+    layerFlowchartMermaid('Cloud-hosted resource', cloudLayers),
+    layerFlowchartMermaid('Datacenter — bare-metal (no cloud vendor)', dcBareMetalLayers),
+    layerFlowchartMermaid(`Datacenter — hybrid cloud hardware (e.g. ${PROVIDER_CONFIG[provider].hybridHardwareName})`, dcHybridLayers),
+    mixBreakdownMd,
+    configExamplesMd,
+    '## 6. Tag name equivalents',
+    'Cloud providers don\'t standardize tag key spelling. On a datacenter host there\'s no import step at all — write the Datadog-canonical key directly and it matches by construction.',
+    `| Datadog key | AWS (typical) | Azure (typical) | GCP (typical) | Datacenter / on-prem |\n|---|---|---|---|---|\n${equivalentsRows}`,
+    '## 7. Apps & resources instrumented — example tag sets',
+    resourcesMd,
+    colorCard('violet', 'Key takeaway', htmlP('Cloud tags describe <em>where</em>; env/service/version describe <em>what</em>. The cloud provider gives you the "where" tags for free — you only ever hand-write the "what" tags, and you write them identically whether the host is in AWS or your own datacenter.')),
+    maturityMd,
+  ].filter(Boolean).join('\n\n') + '\n';
+}
+
+function downloadTextFile(filename: string, content: string, mimeType: string) {
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function exportMarkdown(opts: {
+  industryName?: string;
+  industryTags: ContextTag[];
+  instanceKey: string;
+  instanceExample: string;
+  provider: CloudProvider;
+  steps: TimelineStep[];
+  resources: ResourceCard[];
+  tiers: WaterfallTier[];
+  aggregateTiers: WaterfallTier[];
+  maturityAssessment?: { industry: string; promptText: string; hasScanData: boolean };
+}) {
+  const markdown = buildPrintableMarkdown(opts);
+  downloadTextFile('how-tagging-works.md', markdown, 'text/markdown');
 }
 
 function exportPdf(opts: {
@@ -1205,6 +1518,7 @@ function exportPdf(opts: {
   provider: CloudProvider;
   steps: TimelineStep[];
   resources: ResourceCard[];
+  maturityAssessment?: { industry: string; promptText: string; hasScanData: boolean };
 }) {
   const html = buildPrintableHtml(opts);
   // Passing 'noopener' here would make window.open() return null in most
@@ -1224,6 +1538,55 @@ function exportPdf(opts: {
   }, 300);
 }
 
+function MaturityAssessmentSection({
+  hasOrgSelected, data, isLoading, isError,
+}: {
+  hasOrgSelected: boolean;
+  data?: MaturityAssessmentResult;
+  isLoading: boolean;
+  isError: boolean;
+}) {
+  function copyPrompt() {
+    if (!data) return;
+    navigator.clipboard.writeText(data.promptText)
+      .then(() => toast.success('Prompt copied — paste it into Bits AI'))
+      .catch(() => toast.error('Failed to copy to clipboard'));
+  }
+
+  return (
+    <section className="mt-6">
+      <h3 className="text-sm font-semibold text-ink mb-1">Ready to assess your maturity? Ask Bits AI</h3>
+      <p className="text-xs text-ink-muted mb-3">
+        Generate a ready-to-run prompt that scores this org's Unified Service Tagging maturity, using the
+        industry tags above, and hand it to Bits AI directly.
+      </p>
+
+      {!hasOrgSelected ? (
+        <p className="text-xs text-ink-faint">Select an organization to generate this prompt.</p>
+      ) : isLoading ? (
+        <p className="text-xs text-ink-faint">Generating prompt…</p>
+      ) : isError || !data ? (
+        <p className="text-xs text-ink-faint">Couldn't generate a maturity assessment prompt for this org.</p>
+      ) : (
+        <div className="space-y-2">
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <span className="text-xs text-ink-faint">
+              Industry: <span className="text-ink-muted font-medium">{data.industry}</span>
+              {!data.hasScanData && ' · no Architecture Health Check scan on file yet for this org'}
+            </span>
+            <button className="btn-secondary text-xs px-3 py-1.5" onClick={copyPrompt}>
+              Copy for Bits AI
+            </button>
+          </div>
+          <pre className="text-xs text-ink-muted bg-surface-sunken border border-border rounded-lg p-3 overflow-x-auto whitespace-pre-wrap max-h-64 overflow-y-auto">
+            {data.promptText}
+          </pre>
+        </div>
+      )}
+    </section>
+  );
+}
+
 export default function TaggingStrategyGuideModal({
   onClose, industryName, industryTags = [],
 }: {
@@ -1240,6 +1603,18 @@ export default function TaggingStrategyGuideModal({
   const aggregateTiers = buildAggregateWaterfall(industryName, industryTags, instanceKey, instanceExample, provider);
   const resources = buildResourceCards(industryTags, instanceKey, provider);
 
+  const { selectedOrgId, selectedScanId } = useOrgAndScanFilters();
+  const { data: maturityAssessment, isLoading: maturityLoading, isError: maturityError } = useQuery({
+    queryKey: ['tagging-maturity-assessment', selectedOrgId, selectedScanId],
+    queryFn: () => taggingApi.maturityAssessment(selectedOrgId, selectedScanId || undefined),
+    enabled: Boolean(selectedOrgId),
+  });
+  const maturityAssessmentForExport = maturityAssessment && {
+    industry: maturityAssessment.industry,
+    promptText: maturityAssessment.promptText,
+    hasScanData: maturityAssessment.hasScanData,
+  };
+
   return (
     <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-6" onClick={onClose}>
       <div
@@ -1251,7 +1626,19 @@ export default function TaggingStrategyGuideModal({
             <h2 className="text-lg font-bold text-ink">How tagging works: cloud + datacenter + mixed environments</h2>
             <div className="flex items-center gap-2">
               <button
-                onClick={() => exportPdf({ industryName, industryTags, instanceKey, instanceExample, provider, steps, resources })}
+                onClick={() => exportMarkdown({
+                  industryName, industryTags, instanceKey, instanceExample, provider, steps, resources, tiers, aggregateTiers,
+                  maturityAssessment: maturityAssessmentForExport,
+                })}
+                className="btn-secondary text-xs"
+              >
+                ⬇ Export Markdown
+              </button>
+              <button
+                onClick={() => exportPdf({
+                  industryName, industryTags, instanceKey, instanceExample, provider, steps, resources,
+                  maturityAssessment: maturityAssessmentForExport,
+                })}
                 className="btn-secondary text-xs"
               >
                 🖨 Export PDF
@@ -1362,6 +1749,13 @@ export default function TaggingStrategyGuideModal({
               environment scoring well against the templates below.
             </p>
           </div>
+
+          <MaturityAssessmentSection
+            hasOrgSelected={Boolean(selectedOrgId)}
+            data={maturityAssessment}
+            isLoading={maturityLoading}
+            isError={maturityError}
+          />
         </div>
       </div>
     </div>

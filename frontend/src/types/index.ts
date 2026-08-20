@@ -461,35 +461,12 @@ export interface OrgTagTemplateSelection {
   updatedAt: string;
 }
 
-// ─── Tagging implementation guide ──────────────────────────────────────────────
-export type TaggingMode = 'hard' | 'soft';
-export type HardMechanism = 'terraform' | 'ansible' | 'scom' | 'fleet_automation';
-
-export interface EnrichedGapResource {
-  type: string;
-  id: string;
-  name: string;
-  cloudProvider: string | null;
-}
-
-export interface GapSummaryEntry {
-  tagKey: string;
-  ruleId: string;
-  title: string;
-  affectedCount: number;
-  totalCount: number;
-  percentage: number;
-  bestPracticeHow: string;
-  sampleResources: EnrichedGapResource[];
-}
-
-export interface ImplementationGuideResult {
-  mode: TaggingMode;
-  mechanism?: HardMechanism;
-  gaps: GapSummaryEntry[];
-  mechanismWarning: string | null;
+export interface MaturityAssessmentResult {
+  industry: string;
+  templateId: string;
+  suggestedTagKeys: string[];
+  hasScanData: boolean;
   promptText: string;
-  staticReference: TagPolicyLayer[];
 }
 
 // ─── Host instrumentation blind-spot analysis ─────────────────────────────────

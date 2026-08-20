@@ -60,7 +60,6 @@ export const NAV_ITEMS: NavItem[] = [
   { path: '/tag-mapping', label: 'Tag Normalization', icon: '⇄', hub: 'tagging', featureKey: 'page.tag_mapping' },
   { path: '/cloud-tags', label: 'Cloud Alignment', icon: '☁', hub: 'tagging', featureKey: 'page.cloud_tags' },
   { path: '/tag-governance', label: 'Multi-Org Governance', icon: '⊛', hub: 'tagging', featureKey: 'page.tag_governance' },
-  { path: '/tagging-implementation', label: 'Implementation Guide', icon: '🛠', hub: 'tagging', keywords: ['bits ai', 'terraform', 'ansible', 'scom', 'fleet automation', 'hard tagging', 'soft tagging'], featureKey: 'page.tagging_implementation' },
 
   { path: '/chat', label: 'AI Chat Advisor', icon: '💬', hub: 'ai', featureKey: 'page.chat' },
   { path: '/ai', label: 'AI Assessment', icon: '✨', hub: 'ai' },

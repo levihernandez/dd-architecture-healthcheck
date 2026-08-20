@@ -22,8 +22,7 @@ const PROMPT_REGISTRY: Array<{ key: string; label: string; fileName: string }> =
   { key: 'openai-system', label: 'OpenAI System Addendum', fileName: 'openai-system.md' },
   { key: 'anthropic-system', label: 'Anthropic System Addendum', fileName: 'anthropic-system.md' },
   { key: 'ollama-system', label: 'Ollama System Addendum', fileName: 'ollama-system.md' },
-  { key: 'tagging-impl-hard', label: 'Tagging Implementation Guide — Hard Tagging', fileName: 'tagging-impl-hard.md' },
-  { key: 'tagging-impl-soft', label: 'Tagging Implementation Guide — Soft Tagging', fileName: 'tagging-impl-soft.md' },
+  { key: 'tagging-maturity-assessment', label: 'Tagging Maturity Assessment', fileName: 'tagging-maturity-assessment.md' },
 ];
 
 function getPromptsDir(): string {

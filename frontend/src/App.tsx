@@ -23,7 +23,6 @@ import TagMappingDashboard from './pages/TagMappingDashboard';
 import CloudTagComparison from './pages/CloudTagComparison';
 import IndustryTemplates from './pages/IndustryTemplates';
 import TagGovernance from './pages/TagGovernance';
-import TaggingImplementationGuide from './pages/TaggingImplementationGuide';
 import AIChatAssistant from './pages/AIChatAssistant';
 import AISettings from './pages/AISettings';
 import Analytics from './pages/Analytics';
@@ -64,7 +63,6 @@ export default function App() {
           <Route path="cloud-tags" element={<FeatureGate featureKey="page.cloud_tags"><CloudTagComparison /></FeatureGate>} />
           <Route path="tag-templates" element={<IndustryTemplates />} />
           <Route path="tag-governance" element={<FeatureGate featureKey="page.tag_governance"><TagGovernance /></FeatureGate>} />
-          <Route path="tagging-implementation" element={<FeatureGate featureKey="page.tagging_implementation"><TaggingImplementationGuide /></FeatureGate>} />
           <Route path="org-context" element={<OrgContext />} />
           <Route path="usage" element={<FeatureGate featureKey="page.usage"><Usage /></FeatureGate>} />
           <Route path="chat" element={<FeatureGate featureKey="page.chat"><AIChatAssistant /></FeatureGate>} />

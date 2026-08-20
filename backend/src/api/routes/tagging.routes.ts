@@ -10,7 +10,7 @@ import {
 import { analyzeMultiOrgGovernance } from '../../tagging/governance';
 import { analyzeCostReadiness } from '../../tagging/cost-readiness';
 import { TAG_DICTIONARY, lookupTag } from '../../tagging/tag-dictionary';
-import { buildImplementationGuide, type TaggingMode, type HardMechanism } from '../../tagging/implementation-guide';
+import { buildMaturityAssessmentPrompt } from '../../tagging/maturity-assessment';
 
 const router = Router();
 
@@ -131,20 +131,14 @@ router.get('/policy-resources', (_req, res) => {
   res.json(TAG_POLICY_RESOURCES);
 });
 
-// GET /api/tagging/implementation-guide?orgId=&scanRunId=&mode=hard|soft&mechanism=terraform|ansible|scom|fleet_automation
-const HARD_MECHANISMS: HardMechanism[] = ['terraform', 'ansible', 'scom', 'fleet_automation'];
-router.get('/implementation-guide', (req, res, next) => {
+// GET /api/tagging/maturity-assessment?orgId=&scanRunId= — scanRunId optional; generates a
+// Bits AI-ready UST maturity assessment prompt, industry and suggested tags auto-filled
+// from this org's selected/detected industry template.
+router.get('/maturity-assessment', (req, res, next) => {
   try {
     const { orgId, scanRunId } = req2ids(req as Parameters<typeof req2ids>[0]);
-    const mode = req.query.mode as TaggingMode | undefined;
-    const mechanism = req.query.mechanism as HardMechanism | undefined;
     if (!orgId) throw new AppError('orgId required', 400);
-    if (!scanRunId) throw new AppError('scanRunId required', 400);
-    if (mode !== 'hard' && mode !== 'soft') throw new AppError('mode must be "hard" or "soft"', 400);
-    if (mode === 'hard' && (!mechanism || !HARD_MECHANISMS.includes(mechanism))) {
-      throw new AppError(`mechanism required for hard mode, one of: ${HARD_MECHANISMS.join(', ')}`, 400);
-    }
-    res.json(buildImplementationGuide({ orgId, scanRunId, mode, mechanism: mode === 'hard' ? mechanism : undefined }));
+    res.json(buildMaturityAssessmentPrompt({ orgId, scanRunId }));
   } catch (err) { next(err); }
 });
 
