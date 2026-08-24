@@ -113,7 +113,75 @@ const GUIDE_STEPS: GuideStep[] = [
   },
 ];
 
-function GettingStartedGuide() {
+// Every step before the org exists is already satisfied by the time this guide
+// renders at all (Overview shows a dedicated empty state, not this page, until
+// an org is connected) — so the only real fork is "no scored data yet" vs.
+// "there's a scorecard to act on."
+function stepsThatMatterNow(hasCompletedScan: boolean): number[] {
+  return hasCompletedScan ? [4, 5, 6] : [2, 3];
+}
+
+function stepsAlreadyDone(hasCompletedScan: boolean): number[] {
+  return hasCompletedScan ? [1, 2, 3] : [1];
+}
+
+function GuideStepCard({
+  step, expanded, done, onToggle, onNavigate,
+}: {
+  step: GuideStep;
+  expanded: boolean;
+  done: boolean;
+  onToggle: () => void;
+  onNavigate: (path: string) => void;
+}) {
+  return (
+    <div className={clsx('rounded-lg border transition-colors', done ? 'border-border bg-surface-sunken/40' : 'border-border')}>
+      <button onClick={onToggle} className="w-full flex items-start gap-3 text-left px-3 py-2.5">
+        <div
+          className={clsx(
+            'w-6 h-6 rounded-full border-2 flex items-center justify-center text-xs font-bold shrink-0 mt-0.5',
+            done ? 'border-green-500/50 text-green-500 bg-green-500/10' : 'border-dd-purple/40 text-dd-purple-dark'
+          )}
+        >
+          {done ? '✓' : step.n}
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <h3 className={clsx('text-sm font-semibold', done ? 'text-ink-muted' : 'text-ink')}>{step.title}</h3>
+            <div className="flex items-center gap-2 shrink-0">
+              <span className="text-[10px] uppercase tracking-wide font-medium text-dd-purple-dark bg-dd-purple/10 border border-dd-purple/20 rounded px-1.5 py-0.5">
+                {step.hub}
+              </span>
+              <span className={clsx('text-ink-faint transition-transform text-xs', expanded && '-rotate-90')}>▾</span>
+            </div>
+          </div>
+          {!expanded && <p className="text-xs text-ink-faint mt-0.5 truncate">{step.why}</p>}
+        </div>
+      </button>
+
+      {expanded && (
+        <div className="px-3 pb-3 pl-12 -mt-1">
+          <p className="text-xs text-ink-muted mt-1">
+            <span className="font-medium text-ink-faint">Where: </span>{step.find}
+          </p>
+          <p className="text-xs text-ink-muted mt-1">
+            <span className="font-medium text-ink-faint">Why: </span>{step.why}
+          </p>
+          {step.path && (
+            <button
+              onClick={() => onNavigate(step.path!)}
+              className="text-xs text-dd-purple hover:text-dd-purple-dark mt-1.5 font-medium"
+            >
+              Go to {step.linkLabel} →
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function GettingStartedGuide({ hasCompletedScan }: { hasCompletedScan: boolean }) {
   const navigate = useNavigate();
   const [collapsed, setCollapsed] = useState(() => {
     try {
@@ -122,8 +190,12 @@ function GettingStartedGuide() {
       return false;
     }
   });
+  // Steps the user has explicitly clicked open/shut override the computed
+  // default below, so expanding a "later" step (or collapsing a "current" one)
+  // sticks even as hasCompletedScan changes underneath it during this visit.
+  const [manualExpand, setManualExpand] = useState<Record<number, boolean>>({});
 
-  function toggle() {
+  function toggleGuide() {
     setCollapsed((prev) => {
       const next = !prev;
       try {
@@ -135,48 +207,41 @@ function GettingStartedGuide() {
     });
   }
 
+  const currentStepNumbers = stepsThatMatterNow(hasCompletedScan);
+  const doneStepNumbers = stepsAlreadyDone(hasCompletedScan);
+
+  function isExpanded(n: number): boolean {
+    return manualExpand[n] ?? currentStepNumbers.includes(n);
+  }
+  function toggleStep(n: number) {
+    setManualExpand((prev) => ({ ...prev, [n]: !isExpanded(n) }));
+  }
+
   return (
     <div className="card border-dd-purple/30 bg-dd-purple/5">
-      <button onClick={toggle} className="w-full flex items-center justify-between gap-2 text-left">
+      <button onClick={toggleGuide} className="w-full flex items-center justify-between gap-2 text-left">
         <div>
           <h2 className="text-sm font-semibold text-ink">🧭 How to use this tool</h2>
           <p className="text-xs text-ink-muted mt-0.5">
-            The intended path through this app, step by step — where each thing lives and why it matters.
+            {hasCompletedScan
+              ? "The intended path through this app — the next steps to act on your scan are expanded below."
+              : 'The intended path through this app — the setup steps to get your first scored scan are expanded below.'}
           </p>
         </div>
         <span className={clsx('text-ink-faint transition-transform text-sm shrink-0', collapsed && '-rotate-90')}>▾</span>
       </button>
 
       {!collapsed && (
-        <div className="mt-4 space-y-3">
+        <div className="mt-4 space-y-2">
           {GUIDE_STEPS.map((s) => (
-            <div key={s.n} className="flex gap-3">
-              <div className="w-6 h-6 rounded-full border-2 border-dd-purple/40 text-dd-purple-dark flex items-center justify-center text-xs font-bold shrink-0 mt-0.5">
-                {s.n}
-              </div>
-              <div className="min-w-0 flex-1 pb-3 border-b border-border last:border-b-0 last:pb-0">
-                <div className="flex items-center justify-between gap-2 flex-wrap">
-                  <h3 className="text-sm font-semibold text-ink">{s.title}</h3>
-                  <span className="text-[10px] uppercase tracking-wide font-medium text-dd-purple-dark bg-dd-purple/10 border border-dd-purple/20 rounded px-1.5 py-0.5 shrink-0">
-                    {s.hub}
-                  </span>
-                </div>
-                <p className="text-xs text-ink-muted mt-1">
-                  <span className="font-medium text-ink-faint">Where: </span>{s.find}
-                </p>
-                <p className="text-xs text-ink-muted mt-1">
-                  <span className="font-medium text-ink-faint">Why: </span>{s.why}
-                </p>
-                {s.path && (
-                  <button
-                    onClick={() => navigate(s.path!)}
-                    className="text-xs text-dd-purple hover:text-dd-purple-dark mt-1.5 font-medium"
-                  >
-                    Go to {s.linkLabel} →
-                  </button>
-                )}
-              </div>
-            </div>
+            <GuideStepCard
+              key={s.n}
+              step={s}
+              expanded={isExpanded(s.n)}
+              done={doneStepNumbers.includes(s.n)}
+              onToggle={() => toggleStep(s.n)}
+              onNavigate={navigate}
+            />
           ))}
         </div>
       )}
@@ -284,6 +349,7 @@ export default function Overview() {
     );
   }
 
+  const hasCompletedScan = selectedOrg ? Boolean(scorecard) : overview.some((o) => o.scorecard);
   const scoredOrgs = overview.filter((o) => o.scorecard);
   const avgScore = scoredOrgs.length
     ? Math.round(scoredOrgs.reduce((sum, o) => sum + o.scorecard!.overallScore, 0) / scoredOrgs.length)
@@ -321,7 +387,7 @@ export default function Overview() {
       />
 
       <SectionGate featureKey="section.overview.getting_started">
-        <GettingStartedGuide />
+        <GettingStartedGuide hasCompletedScan={hasCompletedScan} />
       </SectionGate>
 
       {/* Org selector */}
