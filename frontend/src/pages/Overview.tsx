@@ -19,6 +19,171 @@ import type { Org, ScanRun, OrgScorecard } from '../types';
 
 type OrgOverview = Org & { scorecard: OrgScorecard | null };
 
+const GUIDE_COLLAPSED_KEY = 'dd-hc:overview-guide-collapsed';
+
+interface GuideStep {
+  n: number;
+  title: string;
+  hub: string;
+  path?: string;
+  linkLabel?: string;
+  find: string;
+  why: string;
+}
+
+const GUIDE_STEPS: GuideStep[] = [
+  {
+    n: 1,
+    title: 'Connect an organization',
+    hub: 'Organizations',
+    path: '/orgs',
+    linkLabel: 'Org Connections',
+    find: 'Sidebar → Organizations → Org Connections. Paste a read-only API key + Application key for the Datadog org you want to audit.',
+    why: 'Every other page in this app is empty until an org exists — this is the only step nothing else can substitute for.',
+  },
+  {
+    n: 2,
+    title: 'Pick an industry template (optional)',
+    hub: 'Organizations',
+    path: '/tag-templates',
+    linkLabel: 'Industry Templates',
+    find: 'Sidebar → Organizations → Industry Templates. Choose the closest match (e.g. E-commerce, Healthcare, Cruise Lines) or stick with the generic baseline.',
+    why: "Sets which tags beyond env/service/version this org gets scored against, and feeds the industry-specific tags into the Bits AI prompts in step 7.",
+  },
+  {
+    n: 3,
+    title: 'Run a scan',
+    hub: 'Organizations',
+    path: '/scans',
+    linkLabel: 'Scan Runs',
+    find: 'The "▶ Run Scan" button right here on Overview (once an org is selected above), or Sidebar → Organizations → Scan Runs for history.',
+    why: 'The 10 read-only collectors populate every inventory count, finding, and score in this app — nothing below this point has data before a scan completes.',
+  },
+  {
+    n: 4,
+    title: 'Read the Scorecard',
+    hub: 'Home',
+    find: 'Right here on Overview, once an org with a completed scan is selected — the gauge plus 9 weighted category scores.',
+    why: 'One number tells you if things are fine; the category breakdown tells you where to look first. Click any category to jump straight to its page.',
+  },
+  {
+    n: 5,
+    title: 'Drill into Inventory & Health Checks',
+    hub: 'Inventory · Health Checks',
+    path: '/inventory',
+    linkLabel: 'Inventory Explorer',
+    find: 'Sidebar → Inventory (raw hosts/services/dashboards counts) and Sidebar → Health Checks (Monitors, Dashboards, Logs, Synthetics, Governance — one page per category).',
+    why: 'The scorecard tells you *that* something is wrong; these pages show *which specific resources* and *what exactly* needs fixing, with evidence.',
+  },
+  {
+    n: 6,
+    title: 'Go deep on tagging',
+    hub: 'Tagging Intelligence',
+    path: '/tagging-scorecard',
+    linkLabel: 'Unified Tagging',
+    find: 'Sidebar → Tagging Intelligence → Unified Tagging, Tag Explorer, Tag Normalization, Cloud Alignment, Multi-Org Governance.',
+    why: 'Unified Service Tagging is weighted highest (30%) in the scorecard and is the category most orgs get wrong first — it has its own hub because of how much leverage fixing it has.',
+  },
+  {
+    n: 7,
+    title: 'Get AI-assisted analysis',
+    hub: 'AI & Analysis',
+    path: '/ai',
+    linkLabel: 'AI Assessment',
+    find: 'Sidebar → AI & Analysis → AI Assessment (executive summary), AI Chat Advisor (ask anything about this org), Recommendations (prioritized punch list).',
+    why: 'Turns raw findings and percentages into prose and priority a non-engineer stakeholder can actually read and act on.',
+  },
+  {
+    n: 8,
+    title: 'Turn advice into action with Bits AI',
+    hub: 'Organizations',
+    path: '/tag-templates',
+    linkLabel: 'How tagging works',
+    find: 'Industry Templates page → "📚 How tagging works" → scroll to the bottom for "Ready to assess your maturity?" and "Ready to fix it?" — copy either prompt into Bits AI.',
+    why: 'This app is read-only and never writes to your org. These prompts hand execution to Bits AI, which already runs with your org\'s real permissions, so advice actually gets applied.',
+  },
+  {
+    n: 9,
+    title: 'Export and re-scan to track progress',
+    hub: 'More · Organizations',
+    path: '/export',
+    linkLabel: 'Export Center',
+    find: 'Sidebar → More → Export Center to hand off a report (JSON/CSV/Markdown/PDF); Sidebar → Organizations → Scan Comparison after a later scan to see the trend.',
+    why: "Closes the loop — proves whether the fixes from steps 6-8 actually moved the score, instead of just feeling like progress.",
+  },
+];
+
+function GettingStartedGuide() {
+  const navigate = useNavigate();
+  const [collapsed, setCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem(GUIDE_COLLAPSED_KEY) === '1';
+    } catch {
+      return false;
+    }
+  });
+
+  function toggle() {
+    setCollapsed((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem(GUIDE_COLLAPSED_KEY, next ? '1' : '0');
+      } catch {
+        // ignore storage failures (private browsing, quota, etc.)
+      }
+      return next;
+    });
+  }
+
+  return (
+    <div className="card border-dd-purple/30 bg-dd-purple/5">
+      <button onClick={toggle} className="w-full flex items-center justify-between gap-2 text-left">
+        <div>
+          <h2 className="text-sm font-semibold text-ink">🧭 How to use this tool</h2>
+          <p className="text-xs text-ink-muted mt-0.5">
+            The intended path through this app, step by step — where each thing lives and why it matters.
+          </p>
+        </div>
+        <span className={clsx('text-ink-faint transition-transform text-sm shrink-0', collapsed && '-rotate-90')}>▾</span>
+      </button>
+
+      {!collapsed && (
+        <div className="mt-4 space-y-3">
+          {GUIDE_STEPS.map((s) => (
+            <div key={s.n} className="flex gap-3">
+              <div className="w-6 h-6 rounded-full border-2 border-dd-purple/40 text-dd-purple-dark flex items-center justify-center text-xs font-bold shrink-0 mt-0.5">
+                {s.n}
+              </div>
+              <div className="min-w-0 flex-1 pb-3 border-b border-border last:border-b-0 last:pb-0">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <h3 className="text-sm font-semibold text-ink">{s.title}</h3>
+                  <span className="text-[10px] uppercase tracking-wide font-medium text-dd-purple-dark bg-dd-purple/10 border border-dd-purple/20 rounded px-1.5 py-0.5 shrink-0">
+                    {s.hub}
+                  </span>
+                </div>
+                <p className="text-xs text-ink-muted mt-1">
+                  <span className="font-medium text-ink-faint">Where: </span>{s.find}
+                </p>
+                <p className="text-xs text-ink-muted mt-1">
+                  <span className="font-medium text-ink-faint">Why: </span>{s.why}
+                </p>
+                {s.path && (
+                  <button
+                    onClick={() => navigate(s.path!)}
+                    className="text-xs text-dd-purple hover:text-dd-purple-dark mt-1.5 font-medium"
+                  >
+                    Go to {s.linkLabel} →
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function Overview() {
   const navigate = useNavigate();
   const qc = useQueryClient();
@@ -154,6 +319,10 @@ export default function Overview() {
           ) : undefined
         }
       />
+
+      <SectionGate featureKey="section.overview.getting_started">
+        <GettingStartedGuide />
+      </SectionGate>
 
       {/* Org selector */}
       <div className="flex flex-wrap gap-3">

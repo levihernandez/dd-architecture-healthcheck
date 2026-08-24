@@ -104,6 +104,7 @@ export const FEATURE_TREE: FeatureNode[] = [
 
   // Sections — 4th tree level, gate individual cards/tabs/widgets within a page.
   // Rendered via <SectionGate> (silent hide) in frontend/src, never <FeatureGate>.
+  { key: 'section.overview.getting_started', parentKey: 'page.overview', nodeType: 'section', label: 'Getting Started Guide' },
   { key: 'section.overview.stat_tiles', parentKey: 'page.overview', nodeType: 'section', label: 'Stat Tiles' },
   { key: 'section.overview.inventory_summary', parentKey: 'page.overview', nodeType: 'section', label: 'Inventory Summary' },
   { key: 'section.overview.recent_scans', parentKey: 'page.overview', nodeType: 'section', label: 'Recent Scans' },
