@@ -8,6 +8,7 @@ import { useOrgs, useScans } from '../../hooks/useOrgs';
 import { useOrgScanContext } from '../../context/OrgScanContext';
 import { usePinnedPages, useRecentPages } from '../../hooks/usePinnedPages';
 import { useFeatureFlags } from '../../hooks/useFeatureFlags';
+import { useViewFeatureFlagsUi } from '../../hooks/useViewFeatureFlagsUi';
 import { scansApi } from '../../services/api';
 
 export default function CommandPalette() {
@@ -20,6 +21,9 @@ export default function CommandPalette() {
   const { pinned, togglePin } = usePinnedPages();
   const { recent } = useRecentPages();
   const { isPageEnabled } = useFeatureFlags();
+  const viewFfEnabled = useViewFeatureFlagsUi();
+  const isNavItemVisible = (item?: { featureKey?: string; debugOnly?: boolean }) =>
+    Boolean(item) && isPageEnabled(item?.featureKey) && (!item?.debugOnly || viewFfEnabled);
 
   const startScan = useMutation({
     mutationFn: (orgId: string) => scansApi.start(orgId),
@@ -68,10 +72,10 @@ export default function CommandPalette() {
 
   const recentItems = recent
     .map((path) => NAV_ITEMS.find((i) => i.path === path))
-    .filter((i): i is (typeof NAV_ITEMS)[number] => Boolean(i) && isPageEnabled(i?.featureKey));
+    .filter((i): i is (typeof NAV_ITEMS)[number] => isNavItemVisible(i));
   const pinnedItems = pinned
     .map((path) => NAV_ITEMS.find((i) => i.path === path))
-    .filter((i): i is (typeof NAV_ITEMS)[number] => Boolean(i) && isPageEnabled(i?.featureKey));
+    .filter((i): i is (typeof NAV_ITEMS)[number] => isNavItemVisible(i));
 
   return (
     <Command.Dialog
@@ -182,7 +186,7 @@ export default function CommandPalette() {
             )}
 
             {HUBS.map((hub) => {
-              const items = NAV_ITEMS.filter((i) => i.hub === hub.id && isPageEnabled(i.featureKey));
+              const items = NAV_ITEMS.filter((i) => i.hub === hub.id && isNavItemVisible(i));
               if (items.length === 0) return null;
               return (
                 <Command.Group key={hub.id} heading={hub.label} className="text-caption text-ink-faint uppercase px-2 py-1.5">

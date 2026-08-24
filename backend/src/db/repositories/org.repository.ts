@@ -2,6 +2,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { getDatabase } from '../database';
 import { encrypt, decrypt } from '../../utils/crypto';
 import { logger } from '../../utils/logger';
+import { AppError } from '../../api/middleware/error.middleware';
 import type { OrgConfig, DatadogSite } from '../../types/datadog.types';
 import type { CreateOrgRequest, OrgResponse } from '../../types/api.types';
 
@@ -114,6 +115,28 @@ export const OrgRepository = {
         if (updates.appKey) patch.key_hint_app = updates.appKey.slice(-4).padStart(8, '*');
 
         await db('api_credentials_metadata').where({ org_id: id }).update(patch);
+      } else {
+        // No credentials row exists for this org (shouldn't normally happen —
+        // create() always inserts one alongside the org — but silently
+        // no-op'ing here previously made "Edit Keys" look like it saved when
+        // it hadn't. Since there's nothing to merge with, both keys are
+        // required to (re)create the row from scratch.
+        if (!updates.apiKey || !updates.appKey) {
+          throw new AppError(
+            'This organization has no stored credentials — provide both the API key and Application key to restore them.',
+            400
+          );
+        }
+        await db('api_credentials_metadata').insert({
+          id: uuidv4(),
+          org_id: id,
+          encrypted_api_key: encrypt(updates.apiKey),
+          encrypted_app_key: encrypt(updates.appKey),
+          key_hint_api: updates.apiKey.slice(-4).padStart(8, '*'),
+          key_hint_app: updates.appKey.slice(-4).padStart(8, '*'),
+          created_at: now,
+          updated_at: now,
+        });
       }
     }
 

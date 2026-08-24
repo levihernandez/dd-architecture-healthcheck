@@ -9,3 +9,4 @@ backend/.env
 certs/
 .compose-files
 .claude/skills/dd-architecture-healthcheck/snapshots/
+.DS_Store

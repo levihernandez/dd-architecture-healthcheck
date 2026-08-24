@@ -11,6 +11,7 @@ import { CSS } from '@dnd-kit/utilities';
 import { HUBS, NAV_ITEMS, findNavItem } from '../../lib/navigation';
 import { usePinnedPages, useRecentPages } from '../../hooks/usePinnedPages';
 import { useFeatureFlags } from '../../hooks/useFeatureFlags';
+import { useViewFeatureFlagsUi } from '../../hooks/useViewFeatureFlagsUi';
 
 const COLLAPSED_GROUPS_KEY = 'dd-hc:collapsed-nav-groups';
 
@@ -74,6 +75,9 @@ export default function SidebarContent({ onNavigate }: { onNavigate?: () => void
   const { pinned, togglePin, isPinned, reorderPinned } = usePinnedPages();
   const { recent } = useRecentPages();
   const { isPageEnabled } = useFeatureFlags();
+  const viewFfEnabled = useViewFeatureFlagsUi();
+  const isNavItemVisible = (item?: { featureKey?: string; debugOnly?: boolean }) =>
+    Boolean(item) && isPageEnabled(item?.featureKey) && (!item?.debugOnly || viewFfEnabled);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
@@ -99,17 +103,18 @@ export default function SidebarContent({ onNavigate }: { onNavigate?: () => void
     return HUBS.map((hub) => ({
       hub,
       items: NAV_ITEMS.filter((i) =>
-        i.hub === hub.id && (!q || i.label.toLowerCase().includes(q)) && isPageEnabled(i.featureKey)
+        i.hub === hub.id && (!q || i.label.toLowerCase().includes(q)) && isNavItemVisible(i)
       ),
     })).filter((g) => g.items.length > 0);
-  }, [search, isPageEnabled]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search, isPageEnabled, viewFfEnabled]);
 
   const recentItems = recent
     .map((path) => findNavItem(path))
-    .filter((i): i is (typeof NAV_ITEMS)[number] => Boolean(i) && i?.path !== pathname && isPageEnabled(i?.featureKey))
+    .filter((i): i is (typeof NAV_ITEMS)[number] => Boolean(i) && i?.path !== pathname && isNavItemVisible(i))
     .slice(0, 4);
 
-  const visiblePinned = pinned.filter((path) => isPageEnabled(NAV_ITEMS.find((i) => i.path === path)?.featureKey));
+  const visiblePinned = pinned.filter((path) => isNavItemVisible(NAV_ITEMS.find((i) => i.path === path)));
 
   return (
     <div className="flex flex-col h-full">

@@ -11,6 +11,10 @@ export interface NavItem {
   // When set, the sidebar hides the item and the route is wrapped in
   // <FeatureGate> if its effective state is disabled. Omit for always-on pages.
   featureKey?: string;
+  // Hidden unless the view_ff debug query param has unlocked it for this
+  // session (see useViewFeatureFlagsUi) — for operator-only tooling like the
+  // Feature Flags admin page, which most users shouldn't stumble into.
+  debugOnly?: boolean;
 }
 
 export interface HubDef {
@@ -68,7 +72,7 @@ export const NAV_ITEMS: NavItem[] = [
 
   { path: '/export', label: 'Export Center', icon: '⬇', hub: 'standalone', featureKey: 'page.export' },
   { path: '/org-context', label: 'Org Profile', icon: '🧠', hub: 'standalone' },
-  { path: '/feature-flags', label: 'Feature Flags', icon: '🚩', hub: 'standalone' },
+  { path: '/feature-flags', label: 'Feature Flags', icon: '🚩', hub: 'standalone', debugOnly: true },
 ];
 
 export function findNavItem(pathname: string): NavItem | undefined {

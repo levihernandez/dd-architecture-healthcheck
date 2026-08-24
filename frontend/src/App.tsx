@@ -32,6 +32,7 @@ import OrgContext from './pages/OrgContext';
 import Usage from './pages/Usage';
 import EventsHealth from './pages/EventsHealth';
 import FeatureFlags from './pages/FeatureFlags';
+import ViewFfGate from './components/ViewFfGate';
 import ScanComparison from './pages/ScanComparison';
 import FeatureGate from './components/FeatureGate';
 import PrivateRoute from './components/PrivateRoute';
@@ -79,7 +80,7 @@ export default function App() {
           <Route path="ai" element={<AIAssessment />} />
           <Route path="recommendations" element={<FeatureGate featureKey="page.recommendations"><Recommendations /></FeatureGate>} />
           <Route path="export" element={<FeatureGate featureKey="page.export"><ExportCenter /></FeatureGate>} />
-          <Route path="feature-flags" element={<FeatureFlags />} />
+          <Route path="feature-flags" element={<ViewFfGate><FeatureFlags /></ViewFfGate>} />
         </Route>
         </Route>
       </Routes>

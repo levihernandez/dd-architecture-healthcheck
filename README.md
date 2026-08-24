@@ -182,10 +182,30 @@ See **[docs/bits-ai-prompts.md](docs/bits-ai-prompts.md)** for these two plus ad
 
 ---
 
+## Screenshots
+
+A quick tour of the app, logged in and connected to a real org (email/account identity blurred).
+
+| | |
+|---|---|
+| **Sign in** | **Overview** |
+| ![Login](docs/screenshots/01-login.png) | ![Overview](docs/screenshots/02-overview.png) |
+| **Org Connections** | **Scan Runs** |
+| ![Org Connections](docs/screenshots/03-org-connections.png) | ![Scan Runs](docs/screenshots/04-scan-runs.png) |
+| **Inventory Explorer** | **Unified Tagging Scorecard** |
+| ![Inventory Explorer](docs/screenshots/05-inventory-explorer.png) | ![Unified Tagging Scorecard](docs/screenshots/06-unified-tagging-scorecard.png) |
+| **Monitors Health** | **Analytics** |
+| ![Monitors Health](docs/screenshots/07-monitors-health.png) | ![Analytics](docs/screenshots/08-analytics.png) |
+| **Export Center** | **Account menu** |
+| ![Export Center](docs/screenshots/09-export-center.png) | ![Account menu](docs/screenshots/10-account-menu.png) |
+
+
+---
+
 ## Architecture
 
 ```
-dd-api-ai/
+dd-architecture-healthcheck/
 ├── backend/                    # Node.js + Express + TypeScript
 │   ├── scripts/
 │   │   └── reset-password.ts   # Admin-driven password reset (no email flow)
