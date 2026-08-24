@@ -4,12 +4,14 @@ import clsx from 'clsx';
 import SidebarContent from './SidebarContent';
 import { NAV_ITEMS } from '../../lib/navigation';
 import { usePinnedPages } from '../../hooks/usePinnedPages';
+import { useFeatureFlags } from '../../hooks/useFeatureFlags';
 
 const RAIL_KEY = 'dd-hc:sidebar-collapsed';
 
 export default function Sidebar() {
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem(RAIL_KEY) === '1');
   const { pinned } = usePinnedPages();
+  const { isPageEnabled } = useFeatureFlags();
 
   function toggle() {
     setCollapsed((prev) => {
@@ -21,7 +23,7 @@ export default function Sidebar() {
   if (collapsed) {
     const railItems = (pinned.length > 0 ? pinned : ['/overview', '/scans', '/inventory', '/tagging-scorecard'])
       .map((path) => NAV_ITEMS.find((i) => i.path === path))
-      .filter((i): i is (typeof NAV_ITEMS)[number] => Boolean(i));
+      .filter((i): i is (typeof NAV_ITEMS)[number] => Boolean(i) && isPageEnabled(i?.featureKey));
 
     return (
       <aside className="hidden md:flex w-14 bg-surface-sunken flex-col items-center h-screen sticky top-0 py-4 gap-1 shrink-0">

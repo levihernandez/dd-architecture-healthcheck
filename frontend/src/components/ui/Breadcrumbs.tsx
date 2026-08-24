@@ -1,14 +1,16 @@
 import { Link, useLocation } from 'react-router-dom';
 import { findNavItem, hubFor, hubItems } from '../../lib/navigation';
+import { useFeatureFlags } from '../../hooks/useFeatureFlags';
 
 export default function Breadcrumbs() {
   const { pathname } = useLocation();
+  const { isPageEnabled } = useFeatureFlags();
   const hub = hubFor(pathname);
   const item = findNavItem(pathname);
 
   if (!hub || !item) return null;
 
-  const items = hubItems(hub.id);
+  const items = hubItems(hub.id).filter((i) => isPageEnabled(i.featureKey));
   const isMultiPage = items.length > 1;
 
   return (

@@ -1,6 +1,7 @@
 import { NavLink, useLocation } from 'react-router-dom';
 import clsx from 'clsx';
 import { hubFor, hubItems } from '../../lib/navigation';
+import { useFeatureFlags } from '../../hooks/useFeatureFlags';
 
 /**
  * Horizontal tab bar linking sibling pages within the current nav hub
@@ -10,10 +11,11 @@ import { hubFor, hubItems } from '../../lib/navigation';
  */
 export default function HubTabs() {
   const { pathname } = useLocation();
+  const { isPageEnabled } = useFeatureFlags();
   const hub = hubFor(pathname);
   if (!hub) return null;
 
-  const items = hubItems(hub.id);
+  const items = hubItems(hub.id).filter((i) => isPageEnabled(i.featureKey));
   if (items.length <= 1) return null;
 
   return (
