@@ -23,6 +23,7 @@ const PROMPT_REGISTRY: Array<{ key: string; label: string; fileName: string }> =
   { key: 'anthropic-system', label: 'Anthropic System Addendum', fileName: 'anthropic-system.md' },
   { key: 'ollama-system', label: 'Ollama System Addendum', fileName: 'ollama-system.md' },
   { key: 'tagging-maturity-assessment', label: 'Tagging Maturity Assessment', fileName: 'tagging-maturity-assessment.md' },
+  { key: 'tagging-remediation-execution', label: 'Tagging Remediation Execution', fileName: 'tagging-remediation-execution.md' },
 ];
 
 function getPromptsDir(): string {

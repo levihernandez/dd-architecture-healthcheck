@@ -10,7 +10,7 @@ import {
 import { analyzeMultiOrgGovernance } from '../../tagging/governance';
 import { analyzeCostReadiness } from '../../tagging/cost-readiness';
 import { TAG_DICTIONARY, lookupTag } from '../../tagging/tag-dictionary';
-import { buildMaturityAssessmentPrompt } from '../../tagging/maturity-assessment';
+import { buildMaturityAssessmentPrompt, buildRemediationExecutionPrompt } from '../../tagging/maturity-assessment';
 
 const router = Router();
 
@@ -139,6 +139,17 @@ router.get('/maturity-assessment', (req, res, next) => {
     const { orgId, scanRunId } = req2ids(req as Parameters<typeof req2ids>[0]);
     if (!orgId) throw new AppError('orgId required', 400);
     res.json(buildMaturityAssessmentPrompt({ orgId, scanRunId }));
+  } catch (err) { next(err); }
+});
+
+// GET /api/tagging/remediation-execution?orgId=&scanRunId= — scanRunId optional; generates a
+// Bits AI-ready prompt that instructs the agent to actually apply the tag fixes via the
+// Datadog UI (not just report on them), industry and suggested tags auto-filled as above.
+router.get('/remediation-execution', (req, res, next) => {
+  try {
+    const { orgId, scanRunId } = req2ids(req as Parameters<typeof req2ids>[0]);
+    if (!orgId) throw new AppError('orgId required', 400);
+    res.json(buildRemediationExecutionPrompt({ orgId, scanRunId }));
   } catch (err) { next(err); }
 });
 

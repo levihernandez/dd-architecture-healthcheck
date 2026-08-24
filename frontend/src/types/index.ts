@@ -469,6 +469,14 @@ export interface MaturityAssessmentResult {
   promptText: string;
 }
 
+export interface RemediationExecutionResult {
+  industry: string;
+  templateId: string;
+  suggestedTagKeys: string[];
+  hasScanData: boolean;
+  promptText: string;
+}
+
 // ─── Host instrumentation blind-spot analysis ─────────────────────────────────
 
 export interface HostGapRow {

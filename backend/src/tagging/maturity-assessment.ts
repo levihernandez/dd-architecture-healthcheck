@@ -92,3 +92,30 @@ export function buildMaturityAssessmentPrompt(req: MaturityAssessmentRequest): M
 
   return { industry, templateId: template.id, suggestedTagKeys, hasScanData, promptText };
 }
+
+export interface RemediationExecutionResult {
+  industry: string;
+  templateId: string;
+  suggestedTagKeys: string[];
+  hasScanData: boolean;
+  promptText: string;
+}
+
+/** Companion to buildMaturityAssessmentPrompt: instead of asking Bits AI to only
+ * score/report, this prompt asks it to actually apply the tag fixes through the
+ * Datadog UI (bulk tag editor, per-resource tag editors) and report what changed. */
+export function buildRemediationExecutionPrompt(req: MaturityAssessmentRequest): RemediationExecutionResult {
+  const { orgId, scanRunId } = req;
+  const template = resolveTemplate(orgId, scanRunId);
+  const { hasScanData, hostCount, serviceCount } = resolveScanStatus(orgId, scanRunId);
+  const { markdown: suggestedTagsMarkdown, keys: suggestedTagKeys } = formatSuggestedTags(template);
+  const industry = template.sector || template.name;
+
+  const promptText = getPrompt('tagging-remediation-execution')
+    .replace('{{INDUSTRY}}', () => industry)
+    .replace('{{SCAN_STATUS_NOTE}}', () => buildScanStatusNote(hasScanData, hostCount, serviceCount))
+    .replace('{{SUGGESTED_TAGS}}', () => suggestedTagsMarkdown)
+    .replace('{{GENERATED_AT}}', new Date().toISOString());
+
+  return { industry, templateId: template.id, suggestedTagKeys, hasScanData, promptText };
+}

@@ -3,7 +3,7 @@ import { toast } from 'sonner';
 import { useQuery } from '@tanstack/react-query';
 import { taggingApi } from '../../services/api';
 import { useOrgAndScanFilters } from '../../hooks/useFilters';
-import type { MaturityAssessmentResult } from '../../types';
+import type { MaturityAssessmentResult, RemediationExecutionResult } from '../../types';
 
 interface ContextTag {
   key: string;
@@ -1005,8 +1005,9 @@ function buildPrintableHtml(opts: {
   steps: TimelineStep[];
   resources: ResourceCard[];
   maturityAssessment?: { industry: string; promptText: string; hasScanData: boolean };
+  remediationExecution?: { industry: string; promptText: string; hasScanData: boolean };
 }): string {
-  const { industryName, industryTags, instanceKey, instanceExample, provider, steps, resources, maturityAssessment } = opts;
+  const { industryName, industryTags, instanceKey, instanceExample, provider, steps, resources, maturityAssessment, remediationExecution } = opts;
   const instanceLabel = humanizeInstanceLabel(instanceKey);
   const cloudTag = PROVIDER_CONFIG[provider].cloudProviderTag;
   const generatedOn = new Date().toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
@@ -1077,6 +1078,12 @@ function buildPrintableHtml(opts: {
     <p>Paste this into Bits AI to score this org's Unified Service Tagging maturity, using the industry-specific tags above.</p>
     <p class="small muted">Industry: ${escapeHtml(maturityAssessment.industry)}${maturityAssessment.hasScanData ? '' : ' · no Architecture Health Check scan on file yet for this org'}</p>
     <pre class="code">${escapeHtml(maturityAssessment.promptText)}</pre>` : '';
+
+  const remediationPromptHtml = remediationExecution ? `
+    <h2>8. Bits AI tagging remediation execution prompt</h2>
+    <p>Paste this into Bits AI to have it actually apply the tag fixes via the Datadog UI, not just report on them.</p>
+    <p class="small muted">Industry: ${escapeHtml(remediationExecution.industry)}${remediationExecution.hasScanData ? '' : ' · no Architecture Health Check scan on file yet for this org'}</p>
+    <pre class="code">${escapeHtml(remediationExecution.promptText)}</pre>` : '';
 
   return `<!DOCTYPE html>
 <html>
@@ -1210,6 +1217,7 @@ function buildPrintableHtml(opts: {
   </div>
 
   ${maturityPromptHtml}
+  ${remediationPromptHtml}
 
   <footer>How Tagging Works — Cloud, Datacenter &amp; Mixed Environments</footer>
 </body>
@@ -1349,8 +1357,9 @@ function buildPrintableMarkdown(opts: {
   tiers: WaterfallTier[];
   aggregateTiers: WaterfallTier[];
   maturityAssessment?: { industry: string; promptText: string; hasScanData: boolean };
+  remediationExecution?: { industry: string; promptText: string; hasScanData: boolean };
 }): string {
-  const { industryName, industryTags, instanceKey, instanceExample, provider, steps, resources, tiers, aggregateTiers, maturityAssessment } = opts;
+  const { industryName, industryTags, instanceKey, instanceExample, provider, steps, resources, tiers, aggregateTiers, maturityAssessment, remediationExecution } = opts;
   const instanceLabel = humanizeInstanceLabel(instanceKey);
   const cloudTag = PROVIDER_CONFIG[provider].cloudProviderTag;
   const generatedOn = new Date().toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
@@ -1402,6 +1411,17 @@ function buildPrintableMarkdown(opts: {
       htmlP(`Industry: ${escapeHtml(maturityAssessment.industry)}${maturityAssessment.hasScanData ? '' : ' · no Architecture Health Check scan on file yet for this org'}`),
     ),
     fence(maturityAssessment.promptText),
+  ].join('\n\n') : '';
+
+  const remediationMd = remediationExecution ? [
+    '## 9. Bits AI tagging remediation execution prompt',
+    'Paste this into Bits AI to have it actually apply the tag fixes via the Datadog UI, not just report on them.',
+    colorCard(
+      remediationExecution.hasScanData ? 'blue' : 'amber',
+      remediationExecution.hasScanData ? 'Note' : 'Heads up',
+      htmlP(`Industry: ${escapeHtml(remediationExecution.industry)}${remediationExecution.hasScanData ? '' : ' · no Architecture Health Check scan on file yet for this org'}`),
+    ),
+    fence(remediationExecution.promptText),
   ].join('\n\n') : '';
 
   const cloudKeysSet = new Set(cloudLayers.flatMap((l) => l.newTags).map(keyOf));
@@ -1479,6 +1499,7 @@ function buildPrintableMarkdown(opts: {
     resourcesMd,
     colorCard('violet', 'Key takeaway', htmlP('Cloud tags describe <em>where</em>; env/service/version describe <em>what</em>. The cloud provider gives you the "where" tags for free — you only ever hand-write the "what" tags, and you write them identically whether the host is in AWS or your own datacenter.')),
     maturityMd,
+    remediationMd,
   ].filter(Boolean).join('\n\n') + '\n';
 }
 
@@ -1505,6 +1526,7 @@ function exportMarkdown(opts: {
   tiers: WaterfallTier[];
   aggregateTiers: WaterfallTier[];
   maturityAssessment?: { industry: string; promptText: string; hasScanData: boolean };
+  remediationExecution?: { industry: string; promptText: string; hasScanData: boolean };
 }) {
   const markdown = buildPrintableMarkdown(opts);
   downloadTextFile('how-tagging-works.md', markdown, 'text/markdown');
@@ -1519,6 +1541,7 @@ function exportPdf(opts: {
   steps: TimelineStep[];
   resources: ResourceCard[];
   maturityAssessment?: { industry: string; promptText: string; hasScanData: boolean };
+  remediationExecution?: { industry: string; promptText: string; hasScanData: boolean };
 }) {
   const html = buildPrintableHtml(opts);
   // Passing 'noopener' here would make window.open() return null in most
@@ -1587,6 +1610,61 @@ function MaturityAssessmentSection({
   );
 }
 
+function RemediationExecutionSection({
+  hasOrgSelected, data, isLoading, isError,
+}: {
+  hasOrgSelected: boolean;
+  data?: RemediationExecutionResult;
+  isLoading: boolean;
+  isError: boolean;
+}) {
+  function copyPrompt() {
+    if (!data) return;
+    navigator.clipboard.writeText(data.promptText)
+      .then(() => toast.success('Prompt copied — paste it into Bits AI'))
+      .catch(() => toast.error('Failed to copy to clipboard'));
+  }
+
+  return (
+    <section className="mt-6">
+      <h3 className="text-sm font-semibold text-ink mb-1">Ready to fix it? Ask Bits AI to apply the tags</h3>
+      <p className="text-xs text-ink-muted mb-3">
+        This is the same idea as the maturity assessment, but instead of scoring and reporting, this prompt
+        instructs Bits AI to actually go apply the recommended tags via the Datadog UI — after showing you a
+        plan and getting your confirmation.
+      </p>
+
+      {!hasOrgSelected ? (
+        <p className="text-xs text-ink-faint">Select an organization to generate this prompt.</p>
+      ) : isLoading ? (
+        <p className="text-xs text-ink-faint">Generating prompt…</p>
+      ) : isError || !data ? (
+        <p className="text-xs text-ink-faint">Couldn't generate a remediation execution prompt for this org.</p>
+      ) : (
+        <div className="space-y-2">
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <span className="text-xs text-ink-faint">
+              Industry: <span className="text-ink-muted font-medium">{data.industry}</span>
+              {!data.hasScanData && ' · no Architecture Health Check scan on file yet for this org'}
+            </span>
+            <button className="btn-secondary text-xs px-3 py-1.5" onClick={copyPrompt}>
+              Copy for Bits AI
+            </button>
+          </div>
+          <pre className="text-xs text-ink-muted bg-surface-sunken border border-border rounded-lg p-3 overflow-x-auto whitespace-pre-wrap max-h-64 overflow-y-auto">
+            {data.promptText}
+          </pre>
+          <p className="text-xs text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded-lg p-2">
+            This prompt grants Bits AI write access to your tagging. It's written to show a plan before
+            applying anything and cap batches at 25 resources — review both before pasting it into a
+            production org.
+          </p>
+        </div>
+      )}
+    </section>
+  );
+}
+
 export default function TaggingStrategyGuideModal({
   onClose, industryName, industryTags = [],
 }: {
@@ -1614,6 +1692,16 @@ export default function TaggingStrategyGuideModal({
     promptText: maturityAssessment.promptText,
     hasScanData: maturityAssessment.hasScanData,
   };
+  const { data: remediationExecution, isLoading: remediationLoading, isError: remediationError } = useQuery({
+    queryKey: ['tagging-remediation-execution', selectedOrgId, selectedScanId],
+    queryFn: () => taggingApi.remediationExecution(selectedOrgId, selectedScanId || undefined),
+    enabled: Boolean(selectedOrgId),
+  });
+  const remediationExecutionForExport = remediationExecution && {
+    industry: remediationExecution.industry,
+    promptText: remediationExecution.promptText,
+    hasScanData: remediationExecution.hasScanData,
+  };
 
   return (
     <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-6" onClick={onClose}>
@@ -1629,6 +1717,7 @@ export default function TaggingStrategyGuideModal({
                 onClick={() => exportMarkdown({
                   industryName, industryTags, instanceKey, instanceExample, provider, steps, resources, tiers, aggregateTiers,
                   maturityAssessment: maturityAssessmentForExport,
+                  remediationExecution: remediationExecutionForExport,
                 })}
                 className="btn-secondary text-xs"
               >
@@ -1638,6 +1727,7 @@ export default function TaggingStrategyGuideModal({
                 onClick={() => exportPdf({
                   industryName, industryTags, instanceKey, instanceExample, provider, steps, resources,
                   maturityAssessment: maturityAssessmentForExport,
+                  remediationExecution: remediationExecutionForExport,
                 })}
                 className="btn-secondary text-xs"
               >
@@ -1755,6 +1845,13 @@ export default function TaggingStrategyGuideModal({
             data={maturityAssessment}
             isLoading={maturityLoading}
             isError={maturityError}
+          />
+
+          <RemediationExecutionSection
+            hasOrgSelected={Boolean(selectedOrgId)}
+            data={remediationExecution}
+            isLoading={remediationLoading}
+            isError={remediationError}
           />
         </div>
       </div>

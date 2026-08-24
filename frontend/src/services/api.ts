@@ -119,6 +119,8 @@ export const taggingApi = {
     api.get<import('../types').TagPolicyResource[]>('/tagging/policy-resources').then((r) => r.data),
   maturityAssessment: (orgId: string, scanRunId?: string) =>
     api.get<import('../types').MaturityAssessmentResult>('/tagging/maturity-assessment', { params: { orgId, scanRunId } }).then((r) => r.data),
+  remediationExecution: (orgId: string, scanRunId?: string) =>
+    api.get<import('../types').RemediationExecutionResult>('/tagging/remediation-execution', { params: { orgId, scanRunId } }).then((r) => r.data),
 };
 
 // Analytics

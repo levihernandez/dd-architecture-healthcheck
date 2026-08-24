@@ -143,6 +143,15 @@ To enable:
 2. Set your API key for the chosen provider
 3. Run a scan, then navigate to **AI Assessment** and click **Generate Assessment**
 
+### From advice to execution — Bits AI prompts
+
+This app is read-only and advisory: it never writes back to your Datadog org. To act on its findings, the **Tagging Strategy Guide** modal (`How tagging works`) generates two ready-to-paste prompts for **Bits AI** (which already runs with your org's own permissions):
+
+- **"Ready to assess your maturity?"** — a read-only UST maturity scoring prompt, pre-filled with your org's industry template.
+- **"Ready to fix it?"** — the same context, but instructs Bits AI to propose a tagging remediation plan and, once you confirm it, actually apply the tag changes via the Datadog UI.
+
+See **[docs/bits-ai-prompts.md](docs/bits-ai-prompts.md)** for these two plus additional templates (monitor hygiene, dashboard template variables, Service Catalog backfill) you can adapt by hand for categories this app scores but doesn't yet generate an execution prompt for.
+
 ---
 
 ## Architecture
