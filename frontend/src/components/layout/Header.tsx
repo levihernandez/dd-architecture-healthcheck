@@ -111,10 +111,21 @@ export default function Header() {
 
         <button
           onClick={() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', metaKey: true }))}
-          className="hidden sm:flex items-center gap-1.5 text-xs text-ink-faint border border-border-strong rounded px-2.5 py-1.5 hover:bg-surface-subtle transition-colors"
-          aria-label="Open command palette"
+          className="hidden sm:flex items-center gap-2 text-sm text-ink-faint bg-surface-sunken border border-border-strong rounded px-2.5 py-1.5 hover:border-ink-faint transition-colors w-44 md:w-64"
+          aria-label="Search pages, orgs, scans, Bits AI…"
         >
-          <span>⌘K</span>
+          <span className="text-ink-faint shrink-0">🔎</span>
+          <span className="flex-1 text-left truncate">Search…</span>
+          <span className="shrink-0 flex items-center gap-0.5 text-[10px] font-mono text-ink-faint bg-surface-subtle border border-border rounded px-1 py-0.5">
+            ⌘K
+          </span>
+        </button>
+        <button
+          onClick={() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', metaKey: true }))}
+          className="sm:hidden btn-ghost !p-1.5"
+          aria-label="Search pages, orgs, scans, Bits AI…"
+        >
+          🔎
         </button>
       </div>
     </header>

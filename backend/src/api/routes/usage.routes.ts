@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { getDatabase } from '../../db/database';
-import { parseUsageSummary, parseCostJson, buildProductBreakdown } from '../../assessment/cost-data';
+import { parseUsageSummary, parseCostJson, buildProductBreakdown, buildProductCostHistory } from '../../assessment/cost-data';
 
 const router = Router();
 
@@ -42,6 +42,30 @@ router.get('/', (req, res, next) => {
       costCharges,
       products,
     });
+  } catch (err) { next(err); }
+});
+
+// GET /api/usage/product-cost-history?orgId=&productName= — this product's committed/
+// on-demand cost for every distinct report_month this org has a completed scan for,
+// so "activating" a product row can chart its own spend trend rather than just the
+// current month's snapshot the main usage summary is limited to.
+router.get('/product-cost-history', (req, res, next) => {
+  try {
+    const { orgId, productName } = req.query as { orgId?: string; productName?: string };
+    if (!orgId) { res.status(400).json({ error: 'orgId required' }); return; }
+    if (!productName) { res.status(400).json({ error: 'productName required' }); return; }
+
+    const db = getDatabase();
+    const rows = db.prepare(`
+      SELECT us.report_month, us.cost_json
+      FROM usage_summary us
+      JOIN scan_runs sr ON sr.id = us.scan_run_id
+      WHERE us.org_id = ? AND sr.status = 'completed' AND us.cost_json IS NOT NULL
+      ORDER BY us.collected_at ASC
+    `).all(orgId) as Array<{ report_month: string; cost_json: string | null }>;
+
+    const history = buildProductCostHistory(rows, productName);
+    res.json({ productName, history });
   } catch (err) { next(err); }
 });
 

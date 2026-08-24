@@ -45,6 +45,25 @@ export default function CommandPalette() {
     setOpen(false);
   }
 
+  // Direct pivots to content that lives inside a modal/section rather than its
+  // own route, so it's still reachable by typing a name like "Bits AI".
+  const quickActions = [
+    {
+      key: 'bits-ai-maturity',
+      icon: '🤖',
+      label: 'Bits AI: Tagging Maturity Assessment prompt',
+      value: 'bits ai bitsai bits maturity assessment tagging prompt',
+      path: '/tag-templates?guide=maturity',
+    },
+    {
+      key: 'bits-ai-remediation',
+      icon: '🤖',
+      label: 'Bits AI: Tagging Remediation Execution prompt',
+      value: 'bits ai bitsai bits remediation execution tagging prompt fix',
+      path: '/tag-templates?guide=remediation',
+    },
+  ];
+
   const recentItems = recent
     .map((path) => NAV_ITEMS.find((i) => i.path === path))
     .filter((i): i is (typeof NAV_ITEMS)[number] => Boolean(i));
@@ -103,6 +122,20 @@ export default function CommandPalette() {
               </Command.Group>
             )}
 
+            <Command.Group heading="Quick actions" className="text-caption text-ink-faint uppercase px-2 py-1.5">
+              {quickActions.map((action) => (
+                <Command.Item
+                  key={action.key}
+                  value={action.value}
+                  onSelect={() => go(action.path)}
+                  className="flex items-center gap-2.5 px-2 py-2 rounded text-sm text-ink cursor-pointer data-[selected=true]:bg-surface-subtle"
+                >
+                  <span className="w-4 text-center">{action.icon}</span>
+                  {action.label}
+                </Command.Item>
+              ))}
+            </Command.Group>
+
             {orgs.length > 0 && (
               <Command.Group heading="Switch organization" className="text-caption text-ink-faint uppercase px-2 py-1.5">
                 {orgs.map((org) => (
@@ -154,7 +187,7 @@ export default function CommandPalette() {
                   {items.map((item) => (
                     <Command.Item
                       key={item.path}
-                      value={`${hub.label} ${item.label}`}
+                      value={`${hub.label} ${item.label} ${(item.keywords ?? []).join(' ')}`}
                       onSelect={() => go(item.path)}
                       className="flex items-center gap-2.5 px-2 py-2 rounded text-sm text-ink cursor-pointer data-[selected=true]:bg-surface-subtle"
                     >

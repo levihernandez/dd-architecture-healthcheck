@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { useQuery } from '@tanstack/react-query';
 import { taggingApi } from '../../services/api';
@@ -1577,7 +1577,7 @@ function MaturityAssessmentSection({
   }
 
   return (
-    <section className="mt-6">
+    <section id="bits-ai-maturity" className="mt-6">
       <h3 className="text-sm font-semibold text-ink mb-1">Ready to assess your maturity? Ask Bits AI</h3>
       <p className="text-xs text-ink-muted mb-3">
         Generate a ready-to-run prompt that scores this org's Unified Service Tagging maturity, using the
@@ -1626,7 +1626,7 @@ function RemediationExecutionSection({
   }
 
   return (
-    <section className="mt-6">
+    <section id="bits-ai-remediation" className="mt-6">
       <h3 className="text-sm font-semibold text-ink mb-1">Ready to fix it? Ask Bits AI to apply the tags</h3>
       <p className="text-xs text-ink-muted mb-3">
         This is the same idea as the maturity assessment, but instead of scoring and reporting, this prompt
@@ -1666,11 +1666,13 @@ function RemediationExecutionSection({
 }
 
 export default function TaggingStrategyGuideModal({
-  onClose, industryName, industryTags = [],
+  onClose, industryName, industryTags = [], initialSection,
 }: {
   onClose: () => void;
   industryName?: string;
   industryTags?: ContextTag[];
+  // Deep-links from search/onboarding straight to a Bits AI prompt section.
+  initialSection?: 'maturity' | 'remediation';
 }) {
   const [provider, setProvider] = useState<CloudProvider>('aws');
   const instanceTag = industryTags.find((t) => INSTANCE_KEY_PATTERN.test(t.key));
@@ -1702,6 +1704,17 @@ export default function TaggingStrategyGuideModal({
     promptText: remediationExecution.promptText,
     hasScanData: remediationExecution.hasScanData,
   };
+
+  // Deep-link support: jump straight to the requested Bits AI prompt section
+  // once its data has settled, so callers from search/onboarding land on it
+  // instead of the top of a long scrollable modal.
+  useEffect(() => {
+    if (!initialSection) return;
+    if (initialSection === 'maturity' && maturityLoading) return;
+    if (initialSection === 'remediation' && remediationLoading) return;
+    const id = initialSection === 'maturity' ? 'bits-ai-maturity' : 'bits-ai-remediation';
+    document.getElementById(id)?.scrollIntoView({ block: 'start' });
+  }, [initialSection, maturityLoading, remediationLoading]);
 
   return (
     <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-6" onClick={onClose}>

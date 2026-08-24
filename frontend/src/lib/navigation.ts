@@ -33,7 +33,7 @@ export const NAV_ITEMS: NavItem[] = [
   { path: '/overview', label: 'Overview', icon: '⬡', hub: 'home' },
 
   { path: '/orgs', label: 'Org Connections', icon: '⚙', hub: 'organizations', featureKey: 'page.orgs' },
-  { path: '/tag-templates', label: 'Industry Templates', icon: '⊞', hub: 'organizations' },
+  { path: '/tag-templates', label: 'Industry Templates', icon: '⊞', hub: 'organizations', keywords: ['bits ai', 'bitsai', 'bits', 'tagging guide', 'how tagging works'] },
   { path: '/scans', label: 'Scan Runs', icon: '▶', hub: 'organizations' },
   { path: '/scan-comparison', label: 'Scan Comparison', icon: '⇄', hub: 'organizations', keywords: ['diff', 'compare', 'trend', 'regression'], featureKey: 'page.scan_comparison' },
 

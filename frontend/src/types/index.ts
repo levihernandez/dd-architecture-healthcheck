@@ -826,6 +826,18 @@ export interface UsageData {
   products: UsageProductSummary[];
 }
 
+export interface ProductCostHistoryPoint {
+  month: string;
+  committedCost: number;
+  onDemandCost: number;
+  totalCost: number;
+}
+
+export interface ProductCostHistoryResult {
+  productName: string;
+  history: ProductCostHistoryPoint[];
+}
+
 export interface EventStatBucket {
   key: string;
   count: number;

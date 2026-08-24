@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { taggingApi, tagTemplateApi } from '../services/api';
@@ -512,7 +513,24 @@ export default function IndustryTemplates() {
   const [search, setSearch] = useState('');
   const [showExport, setShowExport] = useState(false);
   const [showGuide, setShowGuide] = useState(false);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const guideParam = searchParams.get('guide');
+  const initialGuideSection = guideParam === 'maturity' || guideParam === 'remediation' ? guideParam : undefined;
   const enabled = Boolean(selectedOrgId && selectedScanId);
+
+  // Deep-link entry point: /tag-templates?guide=1|maturity|remediation opens
+  // the Bits AI guide (search, onboarding) without requiring a manual click.
+  useEffect(() => {
+    if (guideParam) setShowGuide(true);
+  }, [guideParam]);
+
+  function closeGuide() {
+    setShowGuide(false);
+    if (guideParam) {
+      searchParams.delete('guide');
+      setSearchParams(searchParams, { replace: true });
+    }
+  }
 
   const { data: templates = [] } = useQuery({
     queryKey: ['tagging-templates'],
@@ -970,9 +988,10 @@ export default function IndustryTemplates() {
 
       {showGuide && (
         <TaggingStrategyGuideModal
-          onClose={() => setShowGuide(false)}
+          onClose={closeGuide}
           industryName={templateDetail?.name}
           industryTags={guideIndustryTags}
+          initialSection={initialGuideSection}
         />
       )}
 

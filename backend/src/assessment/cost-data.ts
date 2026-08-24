@@ -49,6 +49,37 @@ export function parseCostJson(costJson: string | null): CostCharge[] {
   }
 }
 
+export interface ProductCostHistoryPoint {
+  month: string;
+  committedCost: number;
+  onDemandCost: number;
+  totalCost: number;
+}
+
+// One row per scan that collected usage, potentially several scans per calendar
+// month — keeps only the most-recently-collected snapshot per report_month
+// (rows must already be ordered oldest-to-newest) so a mid-month re-scan doesn't
+// produce a duplicate point on the graph.
+export function buildProductCostHistory(
+  rows: Array<{ report_month: string; cost_json: string | null }>,
+  productName: string
+): ProductCostHistoryPoint[] {
+  const byMonth = new Map<string, ProductCostHistoryPoint>();
+  for (const row of rows) {
+    const charges = parseCostJson(row.cost_json);
+    const byProduct = groupChargesByProduct(charges);
+    const cost = byProduct[productName];
+    if (!cost) continue;
+    byMonth.set(row.report_month, {
+      month: row.report_month,
+      committedCost: cost.committed,
+      onDemandCost: cost.on_demand,
+      totalCost: cost.committed + cost.on_demand,
+    });
+  }
+  return [...byMonth.values()].sort((a, b) => a.month.localeCompare(b.month));
+}
+
 // Exact product_name -> {committed, on_demand} totals. No substring/fuzzy matching —
 // every product Datadog actually billed gets its own entry.
 export function groupChargesByProduct(charges: CostCharge[]): Record<string, { committed: number; on_demand: number }> {
