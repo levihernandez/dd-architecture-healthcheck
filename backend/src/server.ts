@@ -5,7 +5,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import compression from 'compression';
 import rateLimit from 'express-rate-limit';
-import { initDatabase, closeDatabase } from './db/database';
+import { initDatabase, closeDatabase, getDatabase } from './db/database';
 import { requestLoggingMiddleware } from './api/middleware/logging.middleware';
 import { errorMiddleware } from './api/middleware/error.middleware';
 import orgsRouter from './api/routes/orgs.routes';
@@ -96,9 +96,17 @@ app.use('/api', limiter);
 // Logging
 app.use(requestLoggingMiddleware);
 
-// Health check — must stay reachable without a token (container healthcheck).
-app.get('/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString(), version: '1.0.0' });
+// Health check — must stay reachable without a token (container healthcheck /
+// orchestrator liveness probe). Pings the DB so a broken connection reports
+// unhealthy instead of a static always-OK masking a real outage.
+app.get('/health', async (req, res) => {
+  try {
+    await getDatabase().raw('SELECT 1');
+    res.json({ status: 'ok', timestamp: new Date().toISOString(), version: '1.0.0' });
+  } catch (err) {
+    logger.error('Health check DB ping failed', err);
+    res.status(503).json({ status: 'error', message: 'Database unavailable', timestamp: new Date().toISOString() });
+  }
 });
 
 // Auth routes are public (register/login) or self-authenticating (/me checks its
@@ -135,7 +143,27 @@ app.use((req, res) => {
 // Error handler
 app.use(errorMiddleware);
 
+// Loud, non-fatal nudges for config choices that are fine in dev but wrong to
+// carry into a real deployment unnoticed — none of these block startup since
+// they may be intentional (e.g. a small internal deployment genuinely fine on
+// SQLite), they just make sure it was a choice, not an oversight.
+function warnOnProductionMisconfig(): void {
+  if (process.env.NODE_ENV !== 'production') return;
+
+  if (!process.env.CORS_ORIGIN || process.env.CORS_ORIGIN === 'http://localhost:5173') {
+    logger.warn('[startup] NODE_ENV=production but CORS_ORIGIN is unset or still the localhost default — set it to the real hostname the frontend is served from.');
+  }
+  if ((process.env.DB_CLIENT ?? 'sqlite') === 'sqlite') {
+    logger.warn('[startup] NODE_ENV=production with DB_CLIENT=sqlite — fine for light/low-concurrency use, but SQLite serializes writes across all users; consider DB_CLIENT=postgres for real concurrent multi-user load.');
+  }
+  if (!process.env.ALLOWED_EMAIL_DOMAINS) {
+    logger.warn('[startup] NODE_ENV=production with ALLOWED_EMAIL_DOMAINS unset — self-registration is open to anyone who can reach this app, with no domain restriction.');
+  }
+}
+
 async function start() {
+  warnOnProductionMisconfig();
+
   await resolveEncryptedEnv(); // decrypts any ENC[...] values (e.g. DD_API_KEY/DD_APP_KEY) before the DB or routes touch them
 
   await initDatabase();

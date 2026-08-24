@@ -8,6 +8,7 @@ export default function Login() {
   const { login } = useAuthContext();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [rememberMe, setRememberMe] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -17,7 +18,7 @@ export default function Login() {
     setIsSubmitting(true);
     try {
       const { token, user } = await authApi.login(email, password);
-      login(token, user);
+      login(token, user, rememberMe);
       navigate('/overview', { replace: true });
     } catch (err) {
       setError((err as any)?.response?.data?.message ?? 'Invalid email or password');
@@ -57,6 +58,18 @@ export default function Login() {
               value={password} required
               onChange={(e) => setPassword(e.target.value)}
             />
+          </div>
+
+          <div className="flex items-center gap-2">
+            <input
+              type="checkbox" id="rememberMe"
+              checked={rememberMe}
+              onChange={(e) => setRememberMe(e.target.checked)}
+              className="rounded border-border-strong"
+            />
+            <label htmlFor="rememberMe" className="text-sm text-ink-muted">
+              Remember me on this device
+            </label>
           </div>
 
           <button type="submit" className="btn-primary w-full" disabled={isSubmitting}>

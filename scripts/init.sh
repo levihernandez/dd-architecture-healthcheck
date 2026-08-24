@@ -41,6 +41,39 @@ echo "  2) Docker / Podman — docker-compose stack (frontend, backend, optional
 mode="$(ask "Choice" "1")"
 [[ "$mode" == "2" ]] && RUN_MODE=docker || RUN_MODE=standalone
 
+# ------------------------------------------------------------ deployment target
+heading "Deployment target"
+echo "  1) Local development — just you, on your own machine"
+echo "  2) Shared / production — a real internal deployment other people will log into"
+deploy_choice="$(ask "Choice" "1")"
+NODE_ENV_VAL="development"
+ALLOWED_EMAIL_DOMAINS_VAL=""
+DB_CLIENT_VAL="sqlite"
+DATABASE_URL_VAL=""
+CORS_ORIGIN_VAL=""
+if [[ "$deploy_choice" == "2" ]]; then
+  NODE_ENV_VAL="production"
+  echo "  ${DIM}These map directly to the checklist in README.md#before-deploying-beyond-your-own-laptop.${RESET}"
+
+  ALLOWED_EMAIL_DOMAINS_VAL="$(ask "  Restrict self-registration to these email domains (comma-separated, blank = open to anyone)" "")"
+
+  echo "  Database:"
+  echo "    1) SQLite — fine for light/low-concurrency use"
+  echo "    2) Postgres — recommended for real concurrent multi-user load"
+  db_choice="$(ask "  Choice" "2")"
+  if [[ "$db_choice" == "2" ]]; then
+    DB_CLIENT_VAL="postgres"
+    DATABASE_URL_VAL="$(ask "  DATABASE_URL (postgres://user:pass@host:5432/dbname)" "")"
+  fi
+
+  while [[ -z "$CORS_ORIGIN_VAL" ]]; do
+    CORS_ORIGIN_VAL="$(ask "  Real hostname the frontend will be served from (e.g. https://health-check.internal.example.com)" "")"
+    [[ -z "$CORS_ORIGIN_VAL" ]] && echo "  ${DIM}Required for a shared deployment — CORS will otherwise reject the frontend's own requests.${RESET}"
+  done
+else
+  echo "  ${DIM}Local dev — self-registration stays open, SQLite, CORS_ORIGIN left at the localhost default.${RESET}"
+fi
+
 # ------------------------------------------------------------ observability
 heading "Datadog observability"
 OBSERVABILITY=false
@@ -151,8 +184,17 @@ set_env AI_PROVIDER "$AI_PROVIDER"
 [[ -n "$OPENAI_KEY" ]] && set_env OPENAI_API_KEY "$OPENAI_KEY"
 [[ -n "$ANTHROPIC_KEY" ]] && set_env ANTHROPIC_API_KEY "$ANTHROPIC_KEY"
 
+set_env NODE_ENV "$NODE_ENV_VAL"
+set_env DB_CLIENT "$DB_CLIENT_VAL"
+[[ -n "$DATABASE_URL_VAL" ]] && set_env DATABASE_URL "$DATABASE_URL_VAL"
+[[ -n "$ALLOWED_EMAIL_DOMAINS_VAL" ]] && set_env ALLOWED_EMAIL_DOMAINS "$ALLOWED_EMAIL_DOMAINS_VAL"
+
 set_env HTTPS_ENABLED "$HTTPS_ENABLED"
-[[ "$HTTPS_ENABLED" == true && "$RUN_MODE" == "standalone" ]] && set_env CORS_ORIGIN "https://localhost:5173"
+if [[ -n "$CORS_ORIGIN_VAL" ]]; then
+  set_env CORS_ORIGIN "$CORS_ORIGIN_VAL"
+elif [[ "$HTTPS_ENABLED" == true && "$RUN_MODE" == "standalone" ]]; then
+  set_env CORS_ORIGIN "https://localhost:5173"
+fi
 set_env DD_TRACE_ENABLED "$APM"
 set_env DD_SITE "$DD_SITE_VAL"
 [[ -n "$DD_API_KEY_VAL" ]] && set_env DD_API_KEY "$DD_API_KEY_VAL"
@@ -220,4 +262,12 @@ if [[ "$OPENBAO" == true ]]; then
 fi
 if [[ "$OBSERVABILITY" == true && -z "$DD_API_KEY_VAL" && "$RUN_AGENT" == true ]]; then
   echo "  ${DIM}DD_API_KEY/DD_APP_KEY are blank — fill them into .env before starting the Agent.${RESET}"
+fi
+if [[ "$NODE_ENV_VAL" == "production" ]]; then
+  echo
+  echo "  ${DIM}Production checklist (README.md#before-deploying-beyond-your-own-laptop):${RESET}"
+  echo "  ${DIM}  - Self-registration: $( [[ -n "$ALLOWED_EMAIL_DOMAINS_VAL" ]] && echo "restricted to $ALLOWED_EMAIL_DOMAINS_VAL" || echo "OPEN — no ALLOWED_EMAIL_DOMAINS set" )${RESET}"
+  echo "  ${DIM}  - Database: $DB_CLIENT_VAL${RESET}"
+  echo "  ${DIM}  - CORS_ORIGIN: $CORS_ORIGIN_VAL${RESET}"
+  echo "  ${DIM}  - Consider wrapping JWT_SECRET/ENCRYPTION_KEY as OpenBao ENC[...] values instead of plaintext.${RESET}"
 fi

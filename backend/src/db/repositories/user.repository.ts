@@ -36,4 +36,9 @@ export const UserRepository = {
     const row = await db<UserRow>('users').where({ id }).first();
     return row ?? null;
   },
+
+  async updatePasswordHash(id: string, passwordHash: string): Promise<void> {
+    const db = getDatabase();
+    await db('users').where({ id }).update({ password_hash: passwordHash, updated_at: new Date().toISOString() });
+  },
 };

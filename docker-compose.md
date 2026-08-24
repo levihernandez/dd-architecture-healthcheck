@@ -155,9 +155,14 @@ on startup, via [Knex](https://knexjs.org) migrations. Dialect is chosen with
 
 Copy `.env.example` to `.env` and fill in what you need — see that file's
 inline comments for the full list (server port, encryption key, JWT secret,
-database client, AI provider, HTTPS, CORS, Datadog credentials, APM/RUM,
-OpenBao). `npm run init` fills most of it in interactively, including
-generating `ENCRYPTION_KEY` and `JWT_SECRET` for you.
+allowed registration domains, database client, AI provider, HTTPS, CORS,
+Datadog credentials, APM/RUM, OpenBao). `npm run init` fills most of it in
+interactively, including generating `ENCRYPTION_KEY` and `JWT_SECRET` for you.
+
+Deploying somewhere other than your own laptop? See
+[README.md#before-deploying-beyond-your-own-laptop](README.md#before-deploying-beyond-your-own-laptop) —
+with `NODE_ENV=production` set, the backend logs a startup warning for each
+config item on that list left at its dev default.
 
 See the main [README.md](README.md) for app features, usage, and the
 standalone (non-Docker) run mode.

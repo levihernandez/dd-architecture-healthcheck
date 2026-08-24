@@ -34,7 +34,26 @@ export function verifyToken(token: string): { sub: string } {
   return jwt.verify(token, getJwtSecret()) as { sub: string };
 }
 
+// ALLOWED_EMAIL_DOMAINS gates self-registration to a comma-separated allowlist
+// (e.g. "datadoghq.com") — unset means open registration (today's default,
+// kept for local dev/testing), so this is opt-in hardening an operator turns
+// on for a real deployment rather than a breaking change.
+function assertAllowedEmailDomain(email: string): void {
+  const allowlist = process.env.ALLOWED_EMAIL_DOMAINS;
+  if (!allowlist) return;
+
+  const domains = allowlist.split(',').map((d) => d.trim().toLowerCase()).filter(Boolean);
+  if (domains.length === 0) return;
+
+  const emailDomain = email.split('@')[1]?.toLowerCase();
+  if (!emailDomain || !domains.includes(emailDomain)) {
+    throw new AppError('Registration is restricted to specific email domains', 403);
+  }
+}
+
 export async function register(email: string, password: string, name?: string): Promise<{ token: string; user: PublicUser }> {
+  assertAllowedEmailDomain(email);
+
   const existing = await UserRepository.findByEmail(email);
   if (existing) {
     throw new AppError('An account with this email already exists', 409);
@@ -63,4 +82,19 @@ export async function login(email: string, password: string): Promise<{ token: s
 export async function getUserById(id: string): Promise<PublicUser | null> {
   const user = await UserRepository.findById(id);
   return user ? toPublicUser(user) : null;
+}
+
+export async function changePassword(userId: string, currentPassword: string, newPassword: string): Promise<void> {
+  const user = await UserRepository.findById(userId);
+  if (!user) {
+    throw new AppError('User not found', 404);
+  }
+
+  const valid = await bcrypt.compare(currentPassword, user.password_hash);
+  if (!valid) {
+    throw new AppError('Current password is incorrect', 401);
+  }
+
+  const passwordHash = await bcrypt.hash(newPassword, BCRYPT_ROUNDS);
+  await UserRepository.updatePasswordHash(userId, passwordHash);
 }

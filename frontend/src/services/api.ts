@@ -4,17 +4,18 @@ import type {
   InventorySummary, TagAnalysisRow, PaginatedResponse, FindingCategory, FindingSeverity,
   OrgContextData, ScanComparisonResult
 } from '../types';
+import { getToken, clearToken } from './tokenStorage';
 
 const api = axios.create({
   baseURL: '/api',
   headers: { 'Content-Type': 'application/json' },
 });
 
-// Attach the stored auth token to every request. Reads localStorage directly
+// Attach the stored auth token to every request. Reads storage directly
 // (rather than through React context) since interceptors run outside the
 // component tree — same source-of-truth approach OrgScanContext already uses.
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('dd_auth_token');
+  const token = getToken();
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
@@ -27,7 +28,7 @@ api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (axios.isAxiosError(error) && error.response?.status === 401 && !error.config?.url?.includes('/auth/login')) {
-      localStorage.removeItem('dd_auth_token');
+      clearToken();
       if (window.location.pathname !== '/login') {
         window.location.href = '/login';
       }
@@ -49,6 +50,8 @@ export const authApi = {
   login: (email: string, password: string) =>
     api.post<{ token: string; user: PublicUser }>('/auth/login', { email, password }).then((r) => r.data),
   me: () => api.get<PublicUser>('/auth/me').then((r) => r.data),
+  changePassword: (currentPassword: string, newPassword: string) =>
+    api.post<{ success: true }>('/auth/change-password', { currentPassword, newPassword }).then((r) => r.data),
 };
 
 // Org context (Getting to Know You)

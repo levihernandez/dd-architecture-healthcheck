@@ -1,12 +1,13 @@
 import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from 'react';
 import { authApi, type PublicUser } from '../services/api';
+import { getToken, setToken as storeToken, clearToken } from '../services/tokenStorage';
 
 interface AuthContextValue {
   token: string | null;
   user: PublicUser | null;
   isAuthenticated: boolean;
   isLoading: boolean;
-  login: (token: string, user: PublicUser) => void;
+  login: (token: string, user: PublicUser, remember?: boolean) => void;
   logout: () => void;
 }
 
@@ -20,7 +21,7 @@ const AuthContext = createContext<AuthContextValue>({
 });
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [token, setToken] = useState<string | null>(() => localStorage.getItem('dd_auth_token'));
+  const [token, setToken] = useState<string | null>(() => getToken());
   const [user, setUser] = useState<PublicUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -32,21 +33,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     authApi.me()
       .then((u) => setUser(u))
       .catch(() => {
-        localStorage.removeItem('dd_auth_token');
+        clearToken();
         setToken(null);
         setUser(null);
       })
       .finally(() => setIsLoading(false));
   }, [token]);
 
-  const login = useCallback((newToken: string, newUser: PublicUser) => {
-    localStorage.setItem('dd_auth_token', newToken);
+  const login = useCallback((newToken: string, newUser: PublicUser, remember = true) => {
+    storeToken(newToken, remember);
     setToken(newToken);
     setUser(newUser);
   }, []);
 
   const logout = useCallback(() => {
-    localStorage.removeItem('dd_auth_token');
+    clearToken();
     setToken(null);
     setUser(null);
   }, []);

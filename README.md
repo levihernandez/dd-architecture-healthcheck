@@ -26,7 +26,7 @@ npm install:all
 npm run init
 ```
 
-This interactive wizard asks about run mode (standalone vs. Docker), HTTPS, Datadog observability (APM/RUM/Agent), OpenBao, and AI provider, then writes `.env` (and `.compose-files` for Docker mode) for you — including generating `ENCRYPTION_KEY`. Then:
+This interactive wizard asks about run mode (standalone vs. Docker), deployment target (local dev vs. shared/production — see [below](#before-deploying-beyond-your-own-laptop)), HTTPS, Datadog observability (APM/RUM/Agent), OpenBao, and AI provider, then writes `.env` (and `.compose-files` for Docker mode) for you — including generating `ENCRYPTION_KEY` and `JWT_SECRET`. Then:
 
 ```bash
 npm run dev          # standalone mode
@@ -276,6 +276,7 @@ All endpoints are read-only (GET requests only):
 
 - **Authentication required** — every `/api/*` route (other than `/api/auth/*`) requires a valid JWT Bearer token; passwords are bcrypt-hashed, never stored or logged in plaintext
 - **Per-user data isolation** — org connections and everything scoped to them (scans, findings, tagging analysis) are only visible to the user who created them; other users get a 404, not a permissions error, so existence isn't leaked either
+- **Restrictable self-registration** — set `ALLOWED_EMAIL_DOMAINS` (comma-separated) to limit who can create an account; unset means anyone reaching the app can register, which is fine for local dev but usually not what you want for a real deployment
 - **No write API calls** — all Datadog operations are read-only
 - **Encrypted storage** — API/App keys AES-encrypted with your `ENCRYPTION_KEY`
 - **No key logging** — keys never appear in logs, exports, or console output
@@ -284,6 +285,20 @@ All endpoints are read-only (GET requests only):
 - **SSO handling** — only high-level enablement flags collected, no IdP metadata or certificates
 - **Session-only mode** — option to not persist credentials at all
 - **Optional HTTPS** — self-signed TLS for local/standalone use, or bring your own cert; see [docker-compose.md](docker-compose.md#docker--https)
+
+## Before deploying beyond your own laptop
+
+The defaults are tuned for local single-user development. Before running this
+somewhere multiple real people will use it, either answer "Shared / production"
+when `npm run init` asks for your deployment target (it prompts for everything
+below and writes it to `.env` for you), or set these by hand:
+
+- Set `ALLOWED_EMAIL_DOMAINS` — otherwise self-registration is open to anyone who can reach the app.
+- Set `CORS_ORIGIN` to the real hostname you'll serve the frontend from.
+- Set `DB_CLIENT=postgres` + `DATABASE_URL` — SQLite serializes writes across all users, fine for light use but a real constraint under concurrent multi-user load.
+- Set `NODE_ENV=production` — the backend logs a startup warning for each of the above if left at its dev default while `NODE_ENV=production`, so this is also what turns those nudges on.
+- Consider wrapping `JWT_SECRET` and `ENCRYPTION_KEY` as OpenBao `ENC[...]` ciphertexts instead of plain values in `.env` — the same transit-decryption path already used for `DD_API_KEY`/`DD_APP_KEY` (see the OpenBao section in [docker-compose.md](docker-compose.md)) covers any env var, no code changes needed.
+- `GET /health` pings the database and returns `503` if it's unreachable — point your orchestrator's liveness/readiness probe at it rather than assuming a bare "process is running" check.
 
 ## Running Tests
 
