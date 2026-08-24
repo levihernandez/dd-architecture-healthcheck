@@ -20,12 +20,12 @@ export interface SaveAISettings {
 }
 
 export const AISettingsRepository = {
-  get(): AISettingsPublic {
+  async get(): Promise<AISettingsPublic> {
     const db = getDatabase();
-    const row = db.prepare('SELECT * FROM ai_settings WHERE id = ?').get('default') as {
-      provider: string; model: string | null; encrypted_api_key: string | null;
+    const row = await db<{
+      id: string; provider: string; model: string | null; encrypted_api_key: string | null;
       base_url: string | null; updated_at: string;
-    } | undefined;
+    }>('ai_settings').where({ id: 'default' }).first();
 
     if (!row) {
       return { provider: 'none', model: null, baseUrl: null, hasKey: false, keyHint: null, updatedAt: null };
@@ -49,11 +49,12 @@ export const AISettingsRepository = {
     };
   },
 
-  getDecryptedKey(): string | null {
+  async getDecryptedKey(): Promise<string | null> {
     const db = getDatabase();
-    const row = db.prepare('SELECT encrypted_api_key FROM ai_settings WHERE id = ?').get('default') as {
-      encrypted_api_key: string | null;
-    } | undefined;
+    const row = await db<{ id: string; encrypted_api_key: string | null }>('ai_settings')
+      .select('encrypted_api_key')
+      .where({ id: 'default' })
+      .first();
     if (!row?.encrypted_api_key) return null;
     try { return decrypt(row.encrypted_api_key); } catch (err) {
       logger.error('Failed to decrypt AI API key', err);
@@ -61,13 +62,14 @@ export const AISettingsRepository = {
     }
   },
 
-  save(settings: SaveAISettings): void {
+  async save(settings: SaveAISettings): Promise<void> {
     const db = getDatabase();
     const now = new Date().toISOString();
 
-    const existing = db.prepare('SELECT encrypted_api_key FROM ai_settings WHERE id = ?').get('default') as {
-      encrypted_api_key: string | null;
-    } | undefined;
+    const existing = await db<{ id: string; encrypted_api_key: string | null }>('ai_settings')
+      .select('encrypted_api_key')
+      .where({ id: 'default' })
+      .first();
 
     let newEncKey: string | null;
     if (settings.clearKey) {
@@ -78,15 +80,16 @@ export const AISettingsRepository = {
       newEncKey = existing?.encrypted_api_key ?? null;
     }
 
-    db.prepare(`
-      INSERT INTO ai_settings (id, provider, model, encrypted_api_key, base_url, updated_at)
-      VALUES ('default', ?, ?, ?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET
-        provider = excluded.provider,
-        model = excluded.model,
-        encrypted_api_key = excluded.encrypted_api_key,
-        base_url = excluded.base_url,
-        updated_at = excluded.updated_at
-    `).run(settings.provider, settings.model, newEncKey, settings.baseUrl ?? null, now);
+    await db('ai_settings')
+      .insert({
+        id: 'default',
+        provider: settings.provider,
+        model: settings.model,
+        encrypted_api_key: newEncKey,
+        base_url: settings.baseUrl ?? null,
+        updated_at: now,
+      })
+      .onConflict('id')
+      .merge();
   },
 };

@@ -38,50 +38,57 @@ export async function collectMonitors(
   const db = getDatabase();
   const now = new Date().toISOString();
 
-  const insert = db.prepare(`
-    INSERT OR REPLACE INTO monitors
-      (id, org_id, scan_run_id, monitor_id, monitor_name, monitor_type, overall_state,
-       priority, has_notification, has_env_tag, has_service_tag, has_team_tag,
-       is_muted, muted_since, tags, message, created_at_dd, modified_at_dd,
-       raw_json, first_seen, last_seen)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
+  try {
+    // monitors has UNIQUE(org_id, monitor_id) but no scan_run_id in that key, so a repeat
+    // scan collides with the prior row — explicit select + conditional insert/update.
+    await db.transaction(async (trx) => {
+      for (const mon of result.data) {
+        const tags = mon.tags ?? [];
+        const tagKeys = tags.map((t) => t.split(':')[0].toLowerCase());
+        const hasEnv = tagKeys.includes('env');
+        const hasService = tagKeys.includes('service');
+        const hasTeam = tagKeys.includes('team');
+        const hasNotification = Boolean(
+          mon.message && (mon.message.includes('@') || mon.message.includes('{{'))
+        );
+        const isMuted = Boolean(
+          mon.options?.silenced && Object.keys(mon.options.silenced).length > 0
+        );
 
-  const txn = db.transaction((monitors: DDMonitor[]) => {
-    for (const mon of monitors) {
-      const tags = mon.tags ?? [];
-      const tagKeys = tags.map((t) => t.split(':')[0].toLowerCase());
-      const hasEnv = tagKeys.includes('env');
-      const hasService = tagKeys.includes('service');
-      const hasTeam = tagKeys.includes('team');
-      const hasNotification = Boolean(
-        mon.message && (mon.message.includes('@') || mon.message.includes('{{'))
-      );
-      const isMuted = Boolean(
-        mon.options?.silenced && Object.keys(mon.options.silenced).length > 0
-      );
+        const patch = {
+          org_id: orgId,
+          scan_run_id: scanRunId,
+          monitor_id: mon.id,
+          monitor_name: mon.name,
+          monitor_type: mon.type,
+          overall_state: mon.overall_state ?? null,
+          priority: mon.priority ?? null,
+          has_notification: hasNotification ? 1 : 0,
+          has_env_tag: hasEnv ? 1 : 0,
+          has_service_tag: hasService ? 1 : 0,
+          has_team_tag: hasTeam ? 1 : 0,
+          is_muted: isMuted ? 1 : 0,
+          muted_since: null,
+          tags: JSON.stringify(tags),
+          message: mon.message?.substring(0, 500) ?? null,
+          created_at_dd: mon.created ?? null,
+          modified_at_dd: mon.modified ?? null,
+          raw_json: safeJsonSnapshot(mon),
+          last_seen: now,
+        };
 
-      insert.run(
-        uuidv4(), orgId, scanRunId,
-        mon.id, mon.name, mon.type, mon.overall_state ?? null,
-        mon.priority ?? null,
-        hasNotification ? 1 : 0,
-        hasEnv ? 1 : 0,
-        hasService ? 1 : 0,
-        hasTeam ? 1 : 0,
-        isMuted ? 1 : 0,
-        null,
-        JSON.stringify(tags),
-        mon.message?.substring(0, 500) ?? null,
-        mon.created ?? null,
-        mon.modified ?? null,
-        safeJsonSnapshot(mon),
-        now, now
-      );
-    }
-  });
-
-  try { txn(result.data); } catch (err) {
+        const existing = await trx<{ id: string; org_id: string; monitor_id: number }>('monitors')
+          .select('id')
+          .where({ org_id: orgId, monitor_id: mon.id })
+          .first();
+        if (existing) {
+          await trx('monitors').where({ id: existing.id }).update(patch);
+        } else {
+          await trx('monitors').insert({ id: uuidv4(), first_seen: now, ...patch });
+        }
+      }
+    });
+  } catch (err) {
     logger.error(`[${orgId}] Failed to store monitor data`, err);
   }
 

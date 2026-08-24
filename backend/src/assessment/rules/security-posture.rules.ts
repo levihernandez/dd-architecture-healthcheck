@@ -11,16 +11,16 @@ const unresolvedCriticalFindingsRule: AssessmentRule = {
   async run(ctx: AssessmentContext): Promise<RuleResult> {
     const { orgId, scanRunId, db } = ctx;
 
-    const total = (db.prepare(
-      'SELECT COUNT(*) as c FROM security_findings WHERE org_id = ? AND scan_run_id = ?'
-    ).get(orgId, scanRunId) as { c: number })?.c ?? 0;
+    const total = Number(
+      (await db('security_findings').where({ org_id: orgId, scan_run_id: scanRunId }).count({ c: '*' }).first())?.c ?? 0
+    );
 
-    const unresolved = db.prepare(`
-      SELECT finding_id, category, severity, resource_name, rule_name FROM security_findings
-      WHERE org_id = ? AND scan_run_id = ? AND severity IN ('critical', 'high')
-        AND (status IS NULL OR status NOT IN ('resolved', 'muted', 'skipped'))
-      LIMIT 20
-    `).all(orgId, scanRunId) as Array<{ finding_id: string; category: string; severity: string; resource_name: string | null; rule_name: string | null }>;
+    const unresolved = await db<{ org_id: string; scan_run_id: string; status: string | null; finding_id: string; category: string; severity: string; resource_name: string | null; rule_name: string | null }>('security_findings')
+      .select('finding_id', 'category', 'severity', 'resource_name', 'rule_name')
+      .where({ org_id: orgId, scan_run_id: scanRunId })
+      .whereIn('severity', ['critical', 'high'])
+      .where((builder) => builder.whereNull('status').orWhereNotIn('status', ['resolved', 'muted', 'skipped']))
+      .limit(20);
 
     if (unresolved.length === 0) {
       return { ruleId: 'sec-001', passed: true, score: 100, maxScore: 100, findings: [] };
@@ -56,16 +56,21 @@ const staleIncidentsRule: AssessmentRule = {
 
     const cutoff = new Date(Date.now() - STALE_INCIDENT_DAYS * 86400_000).toISOString();
 
-    const total = (db.prepare(
-      "SELECT COUNT(*) as c FROM incidents WHERE org_id = ? AND scan_run_id = ? AND (state IS NULL OR state != 'resolved')"
-    ).get(orgId, scanRunId) as { c: number })?.c ?? 0;
+    const total = Number(
+      (await db('incidents')
+        .where({ org_id: orgId, scan_run_id: scanRunId })
+        .where((builder) => builder.whereNull('state').orWhere('state', '!=', 'resolved'))
+        .count({ c: '*' })
+        .first())?.c ?? 0
+    );
 
-    const stale = db.prepare(`
-      SELECT incident_id, title, severity, created_at_dd FROM incidents
-      WHERE org_id = ? AND scan_run_id = ? AND (state IS NULL OR state != 'resolved')
-        AND created_at_dd IS NOT NULL AND created_at_dd < ?
-      LIMIT 20
-    `).all(orgId, scanRunId, cutoff) as Array<{ incident_id: string; title: string | null; severity: string | null; created_at_dd: string }>;
+    const stale = await db<{ org_id: string; scan_run_id: string; state: string | null; incident_id: string; title: string | null; severity: string | null; created_at_dd: string }>('incidents')
+      .select('incident_id', 'title', 'severity', 'created_at_dd')
+      .where({ org_id: orgId, scan_run_id: scanRunId })
+      .where((builder) => builder.whereNull('state').orWhere('state', '!=', 'resolved'))
+      .whereNotNull('created_at_dd')
+      .where('created_at_dd', '<', cutoff)
+      .limit(20);
 
     if (stale.length === 0) {
       return { ruleId: 'sec-002', passed: true, score: 100, maxScore: 100, findings: [] };

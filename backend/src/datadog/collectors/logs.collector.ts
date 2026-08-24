@@ -25,29 +25,35 @@ export async function collectLogs(
   let overallStatus: CollectorResultSummary['status'] = 'success';
 
   if (indexResult.status === 'success' && indexResult.data.length > 0) {
-    const insertIndex = db.prepare(`
-      INSERT OR REPLACE INTO logs_indexes
-        (id, org_id, scan_run_id, index_name, filter_query, retention_days,
-         daily_limit, exclusion_filter_count, is_rate_limited, raw_json, first_seen, last_seen)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-
-    const txn = db.transaction((indexes: DDLogsIndex[]) => {
-      for (const idx of indexes) {
-        insertIndex.run(
-          uuidv4(), orgId, scanRunId,
-          idx.name,
-          idx.filter?.query ?? null,
-          idx.num_retention_days ?? null,
-          idx.daily_limit ?? null,
-          idx.exclusion_filters?.length ?? 0,
-          idx.is_rate_limited ? 1 : 0,
-          safeJsonSnapshot(idx),
-          now, now
-        );
-      }
-    });
-    try { txn(indexResult.data); } catch (err) {
+    try {
+      // logs_indexes has UNIQUE(org_id, index_name) but no scan_run_id in that key, so a
+      // repeat scan collides with the prior row — explicit select + conditional insert/update.
+      await db.transaction(async (trx) => {
+        for (const idx of indexResult.data) {
+          const patch = {
+            org_id: orgId,
+            scan_run_id: scanRunId,
+            index_name: idx.name,
+            filter_query: idx.filter?.query ?? null,
+            retention_days: idx.num_retention_days ?? null,
+            daily_limit: idx.daily_limit ?? null,
+            exclusion_filter_count: idx.exclusion_filters?.length ?? 0,
+            is_rate_limited: idx.is_rate_limited ? 1 : 0,
+            raw_json: safeJsonSnapshot(idx),
+            last_seen: now,
+          };
+          const existing = await trx<{ id: string; org_id: string; index_name: string }>('logs_indexes')
+            .select('id')
+            .where({ org_id: orgId, index_name: idx.name })
+            .first();
+          if (existing) {
+            await trx('logs_indexes').where({ id: existing.id }).update(patch);
+          } else {
+            await trx('logs_indexes').insert({ id: uuidv4(), first_seen: now, ...patch });
+          }
+        }
+      });
+    } catch (err) {
       logger.error(`[${orgId}] Failed to store logs index data`, err);
     }
     totalItems += indexResult.itemCount;
@@ -56,28 +62,35 @@ export async function collectLogs(
   }
 
   if (pipelineResult.status === 'success' && pipelineResult.data.length > 0) {
-    const insertPipeline = db.prepare(`
-      INSERT OR REPLACE INTO logs_pipelines
-        (id, org_id, scan_run_id, pipeline_id, pipeline_name, is_enabled,
-         filter_query, processor_count, is_read_only, raw_json, first_seen, last_seen)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-
-    const txn = db.transaction((pipelines: DDLogsPipeline[]) => {
-      for (const pipeline of pipelines) {
-        insertPipeline.run(
-          uuidv4(), orgId, scanRunId,
-          pipeline.id, pipeline.name,
-          pipeline.is_enabled ? 1 : 0,
-          pipeline.filter?.query ?? null,
-          pipeline.processors?.length ?? 0,
-          pipeline.is_read_only ? 1 : 0,
-          safeJsonSnapshot(pipeline),
-          now, now
-        );
-      }
-    });
-    try { txn(pipelineResult.data); } catch (err) {
+    try {
+      // logs_pipelines has UNIQUE(org_id, pipeline_id) but no scan_run_id in that key, so a
+      // repeat scan collides with the prior row — explicit select + conditional insert/update.
+      await db.transaction(async (trx) => {
+        for (const pipeline of pipelineResult.data) {
+          const patch = {
+            org_id: orgId,
+            scan_run_id: scanRunId,
+            pipeline_id: pipeline.id,
+            pipeline_name: pipeline.name,
+            is_enabled: pipeline.is_enabled ? 1 : 0,
+            filter_query: pipeline.filter?.query ?? null,
+            processor_count: pipeline.processors?.length ?? 0,
+            is_read_only: pipeline.is_read_only ? 1 : 0,
+            raw_json: safeJsonSnapshot(pipeline),
+            last_seen: now,
+          };
+          const existing = await trx<{ id: string; org_id: string; pipeline_id: string }>('logs_pipelines')
+            .select('id')
+            .where({ org_id: orgId, pipeline_id: pipeline.id })
+            .first();
+          if (existing) {
+            await trx('logs_pipelines').where({ id: existing.id }).update(patch);
+          } else {
+            await trx('logs_pipelines').insert({ id: uuidv4(), first_seen: now, ...patch });
+          }
+        }
+      });
+    } catch (err) {
       logger.error(`[${orgId}] Failed to store logs pipeline data`, err);
     }
     totalItems += pipelineResult.itemCount;

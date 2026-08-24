@@ -8,13 +8,12 @@ const logsIndexCoverageRule: AssessmentRule = {
   description: 'Logs indexes should have targeted filters to avoid indexing everything',
   async run(ctx: AssessmentContext): Promise<RuleResult> {
     const { orgId, scanRunId, db } = ctx;
-    const indexes = db.prepare(
-      'SELECT * FROM logs_indexes WHERE org_id = ? AND scan_run_id = ?'
-    ).all(orgId, scanRunId) as Array<{
+    const indexes = await db<{
+      org_id: string; scan_run_id: string;
       index_name: string; filter_query: string | null;
       exclusion_filter_count: number; daily_limit: number | null;
       is_rate_limited: number;
-    }>;
+    }>('logs_indexes').where({ org_id: orgId, scan_run_id: scanRunId });
 
     if (indexes.length === 0) {
       return { ruleId: 'log-001', passed: true, score: 100, maxScore: 100, findings: [] };
@@ -71,8 +70,12 @@ const logsPipelineCoverageRule: AssessmentRule = {
   description: 'Log pipelines parse and enrich logs for better analysis',
   async run(ctx: AssessmentContext): Promise<RuleResult> {
     const { orgId, scanRunId, db } = ctx;
-    const total = (db.prepare('SELECT COUNT(*) as c FROM logs_pipelines WHERE org_id = ? AND scan_run_id = ?').get(orgId, scanRunId) as { c: number })?.c ?? 0;
-    const enabled = (db.prepare('SELECT COUNT(*) as c FROM logs_pipelines WHERE org_id = ? AND scan_run_id = ? AND is_enabled = 1').get(orgId, scanRunId) as { c: number })?.c ?? 0;
+    const total = Number(
+      (await db('logs_pipelines').where({ org_id: orgId, scan_run_id: scanRunId }).count({ c: '*' }).first())?.c ?? 0
+    );
+    const enabled = Number(
+      (await db('logs_pipelines').where({ org_id: orgId, scan_run_id: scanRunId, is_enabled: 1 }).count({ c: '*' }).first())?.c ?? 0
+    );
     const passed = total >= 1;
 
     return {

@@ -23,13 +23,15 @@ export interface MaturityAssessmentResult {
 const ALL_TEMPLATES = [...INDUSTRY_TEMPLATES, ...ORG_TEMPLATES];
 const SUGGESTED_TAGS_CAP = 12;
 
-function resolveTemplate(orgId: string, scanRunId: string | undefined): IndustryTemplate {
+async function resolveTemplate(orgId: string, scanRunId: string | undefined): Promise<IndustryTemplate> {
   const db = getDatabase();
-  const selection = db.prepare('SELECT template_id FROM org_tag_template WHERE org_id = ?')
-    .get(orgId) as { template_id: string } | undefined;
+  const selection = await db<{ org_id: string; template_id: string }>('org_tag_template')
+    .select('template_id')
+    .where({ org_id: orgId })
+    .first();
 
   const templateId = selection?.template_id
-    ?? (scanRunId ? detectRecommendedTemplate(orgId, scanRunId) : 'generic');
+    ?? (scanRunId ? await detectRecommendedTemplate(orgId, scanRunId) : 'generic');
 
   return ALL_TEMPLATES.find((t) => t.id === templateId)
     ?? ALL_TEMPLATES.find((t) => t.id === 'generic')!;
@@ -39,19 +41,24 @@ function resolveTemplate(orgId: string, scanRunId: string | undefined): Industry
 // "a scanRunId was passed," since a stale/invalid id would otherwise silently
 // report false confidence. Mirrors the completed-scan lookup + resource count
 // pattern already used by buildChatContext (chat/context-builder.ts).
-function resolveScanStatus(orgId: string, scanRunId: string | undefined): { hasScanData: boolean; hostCount: number; serviceCount: number } {
+async function resolveScanStatus(orgId: string, scanRunId: string | undefined): Promise<{ hasScanData: boolean; hostCount: number; serviceCount: number }> {
   const db = getDatabase();
   const scan = scanRunId
-    ? db.prepare("SELECT id FROM scan_runs WHERE id = ? AND org_id = ? AND status = 'completed'").get(scanRunId, orgId) as { id: string } | undefined
-    : db.prepare("SELECT id FROM scan_runs WHERE org_id = ? AND status = 'completed' ORDER BY completed_at DESC LIMIT 1").get(orgId) as { id: string } | undefined;
+    ? await db<{ id: string; org_id: string; status: string }>('scan_runs').select('id').where({ id: scanRunId, org_id: orgId, status: 'completed' }).first()
+    : await db<{ id: string; org_id: string; status: string }>('scan_runs').select('id').where({ org_id: orgId, status: 'completed' }).orderBy('completed_at', 'desc').first();
 
   if (!scan) return { hasScanData: false, hostCount: 0, serviceCount: 0 };
 
-  const count = (table: string) =>
-    (db.prepare(`SELECT COUNT(*) as c FROM ${table} WHERE org_id = ? AND scan_run_id = ?`).get(orgId, scan.id) as { c: number })?.c ?? 0;
+  const count = async (table: string) => {
+    const row = await db(table)
+      .count({ c: '*' })
+      .where({ org_id: orgId, scan_run_id: scan.id })
+      .first() as { c: number | string } | undefined;
+    return Number(row?.c ?? 0);
+  };
 
-  const hostCount = count('hosts');
-  const serviceCount = count('services');
+  const hostCount = await count('hosts');
+  const serviceCount = await count('services');
   return { hasScanData: hostCount > 0 || serviceCount > 0, hostCount, serviceCount };
 }
 
@@ -77,10 +84,10 @@ function buildScanStatusNote(hasScanData: boolean, hostCount: number, serviceCou
   return `_This app has a completed Architecture Health Check scan for this org (${hostCount} hosts, ${serviceCount} services collected) that you may cross-reference, but base your assessment on your own direct inspection of the live Datadog organization, not solely on this snapshot._`;
 }
 
-export function buildMaturityAssessmentPrompt(req: MaturityAssessmentRequest): MaturityAssessmentResult {
+export async function buildMaturityAssessmentPrompt(req: MaturityAssessmentRequest): Promise<MaturityAssessmentResult> {
   const { orgId, scanRunId } = req;
-  const template = resolveTemplate(orgId, scanRunId);
-  const { hasScanData, hostCount, serviceCount } = resolveScanStatus(orgId, scanRunId);
+  const template = await resolveTemplate(orgId, scanRunId);
+  const { hasScanData, hostCount, serviceCount } = await resolveScanStatus(orgId, scanRunId);
   const { markdown: suggestedTagsMarkdown, keys: suggestedTagKeys } = formatSuggestedTags(template);
   const industry = template.sector || template.name;
 
@@ -104,10 +111,10 @@ export interface RemediationExecutionResult {
 /** Companion to buildMaturityAssessmentPrompt: instead of asking Bits AI to only
  * score/report, this prompt asks it to actually apply the tag fixes through the
  * Datadog UI (bulk tag editor, per-resource tag editors) and report what changed. */
-export function buildRemediationExecutionPrompt(req: MaturityAssessmentRequest): RemediationExecutionResult {
+export async function buildRemediationExecutionPrompt(req: MaturityAssessmentRequest): Promise<RemediationExecutionResult> {
   const { orgId, scanRunId } = req;
-  const template = resolveTemplate(orgId, scanRunId);
-  const { hasScanData, hostCount, serviceCount } = resolveScanStatus(orgId, scanRunId);
+  const template = await resolveTemplate(orgId, scanRunId);
+  const { hasScanData, hostCount, serviceCount } = await resolveScanStatus(orgId, scanRunId);
   const { markdown: suggestedTagsMarkdown, keys: suggestedTagKeys } = formatSuggestedTags(template);
   const industry = template.sector || template.name;
 

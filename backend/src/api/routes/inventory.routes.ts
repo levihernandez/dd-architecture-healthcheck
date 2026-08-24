@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { getDatabase } from '../../db/database';
+import { assertOrgAccess } from '../../auth/org-access';
 import { AppError } from '../middleware/error.middleware';
 import { analyzeHostGaps } from '../../assessment/host-gaps';
 import { parseHostRawJson, recommendProductsForHost } from '../../assessment/host-enrichment';
@@ -16,31 +17,36 @@ function parseQuery(req: { query: Record<string, unknown> }) {
 }
 
 // GET /api/inventory/hosts
-router.get('/hosts', (req, res, next) => {
+router.get('/hosts', async (req, res, next) => {
   try {
     const { orgId, scanRunId, page, pageSize, search } = parseQuery(req as Parameters<typeof parseQuery>[0]);
     if (!orgId) throw new AppError('orgId required', 400);
     if (!scanRunId) throw new AppError('scanRunId required', 400);
+    await assertOrgAccess(orgId, req.user!.id);
 
     const db = getDatabase();
     const offset = (page - 1) * pageSize;
-    const searchClause = search ? 'AND host_name LIKE ?' : '';
-    const params: unknown[] = [orgId, scanRunId, ...(search ? [`%${search}%`] : [])];
 
-    const total = (db.prepare(
-      `SELECT COUNT(*) as c FROM hosts WHERE org_id = ? AND scan_run_id = ? ${searchClause}`
-    ).get(...params) as { c: number })?.c ?? 0;
+    const baseQuery = () => {
+      let q = db('hosts').where({ org_id: orgId, scan_run_id: scanRunId });
+      if (search) q = q.andWhereLike('host_name', `%${search}%`);
+      return q;
+    };
 
-    const hosts = db.prepare(
-      `SELECT * FROM hosts WHERE org_id = ? AND scan_run_id = ? ${searchClause}
-       ORDER BY has_env_tag ASC, host_name LIMIT ? OFFSET ?`
-    ).all(...params, pageSize, offset) as Array<Record<string, unknown>>;
+    const totalRow = await baseQuery().clone().count<{ c: string | number }[]>({ c: '*' }).first();
+    const total = Number(totalRow?.c ?? 0);
+
+    const hosts = await baseQuery()
+      .select('*')
+      .orderBy([{ column: 'has_env_tag', order: 'asc' }, { column: 'host_name', order: 'asc' }])
+      .limit(pageSize)
+      .offset(offset) as Array<Record<string, unknown>>;
 
     // (env, service) → service_name, for cross-referencing APM presence per host
     // the same way the Instrumentation Gaps analysis does.
-    const serviceRows = db.prepare(
-      `SELECT service_name, env FROM services WHERE org_id = ? AND scan_run_id = ?`
-    ).all(orgId, scanRunId) as Array<{ service_name: string; env: string | null }>;
+    const serviceRows = await db('services')
+      .select('service_name', 'env')
+      .where({ org_id: orgId, scan_run_id: scanRunId }) as Array<{ service_name: string; env: string | null }>;
     const serviceByEnvService = new Set(
       serviceRows.map((s) => `${(s.env ?? '').toLowerCase()}|${s.service_name.toLowerCase()}`)
     );
@@ -69,196 +75,231 @@ router.get('/hosts', (req, res, next) => {
 });
 
 // GET /api/inventory/services
-router.get('/services', (req, res, next) => {
+router.get('/services', async (req, res, next) => {
   try {
     const { orgId, scanRunId, page, pageSize, search } = parseQuery(req as Parameters<typeof parseQuery>[0]);
     if (!orgId) throw new AppError('orgId required', 400);
     if (!scanRunId) throw new AppError('scanRunId required', 400);
+    await assertOrgAccess(orgId, req.user!.id);
 
     const db = getDatabase();
     const offset = (page - 1) * pageSize;
-    const searchClause = search ? 'AND service_name LIKE ?' : '';
-    const params: unknown[] = [orgId, scanRunId, ...(search ? [`%${search}%`] : [])];
 
-    const total = (db.prepare(
-      `SELECT COUNT(*) as c FROM services WHERE org_id = ? AND scan_run_id = ? ${searchClause}`
-    ).get(...params) as { c: number })?.c ?? 0;
+    const baseQuery = () => {
+      let q = db('services').where({ org_id: orgId, scan_run_id: scanRunId });
+      if (search) q = q.andWhereLike('service_name', `%${search}%`);
+      return q;
+    };
 
-    const services = db.prepare(
-      `SELECT * FROM services WHERE org_id = ? AND scan_run_id = ? ${searchClause}
-       ORDER BY has_monitor ASC, service_name LIMIT ? OFFSET ?`
-    ).all(...params, pageSize, offset);
+    const totalRow = await baseQuery().clone().count<{ c: string | number }[]>({ c: '*' }).first();
+    const total = Number(totalRow?.c ?? 0);
+
+    const services = await baseQuery()
+      .select('*')
+      .orderBy([{ column: 'has_monitor', order: 'asc' }, { column: 'service_name', order: 'asc' }])
+      .limit(pageSize)
+      .offset(offset);
 
     res.json({ data: services, total, page, pageSize, totalPages: Math.ceil(total / pageSize) });
   } catch (err) { next(err); }
 });
 
 // GET /api/inventory/monitors
-router.get('/monitors', (req, res, next) => {
+router.get('/monitors', async (req, res, next) => {
   try {
     const { orgId, scanRunId, page, pageSize } = parseQuery(req as Parameters<typeof parseQuery>[0]);
     if (!orgId) throw new AppError('orgId required', 400);
     if (!scanRunId) throw new AppError('scanRunId required', 400);
+    await assertOrgAccess(orgId, req.user!.id);
 
     const db = getDatabase();
     const offset = (page - 1) * pageSize;
-    const total = (db.prepare(
-      'SELECT COUNT(*) as c FROM monitors WHERE org_id = ? AND scan_run_id = ?'
-    ).get(orgId, scanRunId) as { c: number })?.c ?? 0;
 
-    const monitors = db.prepare(
-      `SELECT id, org_id, scan_run_id, monitor_id, monitor_name, monitor_type, overall_state,
-              priority, has_notification, has_env_tag, has_service_tag, has_team_tag, is_muted, tags
-       FROM monitors WHERE org_id = ? AND scan_run_id = ?
-       ORDER BY is_muted DESC, monitor_name LIMIT ? OFFSET ?`
-    ).all(orgId, scanRunId, pageSize, offset);
+    const totalRow = await db('monitors')
+      .where({ org_id: orgId, scan_run_id: scanRunId })
+      .count<{ c: string | number }[]>({ c: '*' }).first();
+    const total = Number(totalRow?.c ?? 0);
+
+    const monitors = await db('monitors')
+      .select(
+        'id', 'org_id', 'scan_run_id', 'monitor_id', 'monitor_name', 'monitor_type', 'overall_state',
+        'priority', 'has_notification', 'has_env_tag', 'has_service_tag', 'has_team_tag', 'is_muted', 'tags'
+      )
+      .where({ org_id: orgId, scan_run_id: scanRunId })
+      .orderBy([{ column: 'is_muted', order: 'desc' }, { column: 'monitor_name', order: 'asc' }])
+      .limit(pageSize)
+      .offset(offset);
 
     res.json({ data: monitors, total, page, pageSize, totalPages: Math.ceil(total / pageSize) });
   } catch (err) { next(err); }
 });
 
 // GET /api/inventory/dashboards
-router.get('/dashboards', (req, res, next) => {
+router.get('/dashboards', async (req, res, next) => {
   try {
     const { orgId, scanRunId, page, pageSize, search } = parseQuery(req as Parameters<typeof parseQuery>[0]);
     if (!orgId) throw new AppError('orgId required', 400);
     if (!scanRunId) throw new AppError('scanRunId required', 400);
+    await assertOrgAccess(orgId, req.user!.id);
 
     const db = getDatabase();
     const offset = (page - 1) * pageSize;
-    const searchClause = search ? 'AND title LIKE ?' : '';
-    const params: unknown[] = [orgId, scanRunId, ...(search ? [`%${search}%`] : [])];
 
-    const total = (db.prepare(
-      `SELECT COUNT(*) as c FROM dashboards WHERE org_id = ? AND scan_run_id = ? ${searchClause}`
-    ).get(...params) as { c: number })?.c ?? 0;
+    const baseQuery = () => {
+      let q = db('dashboards').where({ org_id: orgId, scan_run_id: scanRunId });
+      if (search) q = q.andWhereLike('title', `%${search}%`);
+      return q;
+    };
 
-    const dashboards = db.prepare(
-      `SELECT * FROM dashboards WHERE org_id = ? AND scan_run_id = ? ${searchClause}
-       ORDER BY widget_count DESC, title LIMIT ? OFFSET ?`
-    ).all(...params, pageSize, offset);
+    const totalRow = await baseQuery().clone().count<{ c: string | number }[]>({ c: '*' }).first();
+    const total = Number(totalRow?.c ?? 0);
+
+    const dashboards = await baseQuery()
+      .select('*')
+      .orderBy([{ column: 'widget_count', order: 'desc' }, { column: 'title', order: 'asc' }])
+      .limit(pageSize)
+      .offset(offset);
 
     res.json({ data: dashboards, total, page, pageSize, totalPages: Math.ceil(total / pageSize) });
   } catch (err) { next(err); }
 });
 
 // GET /api/inventory/synthetics
-router.get('/synthetics', (req, res, next) => {
+router.get('/synthetics', async (req, res, next) => {
   try {
     const { orgId, scanRunId, page, pageSize, search } = parseQuery(req as Parameters<typeof parseQuery>[0]);
     if (!orgId) throw new AppError('orgId required', 400);
     if (!scanRunId) throw new AppError('scanRunId required', 400);
+    await assertOrgAccess(orgId, req.user!.id);
 
     const db = getDatabase();
     const offset = (page - 1) * pageSize;
-    const searchClause = search ? 'AND test_name LIKE ?' : '';
-    const params: unknown[] = [orgId, scanRunId, ...(search ? [`%${search}%`] : [])];
 
-    const total = (db.prepare(
-      `SELECT COUNT(*) as c FROM synthetics_tests WHERE org_id = ? AND scan_run_id = ? ${searchClause}`
-    ).get(...params) as { c: number })?.c ?? 0;
+    const baseQuery = () => {
+      let q = db('synthetics_tests').where({ org_id: orgId, scan_run_id: scanRunId });
+      if (search) q = q.andWhereLike('test_name', `%${search}%`);
+      return q;
+    };
 
-    const tests = db.prepare(
-      `SELECT * FROM synthetics_tests WHERE org_id = ? AND scan_run_id = ? ${searchClause}
-       ORDER BY has_notification ASC, test_name LIMIT ? OFFSET ?`
-    ).all(...params, pageSize, offset);
+    const totalRow = await baseQuery().clone().count<{ c: string | number }[]>({ c: '*' }).first();
+    const total = Number(totalRow?.c ?? 0);
+
+    const tests = await baseQuery()
+      .select('*')
+      .orderBy([{ column: 'has_notification', order: 'asc' }, { column: 'test_name', order: 'asc' }])
+      .limit(pageSize)
+      .offset(offset);
 
     res.json({ data: tests, total, page, pageSize, totalPages: Math.ceil(total / pageSize) });
   } catch (err) { next(err); }
 });
 
 // GET /api/inventory/slos
-router.get('/slos', (req, res, next) => {
+router.get('/slos', async (req, res, next) => {
   try {
     const { orgId, scanRunId, page, pageSize, search } = parseQuery(req as Parameters<typeof parseQuery>[0]);
     if (!orgId) throw new AppError('orgId required', 400);
     if (!scanRunId) throw new AppError('scanRunId required', 400);
+    await assertOrgAccess(orgId, req.user!.id);
 
     const db = getDatabase();
     const offset = (page - 1) * pageSize;
-    const searchClause = search ? 'AND slo_name LIKE ?' : '';
-    const params: unknown[] = [orgId, scanRunId, ...(search ? [`%${search}%`] : [])];
 
-    const total = (db.prepare(
-      `SELECT COUNT(*) as c FROM slos WHERE org_id = ? AND scan_run_id = ? ${searchClause}`
-    ).get(...params) as { c: number })?.c ?? 0;
+    const baseQuery = () => {
+      let q = db('slos').where({ org_id: orgId, scan_run_id: scanRunId });
+      if (search) q = q.andWhereLike('slo_name', `%${search}%`);
+      return q;
+    };
 
-    const slos = db.prepare(
-      `SELECT * FROM slos WHERE org_id = ? AND scan_run_id = ? ${searchClause}
-       ORDER BY slo_name LIMIT ? OFFSET ?`
-    ).all(...params, pageSize, offset);
+    const totalRow = await baseQuery().clone().count<{ c: string | number }[]>({ c: '*' }).first();
+    const total = Number(totalRow?.c ?? 0);
+
+    const slos = await baseQuery()
+      .select('*')
+      .orderBy('slo_name', 'asc')
+      .limit(pageSize)
+      .offset(offset);
 
     res.json({ data: slos, total, page, pageSize, totalPages: Math.ceil(total / pageSize) });
   } catch (err) { next(err); }
 });
 
 // GET /api/inventory/tags
-router.get('/tags', (req, res, next) => {
+router.get('/tags', async (req, res, next) => {
   try {
     const { orgId, scanRunId } = parseQuery(req as Parameters<typeof parseQuery>[0]);
     if (!orgId) throw new AppError('orgId required', 400);
     if (!scanRunId) throw new AppError('scanRunId required', 400);
+    await assertOrgAccess(orgId, req.user!.id);
 
     const db = getDatabase();
-    const tagAnalysis = db.prepare(
-      `SELECT * FROM tag_analysis WHERE org_id = ? AND scan_run_id = ?
-       ORDER BY (host_occurrence_count + service_occurrence_count) DESC`
-    ).all(orgId, scanRunId);
+    const tagAnalysis = await db('tag_analysis')
+      .where({ org_id: orgId, scan_run_id: scanRunId })
+      .orderBy(db.raw('(host_occurrence_count + service_occurrence_count)'), 'desc');
 
     res.json(tagAnalysis);
   } catch (err) { next(err); }
 });
 
 // GET /api/inventory/product-signals
-router.get('/product-signals', (req, res, next) => {
+router.get('/product-signals', async (req, res, next) => {
   try {
     const { orgId, scanRunId } = parseQuery(req as Parameters<typeof parseQuery>[0]);
     if (!orgId) throw new AppError('orgId required', 400);
     if (!scanRunId) throw new AppError('scanRunId required', 400);
+    await assertOrgAccess(orgId, req.user!.id);
 
     const db = getDatabase();
-    const signals = db.prepare(
-      'SELECT * FROM product_usage_signals WHERE org_id = ? AND scan_run_id = ? ORDER BY product, signal'
-    ).all(orgId, scanRunId);
+    const signals = await db('product_usage_signals')
+      .where({ org_id: orgId, scan_run_id: scanRunId })
+      .orderBy([{ column: 'product', order: 'asc' }, { column: 'signal', order: 'asc' }]);
 
     res.json(signals);
   } catch (err) { next(err); }
 });
 
 // GET /api/inventory/summary
-router.get('/summary', (req, res, next) => {
+router.get('/summary', async (req, res, next) => {
   try {
     const { orgId, scanRunId } = parseQuery(req as Parameters<typeof parseQuery>[0]);
     if (!orgId) throw new AppError('orgId required', 400);
     if (!scanRunId) throw new AppError('scanRunId required', 400);
+    await assertOrgAccess(orgId, req.user!.id);
 
     const db = getDatabase();
-    const count = (table: string) =>
-      (db.prepare(`SELECT COUNT(*) as c FROM ${table} WHERE org_id = ? AND scan_run_id = ?`)
-        .get(orgId, scanRunId) as { c: number })?.c ?? 0;
+    const count = async (table: string) => {
+      const row = await db(table).where({ org_id: orgId, scan_run_id: scanRunId })
+        .count<{ c: string | number }[]>({ c: '*' }).first();
+      return Number(row?.c ?? 0);
+    };
 
-    const hostEnvCoverage = (db.prepare(
-      'SELECT COUNT(*) as c FROM hosts WHERE org_id = ? AND scan_run_id = ? AND has_env_tag = 1'
-    ).get(orgId, scanRunId) as { c: number })?.c ?? 0;
-    const totalHosts = count('hosts');
-    const openIncidents = (db.prepare(
-      "SELECT COUNT(*) as c FROM incidents WHERE org_id = ? AND scan_run_id = ? AND (state IS NULL OR state != 'resolved')"
-    ).get(orgId, scanRunId) as { c: number })?.c ?? 0;
+    const hostEnvCoverageRow = await db('hosts')
+      .where({ org_id: orgId, scan_run_id: scanRunId, has_env_tag: 1 })
+      .count<{ c: string | number }[]>({ c: '*' }).first();
+    const hostEnvCoverage = Number(hostEnvCoverageRow?.c ?? 0);
+
+    const totalHosts = await count('hosts');
+
+    const openIncidentsRow = await db('incidents')
+      .where({ org_id: orgId, scan_run_id: scanRunId })
+      .andWhere((qb) => qb.whereNull('state').orWhereNot('state', 'resolved'))
+      .count<{ c: string | number }[]>({ c: '*' }).first();
+    const openIncidents = Number(openIncidentsRow?.c ?? 0);
 
     res.json({
       hosts: totalHosts,
-      services: count('services'),
-      monitors: count('monitors'),
-      dashboards: count('dashboards'),
-      syntheticsTests: count('synthetics_tests'),
-      logsIndexes: count('logs_indexes'),
-      logsPipelines: count('logs_pipelines'),
-      integrations: count('integrations'),
-      cloudAccounts: count('cloud_accounts'),
-      slos: count('slos'),
-      tagKeys: count('tag_analysis'),
+      services: await count('services'),
+      monitors: await count('monitors'),
+      dashboards: await count('dashboards'),
+      syntheticsTests: await count('synthetics_tests'),
+      logsIndexes: await count('logs_indexes'),
+      logsPipelines: await count('logs_pipelines'),
+      integrations: await count('integrations'),
+      cloudAccounts: await count('cloud_accounts'),
+      slos: await count('slos'),
+      tagKeys: await count('tag_analysis'),
       envTagCoverage: totalHosts > 0 ? Math.round((hostEnvCoverage / totalHosts) * 100) : 0,
-      securityFindings: count('security_findings'),
+      securityFindings: await count('security_findings'),
       openIncidents,
     });
   } catch (err) { next(err); }
@@ -266,71 +307,85 @@ router.get('/summary', (req, res, next) => {
 
 // GET /api/inventory/tag-coverage
 // Returns per-product-layer tag coverage for the hierarchical tree view
-router.get('/tag-coverage', (req, res, next) => {
+router.get('/tag-coverage', async (req, res, next) => {
   try {
     const { orgId, scanRunId } = parseQuery(req as Parameters<typeof parseQuery>[0]);
     if (!orgId) throw new AppError('orgId required', 400);
     if (!scanRunId) throw new AppError('scanRunId required', 400);
+    await assertOrgAccess(orgId, req.user!.id);
 
     const db = getDatabase();
     const pct = (count: number, total: number) => (total > 0 ? Math.round((count / total) * 100) : null);
 
-    const hosts = db.prepare(
-      `SELECT COUNT(*) as total, SUM(has_env_tag) as env, SUM(has_service_tag) as service,
-              SUM(has_version_tag) as version, SUM(has_team_tag) as team
-       FROM hosts WHERE org_id = ? AND scan_run_id = ?`
-    ).get(orgId, scanRunId) as { total: number; env: number; service: number; version: number; team: number };
+    const hosts = await db('hosts')
+      .where({ org_id: orgId, scan_run_id: scanRunId })
+      .count<{ total: string | number }>({ total: '*' })
+      .sum<{ env: string | number }>({ env: 'has_env_tag' })
+      .sum<{ service: string | number }>({ service: 'has_service_tag' })
+      .sum<{ version: string | number }>({ version: 'has_version_tag' })
+      .sum<{ team: string | number }>({ team: 'has_team_tag' })
+      .first() as unknown as { total: number; env: number; service: number; version: number; team: number };
 
-    const services = db.prepare(
-      `SELECT COUNT(*) as total, SUM(CASE WHEN env IS NOT NULL AND env != '' THEN 1 ELSE 0 END) as env,
-              SUM(has_version_tag) as version, SUM(CASE WHEN team IS NOT NULL AND team != '' THEN 1 ELSE 0 END) as team
-       FROM services WHERE org_id = ? AND scan_run_id = ?`
-    ).get(orgId, scanRunId) as { total: number; env: number; version: number; team: number };
+    const services = await db('services')
+      .where({ org_id: orgId, scan_run_id: scanRunId })
+      .count<{ total: string | number }>({ total: '*' })
+      .sum<{ env: string | number }>(
+        db.raw("CASE WHEN env IS NOT NULL AND env != '' THEN 1 ELSE 0 END") as unknown as string
+      )
+      .sum<{ version: string | number }>({ version: 'has_version_tag' })
+      .sum<{ team: string | number }>(
+        db.raw("CASE WHEN team IS NOT NULL AND team != '' THEN 1 ELSE 0 END") as unknown as string
+      )
+      .first() as unknown as { total: number; env: number; version: number; team: number };
 
-    const monitors = db.prepare(
-      `SELECT COUNT(*) as total, SUM(has_env_tag) as env, SUM(has_service_tag) as service,
-              SUM(has_team_tag) as team
-       FROM monitors WHERE org_id = ? AND scan_run_id = ?`
-    ).get(orgId, scanRunId) as { total: number; env: number; service: number; team: number };
+    const monitors = await db('monitors')
+      .where({ org_id: orgId, scan_run_id: scanRunId })
+      .count<{ total: string | number }>({ total: '*' })
+      .sum<{ env: string | number }>({ env: 'has_env_tag' })
+      .sum<{ service: string | number }>({ service: 'has_service_tag' })
+      .sum<{ team: string | number }>({ team: 'has_team_tag' })
+      .first() as unknown as { total: number; env: number; service: number; team: number };
 
-    const synthetics = db.prepare(
-      `SELECT COUNT(*) as total, SUM(has_env_tag) as env, SUM(has_service_tag) as service
-       FROM synthetics_tests WHERE org_id = ? AND scan_run_id = ?`
-    ).get(orgId, scanRunId) as { total: number; env: number; service: number };
+    const synthetics = await db('synthetics_tests')
+      .where({ org_id: orgId, scan_run_id: scanRunId })
+      .count<{ total: string | number }>({ total: '*' })
+      .sum<{ env: string | number }>({ env: 'has_env_tag' })
+      .sum<{ service: string | number }>({ service: 'has_service_tag' })
+      .first() as unknown as { total: number; env: number; service: number };
 
     // Detect sector tags from the tag_analysis table
     const detectedKeys = new Set(
-      (db.prepare('SELECT tag_key FROM tag_analysis WHERE org_id = ? AND scan_run_id = ?')
-        .all(orgId, scanRunId) as { tag_key: string }[]).map((r) => r.tag_key)
+      (await db('tag_analysis').select('tag_key').where({ org_id: orgId, scan_run_id: scanRunId }) as { tag_key: string }[])
+        .map((r) => r.tag_key)
     );
 
     res.json({
       layers: {
         hosts: {
-          total: hosts.total,
-          env: pct(hosts.env, hosts.total),
-          service: pct(hosts.service, hosts.total),
-          version: pct(hosts.version, hosts.total),
-          team: pct(hosts.team, hosts.total),
+          total: Number(hosts.total),
+          env: pct(Number(hosts.env), Number(hosts.total)),
+          service: pct(Number(hosts.service), Number(hosts.total)),
+          version: pct(Number(hosts.version), Number(hosts.total)),
+          team: pct(Number(hosts.team), Number(hosts.total)),
         },
         services: {
-          total: services.total,
+          total: Number(services.total),
           // All APM services have a service name by definition
-          service: services.total > 0 ? 100 : null,
-          env: pct(services.env, services.total),
-          version: pct(services.version, services.total),
-          team: pct(services.team, services.total),
+          service: Number(services.total) > 0 ? 100 : null,
+          env: pct(Number(services.env), Number(services.total)),
+          version: pct(Number(services.version), Number(services.total)),
+          team: pct(Number(services.team), Number(services.total)),
         },
         monitors: {
-          total: monitors.total,
-          env: pct(monitors.env, monitors.total),
-          service: pct(monitors.service, monitors.total),
-          team: pct(monitors.team, monitors.total),
+          total: Number(monitors.total),
+          env: pct(Number(monitors.env), Number(monitors.total)),
+          service: pct(Number(monitors.service), Number(monitors.total)),
+          team: pct(Number(monitors.team), Number(monitors.total)),
         },
         synthetics: {
-          total: synthetics.total,
-          env: pct(synthetics.env, synthetics.total),
-          service: pct(synthetics.service, synthetics.total),
+          total: Number(synthetics.total),
+          env: pct(Number(synthetics.env), Number(synthetics.total)),
+          service: pct(Number(synthetics.service), Number(synthetics.total)),
         },
       },
       detectedTagKeys: [...detectedKeys],
@@ -339,29 +394,34 @@ router.get('/tag-coverage', (req, res, next) => {
 });
 
 // GET /api/inventory/tag-detail  — per-tag value breakdown + collision detection
-router.get('/tag-detail', (req, res, next) => {
+router.get('/tag-detail', async (req, res, next) => {
   try {
     const { orgId, scanRunId } = parseQuery(req as Parameters<typeof parseQuery>[0]);
     const tagKey = req.query.tagKey as string | undefined;
     if (!orgId || !scanRunId || !tagKey) throw new AppError('orgId, scanRunId, and tagKey required', 400);
+    await assertOrgAccess(orgId, req.user!.id);
 
     const db = getDatabase();
 
     // All values for this key across all resource types
-    const valueRows = db.prepare(`
-      SELECT resource_type, tag_value, COUNT(DISTINCT resource_id) as cnt
-      FROM resource_tags
-      WHERE org_id = ? AND scan_run_id = ? AND tag_key = ?
-      GROUP BY resource_type, tag_value
-      ORDER BY cnt DESC
-    `).all(orgId, scanRunId, tagKey) as Array<{ resource_type: string; tag_value: string; cnt: number }>;
+    const valueRows = await db('resource_tags')
+      .select('resource_type', 'tag_value')
+      .count({ cnt: 'resource_id', distinct: true })
+      .where({ org_id: orgId, scan_run_id: scanRunId, tag_key: tagKey })
+      .groupBy('resource_type', 'tag_value')
+      .orderBy('cnt', 'desc') as unknown as Array<{ resource_type: string; tag_value: string; cnt: number }>;
 
     // Total resources per type (to compute coverage %)
+    const countTable = async (table: string) => {
+      const row = await db(table).where({ org_id: orgId, scan_run_id: scanRunId })
+        .count<{ c: string | number }[]>({ c: '*' }).first();
+      return Number(row?.c ?? 0);
+    };
     const typeTotals: Record<string, number> = {
-      host: (db.prepare('SELECT COUNT(*) as c FROM hosts WHERE org_id=? AND scan_run_id=?').get(orgId, scanRunId) as { c: number }).c,
-      service: (db.prepare('SELECT COUNT(*) as c FROM services WHERE org_id=? AND scan_run_id=?').get(orgId, scanRunId) as { c: number }).c,
-      monitor: (db.prepare('SELECT COUNT(*) as c FROM monitors WHERE org_id=? AND scan_run_id=?').get(orgId, scanRunId) as { c: number }).c,
-      synthetics_test: (db.prepare('SELECT COUNT(*) as c FROM synthetics_tests WHERE org_id=? AND scan_run_id=?').get(orgId, scanRunId) as { c: number }).c,
+      host: await countTable('hosts'),
+      service: await countTable('services'),
+      monitor: await countTable('monitors'),
+      synthetics_test: await countTable('synthetics_tests'),
     };
 
     // Aggregate: per resource-type breakdown
@@ -370,11 +430,12 @@ router.get('/tag-detail', (req, res, next) => {
 
     for (const row of valueRows) {
       const t = row.resource_type;
+      const cnt = Number(row.cnt);
       if (!byType[t]) byType[t] = { tagged: 0, total: typeTotals[t] ?? 0 };
-      byType[t].tagged += row.cnt;
+      byType[t].tagged += cnt;
 
       if (!valueAgg[row.tag_value]) valueAgg[row.tag_value] = { count: 0, types: new Set() };
-      valueAgg[row.tag_value].count += row.cnt;
+      valueAgg[row.tag_value].count += cnt;
       valueAgg[row.tag_value].types.add(row.resource_type);
     }
 
@@ -437,45 +498,46 @@ router.get('/tag-detail', (req, res, next) => {
 });
 
 // GET /api/inventory/cloud  — cloud accounts + cloud-sourced tag inventory
-router.get('/cloud', (req, res, next) => {
+router.get('/cloud', async (req, res, next) => {
   try {
     const { orgId, scanRunId } = parseQuery(req as Parameters<typeof parseQuery>[0]);
     if (!orgId) throw new AppError('orgId required', 400);
     if (!scanRunId) throw new AppError('scanRunId required', 400);
+    await assertOrgAccess(orgId, req.user!.id);
 
     const db = getDatabase();
 
     // Cloud accounts
-    const accounts = db.prepare(`
-      SELECT provider, account_id, account_name, status,
-             metrics_enabled, resource_collection_enabled, has_errors, raw_json
-      FROM cloud_accounts WHERE org_id = ? AND scan_run_id = ?
-      ORDER BY provider, account_name
-    `).all(orgId, scanRunId) as Array<{
+    const accounts = await db('cloud_accounts')
+      .select(
+        'provider', 'account_id', 'account_name', 'status',
+        'metrics_enabled', 'resource_collection_enabled', 'has_errors', 'raw_json'
+      )
+      .where({ org_id: orgId, scan_run_id: scanRunId })
+      .orderBy([{ column: 'provider', order: 'asc' }, { column: 'account_name', order: 'asc' }]) as Array<{
       provider: string; account_id: string | null; account_name: string | null;
       status: string; metrics_enabled: number; resource_collection_enabled: number;
       has_errors: number; raw_json: string | null;
     }>;
 
     // Cloud-sourced tags from resource_tags (populated correctly after collector fix)
-    const CLOUD_SOURCES = ['aws', 'gcp', 'azure', 'kubernetes', 'docker'];
-    const cloudTagRows = db.prepare(`
-      SELECT tag_source, tag_key, tag_value, COUNT(DISTINCT resource_id) as host_count
-      FROM resource_tags
-      WHERE org_id = ? AND scan_run_id = ?
-        AND tag_source IN ('aws','gcp','azure','kubernetes','docker')
-      GROUP BY tag_source, tag_key, tag_value
-      ORDER BY tag_source, host_count DESC, tag_key
-    `).all(orgId, scanRunId) as Array<{
+    const cloudTagRows = await db('resource_tags')
+      .select('tag_source', 'tag_key', 'tag_value')
+      .count({ host_count: 'resource_id', distinct: true })
+      .where({ org_id: orgId, scan_run_id: scanRunId })
+      .whereIn('tag_source', ['aws', 'gcp', 'azure', 'kubernetes', 'docker'])
+      .groupBy('tag_source', 'tag_key', 'tag_value')
+      .orderBy([{ column: 'tag_source', order: 'asc' }, { column: 'host_count', order: 'desc' }, { column: 'tag_key', order: 'asc' }]) as unknown as Array<{
       tag_source: string; tag_key: string; tag_value: string; host_count: number;
     }>;
 
     // Fallback: parse tags_by_source from host raw_json for scans without cloud source tracking
     let cloudTagsFromRaw: typeof cloudTagRows = [];
     if (cloudTagRows.length === 0) {
-      const hostRaws = db.prepare(`
-        SELECT host_name, raw_json FROM hosts WHERE org_id = ? AND scan_run_id = ? AND raw_json IS NOT NULL
-      `).all(orgId, scanRunId) as Array<{ host_name: string; raw_json: string }>;
+      const hostRaws = await db('hosts')
+        .select('host_name', 'raw_json')
+        .where({ org_id: orgId, scan_run_id: scanRunId })
+        .whereNotNull('raw_json') as Array<{ host_name: string; raw_json: string }>;
 
       const CLOUD_SOURCE_MAP: Record<string, string> = {
         'amazon web services': 'aws', 'amazon ec2': 'aws', 'aws': 'aws',
@@ -524,7 +586,7 @@ router.get('/cloud', (req, res, next) => {
     const bySource: Record<string, Array<{ key: string; value: string; hostCount: number }>> = {};
     for (const row of effectiveCloudTags) {
       if (!bySource[row.tag_source]) bySource[row.tag_source] = [];
-      bySource[row.tag_source].push({ key: row.tag_key, value: row.tag_value, hostCount: row.host_count });
+      bySource[row.tag_source].push({ key: row.tag_key, value: row.tag_value, hostCount: Number(row.host_count) });
     }
 
     // Unique keys per source
@@ -534,13 +596,21 @@ router.get('/cloud', (req, res, next) => {
     }
 
     // Hosts with cloud tags vs total
-    const totalHosts = (db.prepare('SELECT COUNT(*) as c FROM hosts WHERE org_id=? AND scan_run_id=?')
-      .get(orgId, scanRunId) as { c: number }).c;
-    const hostsWithCloudTags = cloudTagRows.length > 0
-      ? (db.prepare(`SELECT COUNT(DISTINCT resource_id) as c FROM resource_tags
-           WHERE org_id=? AND scan_run_id=? AND tag_source IN ('aws','gcp','azure')`)
-          .get(orgId, scanRunId) as { c: number }).c
-      : effectiveCloudTags.reduce((s, r) => s + r.host_count, 0); // rough for fallback
+    const totalHostsRow = await db('hosts')
+      .where({ org_id: orgId, scan_run_id: scanRunId })
+      .count<{ c: string | number }[]>({ c: '*' }).first();
+    const totalHosts = Number(totalHostsRow?.c ?? 0);
+
+    let hostsWithCloudTags: number;
+    if (cloudTagRows.length > 0) {
+      const hostsWithCloudTagsRow = await db('resource_tags')
+        .where({ org_id: orgId, scan_run_id: scanRunId })
+        .whereIn('tag_source', ['aws', 'gcp', 'azure'])
+        .countDistinct<{ c: string | number }[]>({ c: 'resource_id' }).first();
+      hostsWithCloudTags = Number(hostsWithCloudTagsRow?.c ?? 0);
+    } else {
+      hostsWithCloudTags = effectiveCloudTags.reduce((s, r) => s + Number(r.host_count), 0); // rough for fallback
+    }
 
     // Detected providers
     const detectedProviders = [...new Set(effectiveCloudTags.map(r => r.tag_source))];
@@ -561,10 +631,9 @@ router.get('/cloud', (req, res, next) => {
     }
 
     // Cloud Cost Management config per provider
-    const costManagementRows = db.prepare(`
-      SELECT provider, configured, account_count FROM cost_management_config
-      WHERE org_id = ? AND scan_run_id = ?
-    `).all(orgId, scanRunId) as Array<{ provider: string; configured: number; account_count: number }>;
+    const costManagementRows = await db('cost_management_config')
+      .select('provider', 'configured', 'account_count')
+      .where({ org_id: orgId, scan_run_id: scanRunId }) as Array<{ provider: string; configured: number; account_count: number }>;
     const costManagement = costManagementRows.map(r => ({
       provider: r.provider,
       configured: Boolean(r.configured),
@@ -597,12 +666,13 @@ router.get('/cloud', (req, res, next) => {
 // cloud placement, tag compliance, APM/CSPM/CWS/NPM coverage gaps with
 // why/what/how/cost/impact, service catalog maturity, and host-vs-serverless
 // app breakdown. See backend/src/assessment/host-gaps.ts.
-router.get('/host-gaps', (req, res, next) => {
+router.get('/host-gaps', async (req, res, next) => {
   try {
     const { orgId, scanRunId } = parseQuery(req as Parameters<typeof parseQuery>[0]);
     if (!orgId) throw new AppError('orgId required', 400);
     if (!scanRunId) throw new AppError('scanRunId required', 400);
-    res.json(analyzeHostGaps(orgId, scanRunId));
+    await assertOrgAccess(orgId, req.user!.id);
+    res.json(await analyzeHostGaps(orgId, scanRunId));
   } catch (err) { next(err); }
 });
 

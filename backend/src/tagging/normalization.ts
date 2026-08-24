@@ -1,3 +1,4 @@
+import type { Knex } from 'knex';
 import { getDatabase } from '../db/database';
 
 const AFFECTED_CAP = 25;
@@ -82,25 +83,22 @@ function caseFold(s: string) {
  * currently only populated for resource_type='host' by the infrastructure
  * collector, so this surfaces host-level detail; the returned list is capped.
  */
-function findAffectedResources(
-  db: ReturnType<typeof getDatabase>,
+async function findAffectedResources(
+  db: Knex,
   orgId: string,
   scanRunId: string,
   tagKeys: string[],
   tagValues?: string[]
-): Array<{ type: string; id: string; name: string }> {
+): Promise<Array<{ type: string; id: string; name: string }>> {
   if (tagKeys.length === 0) return [];
-  const keyPlaceholders = tagKeys.map(() => '?').join(', ');
-  let query = `SELECT DISTINCT resource_type, resource_id FROM resource_tags
-     WHERE org_id = ? AND scan_run_id = ? AND tag_key IN (${keyPlaceholders})`;
-  const params: Array<string> = [orgId, scanRunId, ...tagKeys];
+  let query = db<{ org_id: string; scan_run_id: string; resource_type: string; resource_id: string }>('resource_tags')
+    .distinct('resource_type', 'resource_id')
+    .where({ org_id: orgId, scan_run_id: scanRunId })
+    .whereIn('tag_key', tagKeys);
   if (tagValues && tagValues.length > 0) {
-    const valuePlaceholders = tagValues.map(() => '?').join(', ');
-    query += ` AND tag_value IN (${valuePlaceholders})`;
-    params.push(...tagValues);
+    query = query.whereIn('tag_value', tagValues);
   }
-  query += ` LIMIT ${AFFECTED_CAP}`;
-  const rows = db.prepare(query).all(...params) as Array<{ resource_type: string; resource_id: string }>;
+  const rows = await query.limit(AFFECTED_CAP);
   return rows.map((r) => ({ type: r.resource_type, id: r.resource_id, name: r.resource_id }));
 }
 
@@ -135,26 +133,29 @@ export interface NormalizationResult {
   totalTagKeys: number;
 }
 
-export function analyzeTagNormalization(orgId: string, scanRunId: string): NormalizationResult {
+export async function analyzeTagNormalization(orgId: string, scanRunId: string): Promise<NormalizationResult> {
   const db = getDatabase();
 
-  const tagRows = db.prepare(
-    `SELECT tag_key, unique_value_count, host_occurrence_count, service_occurrence_count, top_values
-     FROM tag_analysis WHERE org_id = ? AND scan_run_id = ?`
-  ).all(orgId, scanRunId) as Array<{
+  const tagRows = await db<{
+    org_id: string;
+    scan_run_id: string;
     tag_key: string;
     unique_value_count: number;
     host_occurrence_count: number;
     service_occurrence_count: number;
     top_values: string;
-  }>;
+  }>('tag_analysis')
+    .select('tag_key', 'unique_value_count', 'host_occurrence_count', 'service_occurrence_count', 'top_values')
+    .where({ org_id: orgId, scan_run_id: scanRunId });
 
   const tagKeys = tagRows.map((r) => r.tag_key);
   const tagMap = new Map(tagRows.map((r) => [r.tag_key, r]));
 
-  const totalHosts = (db.prepare(
-    'SELECT COUNT(*) as c FROM hosts WHERE org_id = ? AND scan_run_id = ?'
-  ).get(orgId, scanRunId) as { c: number })?.c ?? 1;
+  const totalHostsRow = await db('hosts')
+    .count({ c: '*' })
+    .where({ org_id: orgId, scan_run_id: scanRunId })
+    .first() as { c: number | string } | undefined;
+  const totalHosts = Number(totalHostsRow?.c ?? 1) || 1;
 
   // ── Synonym detection ──────────────────────────────────────────────────────
   const synonymGroups: NormalizationResult['synonymGroups'] = [];
@@ -218,7 +219,7 @@ export function analyzeTagNormalization(orgId: string, scanRunId: string): Norma
       resourceTypes: ['host', 'service'],
       affectedCount,
       recommendation: `Standardize to lowercase: use "${lower}" consistently across all resources`,
-      affectedResources: findAffectedResources(db, orgId, scanRunId, variants),
+      affectedResources: await findAffectedResources(db, orgId, scanRunId, variants),
     });
   }
 
@@ -242,7 +243,7 @@ export function analyzeTagNormalization(orgId: string, scanRunId: string): Norma
           resourceTypes: ['host', 'service'],
           affectedCount: row.host_occurrence_count + row.service_occurrence_count,
           recommendation: `Normalize values: standardize to "${group[0]}" (found variants: ${found.join(', ')})`,
-          affectedResources: findAffectedResources(db, orgId, scanRunId, [matchingKey], found),
+          affectedResources: await findAffectedResources(db, orgId, scanRunId, [matchingKey], found),
         });
       }
     }

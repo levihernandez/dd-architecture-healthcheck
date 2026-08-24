@@ -22,25 +22,41 @@ export async function collectGovernance(
   const teamsResult = await client.getV2Paginated<DDTeam>('/api/v2/teams');
 
   if (teamsResult.status === 'success') {
-    const insert = db.prepare(`
-      INSERT OR REPLACE INTO resources
-        (id, org_id, scan_run_id, resource_type, resource_id, resource_name,
-         source_endpoint, first_seen, last_seen, raw_json)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
+    try {
+      await db.transaction(async (trx) => {
+        for (const team of teamsResult.data) {
+          const resourceType = 'team';
+          const resourceId = team.id;
+          const patch = {
+            org_id: orgId,
+            scan_run_id: scanRunId,
+            resource_type: resourceType,
+            resource_id: resourceId,
+            resource_name: team.attributes.name,
+            source_endpoint: '/api/v2/teams',
+            last_seen: now,
+            raw_json: safeJsonSnapshot({ id: team.id, name: team.attributes.name,
+              handle: team.attributes.handle, user_count: team.attributes.user_count }),
+          };
 
-    const txn = db.transaction((teams: DDTeam[]) => {
-      for (const team of teams) {
-        insert.run(
-          uuidv4(), orgId, scanRunId,
-          'team', team.id, team.attributes.name,
-          '/api/v2/teams', now, now,
-          safeJsonSnapshot({ id: team.id, name: team.attributes.name,
-            handle: team.attributes.handle, user_count: team.attributes.user_count })
-        );
-      }
-    });
-    try { txn(teamsResult.data); } catch (err) {
+          const existing = await trx('resources')
+            .where({ org_id: orgId, resource_type: resourceType, resource_id: resourceId })
+            .first();
+
+          if (existing) {
+            await trx('resources')
+              .where({ org_id: orgId, resource_type: resourceType, resource_id: resourceId })
+              .update(patch);
+          } else {
+            await trx('resources').insert({
+              id: uuidv4(),
+              ...patch,
+              first_seen: now,
+            });
+          }
+        }
+      });
+    } catch (err) {
       logger.error(`[${orgId}] Failed to store team data`, err);
     }
     totalItems += teamsResult.itemCount;
@@ -59,16 +75,12 @@ export async function collectGovernance(
       mfaEnabled: usersResult.data.filter((u) => u.attributes.mfa_enabled).length,
     };
 
-    db.prepare(`
-      INSERT OR REPLACE INTO product_usage_signals
-        (id, org_id, scan_run_id, product, signal, value, detected, evidence, checked_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      uuidv4(), orgId, scanRunId,
-      'governance', 'user_count',
-      String(userSummary.total), 1,
-      JSON.stringify(userSummary), now
-    );
+    await upsertProductUsageSignal(db, orgId, scanRunId, 'governance', 'user_count', {
+      value: String(userSummary.total),
+      detected: 1,
+      evidence: JSON.stringify(userSummary),
+      checked_at: now,
+    });
     totalItems += 1;
   }
 
@@ -89,53 +101,44 @@ export async function collectGovernance(
         saml_autocreate_enabled: settings.saml_autocreate_users_domains?.enabled ?? false,
       };
 
-      db.prepare(`
-        INSERT OR REPLACE INTO product_usage_signals
-          (id, org_id, scan_run_id, product, signal, value, detected, evidence, checked_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(
-        uuidv4(), orgId, scanRunId,
-        'governance', 'sso_status',
-        JSON.stringify(ssoSignal), 1,
-        JSON.stringify({ note: 'High-level SSO signal only. No IdP metadata or certificates collected.' }),
-        now
-      );
+      await upsertProductUsageSignal(db, orgId, scanRunId, 'governance', 'sso_status', {
+        value: JSON.stringify(ssoSignal),
+        detected: 1,
+        evidence: JSON.stringify({ note: 'High-level SSO signal only. No IdP metadata or certificates collected.' }),
+        checked_at: now,
+      });
     }
   }
 
   // RBAC roles
   const rolesResult = await client.getV2Paginated<Record<string, unknown>>('/api/v2/roles');
   if (rolesResult.status === 'success') {
-    db.prepare(`
-      INSERT OR REPLACE INTO product_usage_signals
-        (id, org_id, scan_run_id, product, signal, value, detected, evidence, checked_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      uuidv4(), orgId, scanRunId,
-      'governance', 'role_count',
-      String(rolesResult.itemCount), 1,
-      null, now
-    );
+    await upsertProductUsageSignal(db, orgId, scanRunId, 'governance', 'role_count', {
+      value: String(rolesResult.itemCount),
+      detected: 1,
+      evidence: null,
+      checked_at: now,
+    });
   }
 
   // Record permission results for all governance endpoints
-  const insertPermission = db.prepare(`
-    INSERT OR REPLACE INTO permissions_report
-      (id, org_id, scan_run_id, endpoint, status, status_code, error, tested_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-
-  for (const [endpoint, result] of [
+  const permissionRows = ([
     ['/api/v2/teams', teamsResult],
     ['/api/v2/users', usersResult],
     ['/api/v1/org', orgSettingsResult],
     ['/api/v2/roles', rolesResult],
-  ] as const) {
-    insertPermission.run(
-      uuidv4(), orgId, scanRunId,
-      endpoint, result.status, null, result.error ?? null, now
-    );
-  }
+  ] as const).map(([endpoint, result]) => ({
+    id: uuidv4(),
+    org_id: orgId,
+    scan_run_id: scanRunId,
+    endpoint,
+    status: result.status,
+    status_code: null,
+    error: result.error ?? null,
+    tested_at: now,
+  }));
+
+  await db('permissions_report').insert(permissionRows);
 
   const allResults = [teamsResult, usersResult, orgSettingsResult, rolesResult];
   logger.info(`[${orgId}] Collected governance data (${totalItems} items) in ${Date.now() - start}ms`);
@@ -150,4 +153,34 @@ export async function collectGovernance(
     truncated: allResults.some((r) => r.truncated),
     rateLimitRemaining: rolesResult.rateLimitRemaining,
   };
+}
+
+// product_usage_signals has a composite unique constraint on (org_id, product, signal).
+// INSERT OR REPLACE semantics are reproduced explicitly (select then conditional
+// insert/update) rather than via onConflict().merge(), since composite-key conflict
+// targets can behave inconsistently across knex versions/dialects.
+async function upsertProductUsageSignal(
+  db: ReturnType<typeof getDatabase>,
+  orgId: string,
+  scanRunId: string,
+  product: string,
+  signal: string,
+  fields: { value: string | null; detected: number; evidence: string | null; checked_at: string }
+): Promise<void> {
+  const existing = await db('product_usage_signals').where({ org_id: orgId, product, signal }).first();
+
+  if (existing) {
+    await db('product_usage_signals')
+      .where({ org_id: orgId, product, signal })
+      .update({ scan_run_id: scanRunId, ...fields });
+  } else {
+    await db('product_usage_signals').insert({
+      id: uuidv4(),
+      org_id: orgId,
+      scan_run_id: scanRunId,
+      product,
+      signal,
+      ...fields,
+    });
+  }
 }

@@ -4,6 +4,11 @@ function pct(count: number, total: number): number {
   return total === 0 ? 100 : Math.round((count / total) * 100);
 }
 
+async function countServices(db: AssessmentContext['db'], orgId: string, scanRunId: string, extra?: Record<string, unknown>): Promise<number> {
+  const row = await db('services').where({ org_id: orgId, scan_run_id: scanRunId, ...extra }).count({ c: '*' }).first();
+  return Number(row?.c ?? 0);
+}
+
 const missingServiceCatalogRule: AssessmentRule = {
   id: 'svc-001',
   name: 'Service catalog coverage',
@@ -12,14 +17,17 @@ const missingServiceCatalogRule: AssessmentRule = {
   description: 'All APM services should have service catalog entries with ownership',
   async run(ctx: AssessmentContext): Promise<RuleResult> {
     const { orgId, scanRunId, db } = ctx;
-    const total = (db.prepare('SELECT COUNT(*) as c FROM services WHERE org_id = ? AND scan_run_id = ?').get(orgId, scanRunId) as { c: number })?.c ?? 0;
-    const withCatalog = (db.prepare('SELECT COUNT(*) as c FROM services WHERE org_id = ? AND scan_run_id = ? AND has_service_catalog = 1').get(orgId, scanRunId) as { c: number })?.c ?? 0;
+    const total = await countServices(db, orgId, scanRunId);
+    const withCatalog = await countServices(db, orgId, scanRunId, { has_service_catalog: 1 });
     const missing = total - withCatalog;
     const percentage = pct(withCatalog, total);
     const passed = percentage >= 80;
 
     const affectedServices = missing > 0
-      ? (db.prepare('SELECT service_name FROM services WHERE org_id = ? AND scan_run_id = ? AND has_service_catalog = 0 LIMIT 20').all(orgId, scanRunId) as Array<{ service_name: string }>)
+      ? await db<{ org_id: string; scan_run_id: string; has_service_catalog: number; service_name: string }>('services')
+          .select('service_name')
+          .where({ org_id: orgId, scan_run_id: scanRunId, has_service_catalog: 0 })
+          .limit(20)
       : [];
 
     return {
@@ -47,8 +55,8 @@ const servicesWithoutMonitorsRule: AssessmentRule = {
   description: 'Every production service should have at least one monitor',
   async run(ctx: AssessmentContext): Promise<RuleResult> {
     const { orgId, scanRunId, db } = ctx;
-    const total = (db.prepare('SELECT COUNT(*) as c FROM services WHERE org_id = ? AND scan_run_id = ?').get(orgId, scanRunId) as { c: number })?.c ?? 0;
-    const withMonitor = (db.prepare('SELECT COUNT(*) as c FROM services WHERE org_id = ? AND scan_run_id = ? AND has_monitor = 1').get(orgId, scanRunId) as { c: number })?.c ?? 0;
+    const total = await countServices(db, orgId, scanRunId);
+    const withMonitor = await countServices(db, orgId, scanRunId, { has_monitor: 1 });
     const missing = total - withMonitor;
     const percentage = pct(withMonitor, total);
     const passed = percentage >= 90;
@@ -78,8 +86,8 @@ const servicesWithoutSLOsRule: AssessmentRule = {
   description: 'Production services should have SLOs defining reliability targets',
   async run(ctx: AssessmentContext): Promise<RuleResult> {
     const { orgId, scanRunId, db } = ctx;
-    const total = (db.prepare('SELECT COUNT(*) as c FROM services WHERE org_id = ? AND scan_run_id = ?').get(orgId, scanRunId) as { c: number })?.c ?? 0;
-    const withSLO = (db.prepare('SELECT COUNT(*) as c FROM services WHERE org_id = ? AND scan_run_id = ? AND has_slo = 1').get(orgId, scanRunId) as { c: number })?.c ?? 0;
+    const total = await countServices(db, orgId, scanRunId);
+    const withSLO = await countServices(db, orgId, scanRunId, { has_slo: 1 });
     const missing = total - withSLO;
     const percentage = pct(withSLO, total);
     const passed = percentage >= 60;
@@ -109,8 +117,8 @@ const servicesWithoutOwnerRule: AssessmentRule = {
   description: 'Every service should have a declared owner/team',
   async run(ctx: AssessmentContext): Promise<RuleResult> {
     const { orgId, scanRunId, db } = ctx;
-    const total = (db.prepare('SELECT COUNT(*) as c FROM services WHERE org_id = ? AND scan_run_id = ?').get(orgId, scanRunId) as { c: number })?.c ?? 0;
-    const withOwner = (db.prepare('SELECT COUNT(*) as c FROM services WHERE org_id = ? AND scan_run_id = ? AND has_owner = 1').get(orgId, scanRunId) as { c: number })?.c ?? 0;
+    const total = await countServices(db, orgId, scanRunId);
+    const withOwner = await countServices(db, orgId, scanRunId, { has_owner: 1 });
     const missing = total - withOwner;
     const percentage = pct(withOwner, total);
     const passed = percentage >= 85;

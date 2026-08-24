@@ -51,13 +51,13 @@ const ALL_COLLECTORS: Array<{ name: string; fn: CollectorFn }> = [
 ];
 
 export async function runScan(orgId: string, scanRunId: string, requestedCollectors?: string[]): Promise<void> {
-  const creds = OrgRepository.getCredentials(orgId);
+  const creds = await OrgRepository.getCredentials(orgId);
   if (!creds) {
-    ScanRepository.updateStatus(scanRunId, 'failed', 'Could not retrieve credentials');
+    await ScanRepository.updateStatus(scanRunId, 'failed', 'Could not retrieve credentials');
     return;
   }
 
-  ScanRepository.updateStatus(scanRunId, 'running');
+  await ScanRepository.updateStatus(scanRunId, 'running');
 
   const client = createClient({
     site: creds.site,
@@ -70,7 +70,10 @@ export async function runScan(orgId: string, scanRunId: string, requestedCollect
   // Feature-flag gate first: a collector disabled via the admin feature-flag tree
   // (or effectively disabled because its 'scan' ancestor is off) never runs,
   // regardless of what the caller explicitly requested.
-  const flagEnabledCollectors = ALL_COLLECTORS.filter((c) => FeatureFlagRepository.isCollectorEnabled(c.name));
+  const collectorEnabledFlags = await Promise.all(
+    ALL_COLLECTORS.map((c) => FeatureFlagRepository.isCollectorEnabled(c.name))
+  );
+  const flagEnabledCollectors = ALL_COLLECTORS.filter((_c, i) => collectorEnabledFlags[i]);
 
   const collectors = requestedCollectors
     ? flagEnabledCollectors.filter((c) => requestedCollectors.includes(c.name))
@@ -104,21 +107,21 @@ export async function runScan(orgId: string, scanRunId: string, requestedCollect
     }
   }
 
-  ScanRepository.updateCollectorResults(scanRunId, results);
+  await ScanRepository.updateCollectorResults(scanRunId, results);
 
   // Run assessment engine
   try {
     logger.info(`[${orgId}] Running assessment engine`);
     const findingCount = await runAssessment(orgId, scanRunId);
-    ScanRepository.updateFindingCount(scanRunId, findingCount);
+    await ScanRepository.updateFindingCount(scanRunId, findingCount);
     logger.info(`[${orgId}] Assessment complete: ${findingCount} findings`);
   } catch (err) {
     logger.error(`[${orgId}] Assessment engine error`, err);
   }
 
   const hasErrors = results.some((r) => r.status === 'error');
-  ScanRepository.updateStatus(scanRunId, hasErrors ? 'completed' : 'completed');
-  OrgRepository.updateScanStatus(orgId, 'success');
+  await ScanRepository.updateStatus(scanRunId, hasErrors ? 'completed' : 'completed');
+  await OrgRepository.updateScanStatus(orgId, 'success');
 
   logger.info(`[${orgId}] Scan ${scanRunId} complete`);
 }

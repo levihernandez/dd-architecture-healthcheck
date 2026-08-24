@@ -32,49 +32,54 @@ interface PricingSnapshotRow {
 }
 
 export const PricingSnapshotRepository = {
-  capture(sourceUrl: string, items: PricingSnapshotItem[], capturedAt?: string): PricingSnapshotRecord[] {
+  async capture(sourceUrl: string, items: PricingSnapshotItem[], capturedAt?: string): Promise<PricingSnapshotRecord[]> {
     const db = getDatabase();
     const timestamp = capturedAt ?? new Date().toISOString();
-    const insert = db.prepare(`
-      INSERT INTO pricing_snapshots (id, captured_at, source_url, product, tier, unit, price, raw_text)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-    const ids = items.map((item) => {
-      const id = uuidv4();
-      insert.run(id, timestamp, sourceUrl, item.product, item.tier ?? null, item.unit, item.price, item.rawText ?? null);
-      return id;
-    });
-    const rows = db.prepare(
-      `SELECT * FROM pricing_snapshots WHERE id IN (${ids.map(() => '?').join(',')})`
-    ).all(...ids) as PricingSnapshotRow[];
+
+    const rows = items.map((item) => ({
+      id: uuidv4(),
+      captured_at: timestamp,
+      source_url: sourceUrl,
+      product: item.product,
+      tier: item.tier ?? null,
+      unit: item.unit,
+      price: item.price,
+      raw_text: item.rawText ?? null,
+    }));
+
+    if (rows.length === 0) return [];
+
+    await db('pricing_snapshots').insert(rows);
+
+    const ids = rows.map((r) => r.id);
+    const inserted = await db<PricingSnapshotRow>('pricing_snapshots').whereIn('id', ids);
+    return inserted.map(rowToRecord);
+  },
+
+  async listAll(): Promise<PricingSnapshotRecord[]> {
+    const db = getDatabase();
+    const rows = await db<PricingSnapshotRow>('pricing_snapshots').orderBy('captured_at', 'desc');
     return rows.map(rowToRecord);
   },
 
-  listAll(): PricingSnapshotRecord[] {
+  async history(product: string): Promise<PricingSnapshotRecord[]> {
     const db = getDatabase();
-    const rows = db.prepare(
-      'SELECT * FROM pricing_snapshots ORDER BY captured_at DESC'
-    ).all() as PricingSnapshotRow[];
+    const rows = await db<PricingSnapshotRow>('pricing_snapshots')
+      .where({ product })
+      .orderBy('captured_at', 'asc');
     return rows.map(rowToRecord);
   },
 
-  history(product: string): PricingSnapshotRecord[] {
+  async latestPerProduct(): Promise<PricingSnapshotRecord[]> {
     const db = getDatabase();
-    const rows = db.prepare(
-      'SELECT * FROM pricing_snapshots WHERE product = ? ORDER BY captured_at ASC'
-    ).all(product) as PricingSnapshotRow[];
-    return rows.map(rowToRecord);
-  },
-
-  latestPerProduct(): PricingSnapshotRecord[] {
-    const db = getDatabase();
-    const rows = db.prepare(`
-      SELECT ps.* FROM pricing_snapshots ps
-      WHERE ps.captured_at = (
-        SELECT MAX(captured_at) FROM pricing_snapshots WHERE product = ps.product
+    const rows = await db<PricingSnapshotRow>('pricing_snapshots as ps')
+      .where(
+        'ps.captured_at',
+        '=',
+        db('pricing_snapshots').max('captured_at').where('product', db.ref('ps.product'))
       )
-      ORDER BY ps.product ASC
-    `).all() as PricingSnapshotRow[];
+      .orderBy('ps.product', 'asc')
+      .select('ps.*');
     return rows.map(rowToRecord);
   },
 };

@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { getDatabase } from '../../db/database';
+import { assertOrgAccess } from '../../auth/org-access';
 import { AppError } from '../middleware/error.middleware';
 import { parseUsageSummary, parseCostJson, buildProductBreakdown } from '../../assessment/cost-data';
 import {
@@ -12,39 +13,47 @@ import {
 
 const router = Router();
 
+const SEVERITY_ORDER_RAW = "CASE severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END";
+
 // GET /api/analytics?orgId=&scanRunId=
-router.get('/', (req, res, next) => {
+router.get('/', async (req, res, next) => {
   try {
     const orgId = req.query.orgId as string | undefined;
     const scanRunId = req.query.scanRunId as string | undefined;
     if (!orgId) throw new AppError('orgId required', 400);
     if (!scanRunId) throw new AppError('scanRunId required', 400);
+    await assertOrgAccess(orgId, req.user!.id);
 
     const db = getDatabase();
-    const c = (table: string, where = '') =>
-      (db.prepare(`SELECT COUNT(*) as n FROM ${table} WHERE org_id=? AND scan_run_id=? ${where}`)
-        .get(orgId, scanRunId) as { n: number }).n;
+    const c = async (table: string, extra?: Record<string, number>) => {
+      const row = await db(table)
+        .where({ org_id: orgId, scan_run_id: scanRunId, ...(extra ?? {}) })
+        .count<{ n: string | number }[]>({ n: '*' }).first();
+      return Number(row?.n ?? 0);
+    };
 
     // Real billing data, when this scan collected it — used to prefer actual cost
     // over list-price estimates per domain below (falls back to null if absent).
-    const usageRow = db.prepare(
-      'SELECT usage_json, cost_json FROM usage_summary WHERE org_id=? AND scan_run_id=?'
-    ).get(orgId, scanRunId) as { usage_json: string; cost_json: string | null } | undefined;
+    const usageRow = await db('usage_summary')
+      .select('usage_json', 'cost_json')
+      .where({ org_id: orgId, scan_run_id: scanRunId })
+      .first() as { usage_json: string; cost_json: string | null } | undefined;
     const { latestUsage } = usageRow ? parseUsageSummary(usageRow.usage_json) : { latestUsage: {} };
     const costCharges = usageRow ? parseCostJson(usageRow.cost_json) : [];
     const products = buildProductBreakdown(latestUsage, costCharges);
 
     // ── Infrastructure ─────────────────────────────────────────────────────────
-    const totalHosts = c('hosts');
-    const hostsWithEnv = c('hosts', 'AND has_env_tag=1');
-    const hostsWithService = c('hosts', 'AND has_service_tag=1');
-    const hostsWithVersion = c('hosts', 'AND has_version_tag=1');
-    const hostsWithTeam = c('hosts', 'AND has_team_tag=1');
+    const totalHosts = await c('hosts');
+    const hostsWithEnv = await c('hosts', { has_env_tag: 1 });
+    const hostsWithService = await c('hosts', { has_service_tag: 1 });
+    const hostsWithVersion = await c('hosts', { has_version_tag: 1 });
+    const hostsWithTeam = await c('hosts', { has_team_tag: 1 });
 
     // Custom metrics estimate from tag cardinality
-    const tagRows = db.prepare(
-      'SELECT tag_key, unique_value_count FROM tag_analysis WHERE org_id=? AND scan_run_id=? ORDER BY unique_value_count DESC'
-    ).all(orgId, scanRunId) as Array<{ tag_key: string; unique_value_count: number }>;
+    const tagRows = await db('tag_analysis')
+      .select('tag_key', 'unique_value_count')
+      .where({ org_id: orgId, scan_run_id: scanRunId })
+      .orderBy('unique_value_count', 'desc') as Array<{ tag_key: string; unique_value_count: number }>;
 
     const estCM = tagRows.reduce((s, t) => t.unique_value_count > 10 ? s + Math.min(t.unique_value_count * 2, 500) : s, 0);
     const allotment100 = Math.max(500, totalHosts * 100);
@@ -53,14 +62,17 @@ router.get('/', (req, res, next) => {
     const cmRisk = cmPct100 > 90 ? 'high' : cmPct100 > 60 ? 'medium' : 'low';
 
     // Cloud accounts
-    const cloudRows = db.prepare(
-      'SELECT provider, COUNT(*) as n FROM cloud_accounts WHERE org_id=? AND scan_run_id=? GROUP BY provider'
-    ).all(orgId, scanRunId) as Array<{ provider: string; n: number }>;
+    const cloudRows = await db('cloud_accounts')
+      .select('provider')
+      .count<{ n: string | number }>({ n: '*' })
+      .where({ org_id: orgId, scan_run_id: scanRunId })
+      .groupBy('provider') as unknown as Array<{ provider: string; n: number }>;
 
     // Container estimate from product signals
-    const containerSignal = db.prepare(
-      "SELECT value FROM product_usage_signals WHERE org_id=? AND scan_run_id=? AND product='containers' AND signal='total_containers'"
-    ).get(orgId, scanRunId) as { value: string } | undefined;
+    const containerSignal = await db('product_usage_signals')
+      .select('value')
+      .where({ org_id: orgId, scan_run_id: scanRunId, product: 'containers', signal: 'total_containers' })
+      .first() as { value: string } | undefined;
 
     const hostTier = totalHosts === 0 ? 'None'
       : totalHosts < 50 ? 'Startup (<50)'
@@ -69,12 +81,10 @@ router.get('/', (req, res, next) => {
       : 'Enterprise (1000+)';
 
     // ── Logs ───────────────────────────────────────────────────────────────────
-    const logRows = db.prepare(`
-      SELECT index_name, retention_days, daily_limit, exclusion_filter_count,
-             is_rate_limited, filter_query, raw_json
-      FROM logs_indexes WHERE org_id=? AND scan_run_id=?
-      ORDER BY retention_days DESC NULLS LAST
-    `).all(orgId, scanRunId) as Array<{
+    const logRows = await db('logs_indexes')
+      .select('index_name', 'retention_days', 'daily_limit', 'exclusion_filter_count', 'is_rate_limited', 'filter_query', 'raw_json')
+      .where({ org_id: orgId, scan_run_id: scanRunId })
+      .orderByRaw('retention_days DESC NULLS LAST') as Array<{
       index_name: string; retention_days: number | null; daily_limit: number | null;
       exclusion_filter_count: number; is_rate_limited: number;
       filter_query: string | null; raw_json: string | null;
@@ -112,8 +122,8 @@ router.get('/', (req, res, next) => {
       };
     });
 
-    const pipelines = c('logs_pipelines');
-    const enabledPipelines = c('logs_pipelines', 'AND is_enabled=1');
+    const pipelines = await c('logs_pipelines');
+    const enabledPipelines = await c('logs_pipelines', { is_enabled: 1 });
 
     // Archives: check raw_json of log indexes for archive-type fields
     // (Datadog doesn't expose archives in the same endpoint, but note it for future)
@@ -126,11 +136,14 @@ router.get('/', (req, res, next) => {
     // carries the host_count, which is the actual evidence a check is receiving
     // data rather than just configured. Account/notification integrations (aws,
     // slack, pagerduty, etc.) have no per-host signal, so hostCount is null there.
-    const integRows = db.prepare(`
-      SELECT integration_name, integration_type, status, is_configured, is_enabled, raw_json
-      FROM integrations WHERE org_id=? AND scan_run_id=?
-      ORDER BY is_enabled DESC, is_configured DESC, integration_name
-    `).all(orgId, scanRunId) as Array<{
+    const integRows = await db('integrations')
+      .select('integration_name', 'integration_type', 'status', 'is_configured', 'is_enabled', 'raw_json')
+      .where({ org_id: orgId, scan_run_id: scanRunId })
+      .orderBy([
+        { column: 'is_enabled', order: 'desc' },
+        { column: 'is_configured', order: 'desc' },
+        { column: 'integration_name', order: 'asc' },
+      ]) as Array<{
       integration_name: string; integration_type: string | null;
       status: string | null; is_configured: number; is_enabled: number; raw_json: string | null;
     }>;
@@ -159,10 +172,9 @@ router.get('/', (req, res, next) => {
     const integNotInstalled = integRows.length - integInstalled - integBroken - integIdle;
 
     // ── Synthetics ─────────────────────────────────────────────────────────────
-    const synthRows = db.prepare(`
-      SELECT test_name, test_type, status, location_count, tags
-      FROM synthetics_tests WHERE org_id=? AND scan_run_id=?
-    `).all(orgId, scanRunId) as Array<{
+    const synthRows = await db('synthetics_tests')
+      .select('test_name', 'test_type', 'status', 'location_count', 'tags')
+      .where({ org_id: orgId, scan_run_id: scanRunId }) as Array<{
       test_name: string | null; test_type: string | null;
       status: string | null; location_count: number | null; tags: string | null;
     }>;
@@ -183,26 +195,26 @@ router.get('/', (req, res, next) => {
     }));
 
     // ── APM ─────────────────────────────────────────────────────────────────────
-    const totalServices = c('services');
-    const svcInCatalog = c('services', 'AND has_service_catalog=1');
-    const svcWithMonitor = c('services', 'AND has_monitor=1');
-    const svcWithSLO = c('services', 'AND has_slo=1');
-    const slos = c('slos');
-    const monitors = c('monitors');
-    const dashboards = c('dashboards');
-    const dashboardsOotb = c('dashboards', 'AND is_read_only=1');
-    const dashboardsByAuthor = db.prepare(`
-      SELECT COALESCE(author_handle, 'Unknown') as author, COUNT(*) as n
-      FROM dashboards WHERE org_id=? AND scan_run_id=? AND is_read_only=0
-      GROUP BY author ORDER BY n DESC
-    `).all(orgId, scanRunId) as Array<{ author: string; n: number }>;
+    const totalServices = await c('services');
+    const svcInCatalog = await c('services', { has_service_catalog: 1 });
+    const svcWithMonitor = await c('services', { has_monitor: 1 });
+    const svcWithSLO = await c('services', { has_slo: 1 });
+    const slos = await c('slos');
+    const monitors = await c('monitors');
+    const dashboards = await c('dashboards');
+    const dashboardsOotb = await c('dashboards', { is_read_only: 1 });
+    const dashboardsByAuthor = await db('dashboards')
+      .select(db.raw("COALESCE(author_handle, 'Unknown') as author"))
+      .count<{ n: string | number }>({ n: '*' })
+      .where({ org_id: orgId, scan_run_id: scanRunId, is_read_only: 0 })
+      .groupBy('author')
+      .orderBy('n', 'desc') as unknown as Array<{ author: string; n: number }>;
 
     // ── RUM ─────────────────────────────────────────────────────────────────────
-    const rumApps = db.prepare(`
-      SELECT app_id, app_name, app_type, framework, client_token_hint, created_at_dd
-      FROM rum_applications WHERE org_id=? AND scan_run_id=?
-      ORDER BY created_at_dd ASC
-    `).all(orgId, scanRunId) as Array<{
+    const rumApps = await db('rum_applications')
+      .select('app_id', 'app_name', 'app_type', 'framework', 'client_token_hint', 'created_at_dd')
+      .where({ org_id: orgId, scan_run_id: scanRunId })
+      .orderBy('created_at_dd', 'asc') as Array<{
       app_id: string; app_name: string | null; app_type: string | null;
       framework: string | null; client_token_hint: string | null; created_at_dd: string | null;
     }>;
@@ -214,17 +226,18 @@ router.get('/', (req, res, next) => {
     }
 
     // ── Fleet ────────────────────────────────────────────────────────────────────
-    const fleetSig = (signal: string): Record<string, number> => {
-      const row = db.prepare(
-        `SELECT value FROM product_usage_signals WHERE org_id=? AND scan_run_id=? AND product='fleet' AND signal=?`
-      ).get(orgId, scanRunId, signal) as { value: string } | undefined;
+    const fleetSig = async (signal: string): Promise<Record<string, number>> => {
+      const row = await db('product_usage_signals')
+        .select('value')
+        .where({ org_id: orgId, scan_run_id: scanRunId, product: 'fleet', signal })
+        .first() as { value: string } | undefined;
       if (!row?.value) return {};
       try { return JSON.parse(row.value) as Record<string, number>; } catch { return {}; }
     };
 
-    const agentVersions = fleetSig('agent_versions');
-    const platforms = fleetSig('platforms');
-    const installedChecks = fleetSig('installed_checks');
+    const agentVersions = await fleetSig('agent_versions');
+    const platforms = await fleetSig('platforms');
+    const installedChecks = await fleetSig('installed_checks');
 
     const versionBuckets: Record<string, number> = {};
     for (const [ver, cnt] of Object.entries(agentVersions)) {
@@ -234,16 +247,23 @@ router.get('/', (req, res, next) => {
     }
 
     // ── Security findings ───────────────────────────────────────────────────────
-    const totalSecurityFindings = c('security_findings');
-    const securityBySeverity = db.prepare(
-      "SELECT severity, COUNT(*) as n FROM security_findings WHERE org_id=? AND scan_run_id=? GROUP BY severity"
-    ).all(orgId, scanRunId) as Array<{ severity: string; n: number }>;
-    const securityByCategory = db.prepare(
-      "SELECT category, COUNT(*) as n FROM security_findings WHERE org_id=? AND scan_run_id=? GROUP BY category"
-    ).all(orgId, scanRunId) as Array<{ category: string; n: number }>;
-    const unresolvedCritical = (db.prepare(
-      "SELECT COUNT(*) as n FROM security_findings WHERE org_id=? AND scan_run_id=? AND severity IN ('critical','high') AND (status IS NULL OR status NOT IN ('resolved','muted','skipped'))"
-    ).get(orgId, scanRunId) as { n: number }).n;
+    const totalSecurityFindings = await c('security_findings');
+    const securityBySeverity = await db('security_findings')
+      .select('severity')
+      .count<{ n: string | number }>({ n: '*' })
+      .where({ org_id: orgId, scan_run_id: scanRunId })
+      .groupBy('severity') as unknown as Array<{ severity: string; n: number }>;
+    const securityByCategory = await db('security_findings')
+      .select('category')
+      .count<{ n: string | number }>({ n: '*' })
+      .where({ org_id: orgId, scan_run_id: scanRunId })
+      .groupBy('category') as unknown as Array<{ category: string; n: number }>;
+    const unresolvedCriticalRow = await db('security_findings')
+      .where({ org_id: orgId, scan_run_id: scanRunId })
+      .whereIn('severity', ['critical', 'high'])
+      .andWhere((qb) => qb.whereNull('status').orWhereNotIn('status', ['resolved', 'muted', 'skipped']))
+      .count<{ n: string | number }[]>({ n: '*' }).first();
+    const unresolvedCritical = Number(unresolvedCriticalRow?.n ?? 0);
 
     // ── Product proxy detection (DBM/NPM/NDM have no dedicated collector yet —
     // infer presence from matching integration names, same heuristic as Product Usage) ──
@@ -256,19 +276,154 @@ router.get('/', (req, res, next) => {
     };
 
     // ── Incidents ────────────────────────────────────────────────────────────────
-    const totalIncidents = c('incidents');
-    const openIncidentsCount = c('incidents', "AND (state IS NULL OR state != 'resolved')");
-    const incidentsBySeverity = db.prepare(
-      "SELECT severity, COUNT(*) as n FROM incidents WHERE org_id=? AND scan_run_id=? GROUP BY severity"
-    ).all(orgId, scanRunId) as Array<{ severity: string; n: number }>;
+    const totalIncidents = await c('incidents');
+    const openIncidentsRow = await db('incidents')
+      .where({ org_id: orgId, scan_run_id: scanRunId })
+      .andWhere((qb) => qb.whereNull('state').orWhereNot('state', 'resolved'))
+      .count<{ n: string | number }[]>({ n: '*' }).first();
+    const openIncidentsCount = Number(openIncidentsRow?.n ?? 0);
+    const incidentsBySeverity = await db('incidents')
+      .select('severity')
+      .count<{ n: string | number }>({ n: '*' })
+      .where({ org_id: orgId, scan_run_id: scanRunId })
+      .groupBy('severity') as unknown as Array<{ severity: string; n: number }>;
 
     // ── Cloud Cost Management ───────────────────────────────────────────────────
-    const ccmConfig = db.prepare(
-      'SELECT provider, configured FROM cost_management_config WHERE org_id=? AND scan_run_id=?'
-    ).all(orgId, scanRunId) as Array<{ provider: string; configured: number }>;
+    const ccmConfig = await db('cost_management_config')
+      .select('provider', 'configured')
+      .where({ org_id: orgId, scan_run_id: scanRunId }) as Array<{ provider: string; configured: number }>;
+
+    const scanRunRow = await db('scan_runs').select('completed_at').where({ id: scanRunId }).first() as { completed_at: string | null } | undefined;
+
+    // ── Monitor breakdown ──────────────────────────────────────────────────
+    const monitorBreakdown = await (async () => {
+      const rows = await db('monitors')
+        .select('monitor_type', 'overall_state', 'is_muted', 'has_notification', 'has_env_tag', 'has_service_tag', 'has_team_tag')
+        .where({ org_id: orgId, scan_run_id: scanRunId }) as Array<{
+        monitor_type: string | null; overall_state: string | null;
+        is_muted: number; has_notification: number;
+        has_env_tag: number; has_service_tag: number; has_team_tag: number;
+      }>;
+
+      const byState: Record<string, number> = {};
+      const byType: Record<string, number> = {};
+      let mutedCount = 0, withoutNotification = 0;
+      let withoutEnvTag = 0, withoutServiceTag = 0, withoutTeamTag = 0;
+
+      for (const r of rows) {
+        const state = r.overall_state ?? 'Unknown';
+        byState[state] = (byState[state] ?? 0) + 1;
+        const type = r.monitor_type ?? 'other';
+        byType[type] = (byType[type] ?? 0) + 1;
+        if (r.is_muted) mutedCount++;
+        if (!r.has_notification) withoutNotification++;
+        if (!r.has_env_tag) withoutEnvTag++;
+        if (!r.has_service_tag) withoutServiceTag++;
+        if (!r.has_team_tag) withoutTeamTag++;
+      }
+
+      return {
+        total: rows.length, byState, byType, mutedCount, withoutNotification, withoutEnvTag, withoutServiceTag, withoutTeamTag,
+        recommendations: monitorsRecommendations({ total: rows.length, mutedCount, withoutNotification, withoutEnvTag, withoutServiceTag, withoutTeamTag }),
+      };
+    })();
+
+    // ── SLO breakdown ──────────────────────────────────────────────────────
+    const sloBreakdown = await (async () => {
+      const rows = await db('slos')
+        .select('slo_type', 'has_env_tag', 'has_service_tag')
+        .where({ org_id: orgId, scan_run_id: scanRunId }) as Array<{ slo_type: string | null; has_env_tag: number; has_service_tag: number }>;
+
+      const byType: Record<string, number> = {};
+      let withEnvTag = 0, withServiceTag = 0;
+      for (const r of rows) {
+        const t = r.slo_type ?? 'unknown';
+        byType[t] = (byType[t] ?? 0) + 1;
+        if (r.has_env_tag) withEnvTag++;
+        if (r.has_service_tag) withServiceTag++;
+      }
+
+      return {
+        total: rows.length, byType, withEnvTag, withServiceTag,
+        recommendations: sloRecommendations({ total: rows.length, svcWithSLO, totalServices }),
+      };
+    })();
+
+    // ── Governance ─────────────────────────────────────────────────────────
+    const governance = await (async () => {
+      const sig = async (product: string, signal: string): Promise<string | null> => {
+        const row = await db('product_usage_signals')
+          .select('value')
+          .where({ org_id: orgId, scan_run_id: scanRunId, product, signal })
+          .first() as { value: string } | undefined;
+        return row?.value ?? null;
+      };
+
+      const userCount = await sig('governance', 'user_count');
+      const roleCount = await sig('governance', 'role_count');
+
+      const findingRows = await db('findings')
+        .select('rule_name', 'severity', 'title', 'description', 'affected_count', 'total_count', 'recommendation')
+        .where({ org_id: orgId, scan_run_id: scanRunId })
+        .whereIn('category', ['governance', 'unified_tagging'])
+        .orderByRaw(SEVERITY_ORDER_RAW) as Array<{
+        rule_name: string; severity: string; title: string; description: string;
+        affected_count: number; total_count: number; recommendation: string | null;
+      }>;
+
+      const teamTagCoveragePct = totalHosts > 0 ? Math.round(hostsWithTeam / totalHosts * 100) : 0;
+      return {
+        userCount: userCount ? parseInt(userCount) : null,
+        roleCount: roleCount ? parseInt(roleCount) : null,
+        findings: findingRows.map(r => ({
+          ruleName: r.rule_name, severity: r.severity, title: r.title,
+          description: r.description, affectedCount: r.affected_count,
+          totalCount: r.total_count, recommendation: r.recommendation,
+        })),
+        recommendations: governanceRecommendations({
+          userCount: userCount ? parseInt(userCount) : null,
+          roleCount: roleCount ? parseInt(roleCount) : null,
+          findingsCount: findingRows.length,
+          teamTagCoveragePct,
+        }),
+      };
+    })();
+
+    // ── Health scorecard ────────────────────────────────────────────────────
+    const scorecard = await (async () => {
+      const row = await db('scorecards')
+        .select('overall_score', 'overall_grade', 'category_scores')
+        .where({ org_id: orgId, scan_run_id: scanRunId })
+        .first() as { overall_score: number; overall_grade: string; category_scores: string } | undefined;
+
+      if (!row) return null;
+
+      let categories: unknown[] = [];
+      try { categories = JSON.parse(row.category_scores); } catch { /* ignore */ }
+
+      const allFindings = await db('findings')
+        .select('rule_name', 'severity', 'title', 'description', 'affected_count', 'recommendation', 'category')
+        .where({ org_id: orgId, scan_run_id: scanRunId })
+        .orderByRaw(SEVERITY_ORDER_RAW)
+        .limit(20) as Array<{
+        rule_name: string; severity: string; title: string; description: string;
+        affected_count: number; recommendation: string | null; category: string;
+      }>;
+
+      return {
+        overallScore: row.overall_score,
+        overallGrade: row.overall_grade,
+        categories,
+        topFindings: allFindings.map(f => ({
+          ruleName: f.rule_name, severity: f.severity, title: f.title,
+          description: f.description, affectedCount: f.affected_count,
+          recommendation: f.recommendation, category: f.category,
+        })),
+      };
+    })();
 
     res.json({
-      scannedAt: (db.prepare('SELECT completed_at FROM scan_runs WHERE id=?').get(scanRunId) as { completed_at: string | null } | undefined)?.completed_at,
+      scannedAt: scanRunRow?.completed_at,
       infrastructure: {
         totalHosts,
         hostTier,
@@ -389,7 +544,7 @@ router.get('/', (req, res, next) => {
         dashboards,
         dashboardBreakdown: {
           ootb: dashboardsOotb,
-          byAuthor: dashboardsByAuthor.map((r) => ({ author: r.author, count: r.n })),
+          byAuthor: dashboardsByAuthor.map((r) => ({ author: r.author, count: Number(r.n) })),
         },
       },
       rum: {
@@ -416,8 +571,8 @@ router.get('/', (req, res, next) => {
       security: {
         total: totalSecurityFindings,
         unresolvedCritical,
-        bySeverity: Object.fromEntries(securityBySeverity.map((r) => [r.severity ?? 'unknown', r.n])),
-        byCategory: Object.fromEntries(securityByCategory.map((r) => [r.category ?? 'unknown', r.n])),
+        bySeverity: Object.fromEntries(securityBySeverity.map((r) => [r.severity ?? 'unknown', Number(r.n)])),
+        byCategory: Object.fromEntries(securityByCategory.map((r) => [r.category ?? 'unknown', Number(r.n)])),
         cost: domainCost(products, ['cspm', 'cws', 'appsec'], {
           volume: totalHosts, unitPrice: PRICING_ESTIMATES.cspmHostMonthly, unit: 'hosts (CSPM est.)',
         }),
@@ -433,136 +588,16 @@ router.get('/', (req, res, next) => {
       incidents: {
         total: totalIncidents,
         open: openIncidentsCount,
-        bySeverity: Object.fromEntries(incidentsBySeverity.map((r) => [r.severity ?? 'unknown', r.n])),
+        bySeverity: Object.fromEntries(incidentsBySeverity.map((r) => [r.severity ?? 'unknown', Number(r.n)])),
       },
       costManagement: {
         providers: ccmConfig.map((r) => ({ provider: r.provider, configured: Boolean(r.configured) })),
       },
 
-      // ── Monitor breakdown ──────────────────────────────────────────────────
-      monitorBreakdown: (() => {
-        const rows = db.prepare(`
-          SELECT monitor_type, overall_state, is_muted, has_notification,
-                 has_env_tag, has_service_tag, has_team_tag
-          FROM monitors WHERE org_id=? AND scan_run_id=?
-        `).all(orgId, scanRunId) as Array<{
-          monitor_type: string | null; overall_state: string | null;
-          is_muted: number; has_notification: number;
-          has_env_tag: number; has_service_tag: number; has_team_tag: number;
-        }>;
-
-        const byState: Record<string, number> = {};
-        const byType: Record<string, number> = {};
-        let mutedCount = 0, withoutNotification = 0;
-        let withoutEnvTag = 0, withoutServiceTag = 0, withoutTeamTag = 0;
-
-        for (const r of rows) {
-          const state = r.overall_state ?? 'Unknown';
-          byState[state] = (byState[state] ?? 0) + 1;
-          const type = r.monitor_type ?? 'other';
-          byType[type] = (byType[type] ?? 0) + 1;
-          if (r.is_muted) mutedCount++;
-          if (!r.has_notification) withoutNotification++;
-          if (!r.has_env_tag) withoutEnvTag++;
-          if (!r.has_service_tag) withoutServiceTag++;
-          if (!r.has_team_tag) withoutTeamTag++;
-        }
-
-        return {
-          total: rows.length, byState, byType, mutedCount, withoutNotification, withoutEnvTag, withoutServiceTag, withoutTeamTag,
-          recommendations: monitorsRecommendations({ total: rows.length, mutedCount, withoutNotification, withoutEnvTag, withoutServiceTag, withoutTeamTag }),
-        };
-      })(),
-
-      // ── SLO breakdown ──────────────────────────────────────────────────────
-      sloBreakdown: (() => {
-        const rows = db.prepare(`
-          SELECT slo_type, has_env_tag, has_service_tag FROM slos WHERE org_id=? AND scan_run_id=?
-        `).all(orgId, scanRunId) as Array<{ slo_type: string | null; has_env_tag: number; has_service_tag: number }>;
-
-        const byType: Record<string, number> = {};
-        let withEnvTag = 0, withServiceTag = 0;
-        for (const r of rows) {
-          const t = r.slo_type ?? 'unknown';
-          byType[t] = (byType[t] ?? 0) + 1;
-          if (r.has_env_tag) withEnvTag++;
-          if (r.has_service_tag) withServiceTag++;
-        }
-
-        return {
-          total: rows.length, byType, withEnvTag, withServiceTag,
-          recommendations: sloRecommendations({ total: rows.length, svcWithSLO, totalServices }),
-        };
-      })(),
-
-      // ── Governance ─────────────────────────────────────────────────────────
-      governance: (() => {
-        const sig = (product: string, signal: string): string | null =>
-          (db.prepare('SELECT value FROM product_usage_signals WHERE org_id=? AND scan_run_id=? AND product=? AND signal=?')
-            .get(orgId, scanRunId, product, signal) as { value: string } | undefined)?.value ?? null;
-
-        const userCount = sig('governance', 'user_count');
-        const roleCount = sig('governance', 'role_count');
-
-        const findingRows = db.prepare(`
-          SELECT rule_name, severity, title, description, affected_count, total_count, recommendation
-          FROM findings WHERE org_id=? AND scan_run_id=? AND category IN ('governance','unified_tagging')
-          ORDER BY CASE severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END
-        `).all(orgId, scanRunId) as Array<{
-          rule_name: string; severity: string; title: string; description: string;
-          affected_count: number; total_count: number; recommendation: string | null;
-        }>;
-
-        const teamTagCoveragePct = totalHosts > 0 ? Math.round(hostsWithTeam / totalHosts * 100) : 0;
-        return {
-          userCount: userCount ? parseInt(userCount) : null,
-          roleCount: roleCount ? parseInt(roleCount) : null,
-          findings: findingRows.map(r => ({
-            ruleName: r.rule_name, severity: r.severity, title: r.title,
-            description: r.description, affectedCount: r.affected_count,
-            totalCount: r.total_count, recommendation: r.recommendation,
-          })),
-          recommendations: governanceRecommendations({
-            userCount: userCount ? parseInt(userCount) : null,
-            roleCount: roleCount ? parseInt(roleCount) : null,
-            findingsCount: findingRows.length,
-            teamTagCoveragePct,
-          }),
-        };
-      })(),
-
-      // ── Health scorecard ────────────────────────────────────────────────────
-      scorecard: (() => {
-        const row = db.prepare(
-          'SELECT overall_score, overall_grade, category_scores FROM scorecards WHERE org_id=? AND scan_run_id=?'
-        ).get(orgId, scanRunId) as { overall_score: number; overall_grade: string; category_scores: string } | undefined;
-
-        if (!row) return null;
-
-        let categories: unknown[] = [];
-        try { categories = JSON.parse(row.category_scores); } catch { /* ignore */ }
-
-        const allFindings = db.prepare(`
-          SELECT rule_name, severity, title, description, affected_count, recommendation, category
-          FROM findings WHERE org_id=? AND scan_run_id=?
-          ORDER BY CASE severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END
-          LIMIT 20
-        `).all(orgId, scanRunId) as Array<{
-          rule_name: string; severity: string; title: string; description: string;
-          affected_count: number; recommendation: string | null; category: string;
-        }>;
-
-        return {
-          overallScore: row.overall_score,
-          overallGrade: row.overall_grade,
-          categories,
-          topFindings: allFindings.map(f => ({
-            ruleName: f.rule_name, severity: f.severity, title: f.title,
-            description: f.description, affectedCount: f.affected_count,
-            recommendation: f.recommendation, category: f.category,
-          })),
-        };
-      })(),
+      monitorBreakdown,
+      sloBreakdown,
+      governance,
+      scorecard,
     });
   } catch (err) { next(err); }
 });

@@ -35,38 +35,36 @@ export async function collectRUM(
     };
   }
 
-  const insert = db.prepare(`
-    INSERT OR REPLACE INTO rum_applications
-      (id, org_id, scan_run_id, app_id, app_name, app_type, framework,
-       client_token_hint, created_at_dd, raw_json, first_seen, last_seen)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-
-  const txn = db.transaction((apps: DDRumApplication[]) => {
-    for (const app of apps) {
-      const attrs = app.attributes;
-      const appId = attrs.application_id ?? app.id;
-      const token = attrs.client_token;
-      // Store first 8 chars of client token as a hint (these are non-secret public tokens)
-      const tokenHint = token ? token.slice(0, 12) + '...' : null;
-      const createdMs = attrs.created_at;
-
-      insert.run(
-        uuidv4(), orgId, scanRunId,
-        appId,
-        attrs.name ?? null,
-        attrs.type ?? null,
-        attrs.framework ?? null,
-        tokenHint,
-        createdMs ? new Date(createdMs).toISOString() : null,
-        safeJsonSnapshot({ id: appId, name: attrs.name, type: attrs.type, framework: attrs.framework }),
-        now, now
-      );
-    }
-  });
-
   try {
-    txn(result.data);
+    await db.transaction(async (trx) => {
+      for (const app of result.data) {
+        const attrs = app.attributes;
+        const appId = attrs.application_id ?? app.id;
+        const token = attrs.client_token;
+        // Store first 8 chars of client token as a hint (these are non-secret public tokens)
+        const tokenHint = token ? token.slice(0, 12) + '...' : null;
+        const createdMs = attrs.created_at;
+
+        // `rum_applications` has unique(org_id, app_id) — the original
+        // INSERT OR REPLACE deletes any existing row for this app and inserts
+        // a fresh one (including a new id). Replicated here as an explicit
+        // delete+insert rather than onConflict().merge(), since a composite
+        // unique target can behave differently across the sqlite and postgres
+        // dialects this app supports.
+        await trx('rum_applications').where({ org_id: orgId, app_id: appId }).delete();
+        await trx('rum_applications').insert({
+          id: uuidv4(), org_id: orgId, scan_run_id: scanRunId,
+          app_id: appId,
+          app_name: attrs.name ?? null,
+          app_type: attrs.type ?? null,
+          framework: attrs.framework ?? null,
+          client_token_hint: tokenHint,
+          created_at_dd: createdMs ? new Date(createdMs).toISOString() : null,
+          raw_json: safeJsonSnapshot({ id: appId, name: attrs.name, type: attrs.type, framework: attrs.framework }),
+          first_seen: now, last_seen: now,
+        });
+      }
+    });
   } catch (err) {
     logger.error(`[${orgId}] Failed to store RUM application data`, err);
   }
@@ -78,16 +76,16 @@ export async function collectRUM(
       const t = app.attributes.type ?? 'unknown';
       byType[t] = (byType[t] ?? 0) + 1;
     }
-    db.prepare(`
-      INSERT OR REPLACE INTO product_usage_signals
-        (id, org_id, scan_run_id, product, signal, value, detected, evidence, checked_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      uuidv4(), orgId, scanRunId,
-      'rum', 'applications',
-      String(result.itemCount), 1,
-      JSON.stringify(byType), now
-    );
+    // `product_usage_signals` has unique(org_id, product, signal) — see note
+    // above for why this is an explicit delete+insert instead of
+    // onConflict().merge().
+    await db('product_usage_signals').where({ org_id: orgId, product: 'rum', signal: 'applications' }).delete();
+    await db('product_usage_signals').insert({
+      id: uuidv4(), org_id: orgId, scan_run_id: scanRunId,
+      product: 'rum', signal: 'applications',
+      value: String(result.itemCount), detected: 1,
+      evidence: JSON.stringify(byType), checked_at: now,
+    });
   }
 
   logger.info(`[${orgId}] Collected ${result.itemCount} RUM applications in ${Date.now() - start}ms`);

@@ -20,11 +20,13 @@ export async function collectSecurityFindings(
 
   const db = getDatabase();
   const now = new Date().toISOString();
-  db.prepare(`
-    INSERT OR REPLACE INTO permissions_report
-      (id, org_id, scan_run_id, endpoint, status, status_code, error, tested_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(uuidv4(), orgId, scanRunId, ENDPOINT, result.status, null, result.error ?? null, now);
+  // `permissions_report` has no unique constraint besides its app-generated
+  // `id` (which is always fresh here), so the original INSERT OR REPLACE was
+  // never actually replacing anything — a plain insert is behavior-identical.
+  await db('permissions_report').insert({
+    id: uuidv4(), org_id: orgId, scan_run_id: scanRunId, endpoint: ENDPOINT,
+    status: result.status, status_code: null, error: result.error ?? null, tested_at: now,
+  });
 
   if (result.status !== 'success') {
     return {
@@ -41,33 +43,33 @@ export async function collectSecurityFindings(
     };
   }
 
-  const insert = db.prepare(`
-    INSERT OR REPLACE INTO security_findings
-      (id, org_id, scan_run_id, finding_id, category, severity, status,
-       resource_type, resource_name, rule_name, raw_json, first_seen, last_seen)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-
-  const txn = db.transaction((findings: DDSecurityFinding[]) => {
-    for (const finding of findings) {
-      const findingId = finding.id;
-      if (!findingId) continue;
-      const attrs = finding.attributes;
-      insert.run(
-        uuidv4(), orgId, scanRunId, findingId,
-        attrs?.rule?.category ?? attrs?.category ?? 'unknown',
-        attrs?.severity ?? attrs?.evaluation ?? 'unknown',
-        attrs?.status ?? null,
-        attrs?.resource_type ?? attrs?.resource?.type ?? null,
-        attrs?.resource?.name ?? null,
-        attrs?.rule?.name ?? null,
-        safeJsonSnapshot(finding),
-        now, now
-      );
-    }
-  });
-
-  try { txn(result.data); } catch (err) {
+  try {
+    await db.transaction(async (trx) => {
+      for (const finding of result.data) {
+        const findingId = finding.id;
+        if (!findingId) continue;
+        const attrs = finding.attributes;
+        // `security_findings` has unique(org_id, finding_id) — the original
+        // INSERT OR REPLACE deletes any existing row for this finding and
+        // inserts a fresh one (including a new id). Replicated here as an
+        // explicit delete+insert rather than onConflict().merge(), since a
+        // composite unique target can behave differently across the sqlite
+        // and postgres dialects this app supports.
+        await trx('security_findings').where({ org_id: orgId, finding_id: findingId }).delete();
+        await trx('security_findings').insert({
+          id: uuidv4(), org_id: orgId, scan_run_id: scanRunId, finding_id: findingId,
+          category: attrs?.rule?.category ?? attrs?.category ?? 'unknown',
+          severity: attrs?.severity ?? attrs?.evaluation ?? 'unknown',
+          status: attrs?.status ?? null,
+          resource_type: attrs?.resource_type ?? attrs?.resource?.type ?? null,
+          resource_name: attrs?.resource?.name ?? null,
+          rule_name: attrs?.rule?.name ?? null,
+          raw_json: safeJsonSnapshot(finding),
+          first_seen: now, last_seen: now,
+        });
+      }
+    });
+  } catch (err) {
     logger.error(`[${orgId}] Failed to store security findings`, err);
   }
 

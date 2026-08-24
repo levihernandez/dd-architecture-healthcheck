@@ -7,9 +7,9 @@ import { logger } from '../../utils/logger';
 const router = Router();
 
 // GET /api/feature-flags — full nested tree with stored + computed effective state
-router.get('/', (_req, res, next) => {
+router.get('/', async (_req, res, next) => {
   try {
-    res.json(FeatureFlagRepository.getTree());
+    res.json(await FeatureFlagRepository.getTree());
   } catch (err) { next(err); }
 });
 
@@ -18,16 +18,16 @@ const SetEnabledSchema = z.object({
 });
 
 // PATCH /api/feature-flags/:key — toggle a single node's own stored preference
-router.patch('/:key', (req, res, next) => {
+router.patch('/:key', async (req, res, next) => {
   try {
     const parse = SetEnabledSchema.safeParse(req.body);
     if (!parse.success) {
       throw new AppError(`Validation error: ${parse.error.errors.map((e) => e.message).join(', ')}`, 400);
     }
 
-    FeatureFlagRepository.setEnabled(req.params.key, parse.data.enabled);
+    await FeatureFlagRepository.setEnabled(req.params.key, parse.data.enabled);
     logger.info(`[feature-flags] ${req.params.key} -> enabled=${parse.data.enabled}`);
-    res.json(FeatureFlagRepository.getTree());
+    res.json(await FeatureFlagRepository.getTree());
   } catch (err) {
     if (err instanceof Error && err.message.startsWith('Unknown feature flag key')) {
       next(new AppError(err.message, 404));

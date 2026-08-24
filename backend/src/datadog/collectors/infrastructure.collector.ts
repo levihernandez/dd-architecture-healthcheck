@@ -64,80 +64,86 @@ export async function collectInfrastructure(
   const db = getDatabase();
   const now = new Date().toISOString();
 
-  const insertHost = db.prepare(`
-    INSERT OR REPLACE INTO hosts
-      (id, org_id, scan_run_id, host_name, aliases, agent_version, platform,
-       has_env_tag, has_service_tag, has_version_tag, has_team_tag, tag_count,
-       raw_json, first_seen, last_seen)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
+  const hostRows: Record<string, unknown>[] = [];
+  const hostResourceRows: Record<string, unknown>[] = [];
+  const tagRows: Record<string, unknown>[] = [];
 
-  const insertTag = db.prepare(`
-    INSERT OR REPLACE INTO resource_tags
-      (id, org_id, scan_run_id, resource_type, resource_id, tag_key, tag_value, tag_source)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `);
+  for (const host of result.data) {
+    const hostName = host.host_name || host.name;
+    if (!hostName) continue;
 
-  const insertHost2 = db.prepare(`
-    INSERT OR REPLACE INTO resources
-      (id, org_id, scan_run_id, resource_type, resource_id, resource_name,
-       source_endpoint, first_seen, last_seen, raw_json)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
+    const allTags = flattenTags(host.tags_by_source);
+    const tagMap = parseTags(allTags);
 
-  const txn = db.transaction((hosts: DDHost[]) => {
-    for (const host of hosts) {
-      const hostName = host.host_name || host.name;
-      if (!hostName) continue;
+    const hasEnv = tagMap.has('env');
+    const hasService = tagMap.has('service');
+    const hasVersion = tagMap.has('version');
+    const hasTeam = tagMap.has('team');
 
-      const allTags = flattenTags(host.tags_by_source);
-      const tagMap = parseTags(allTags);
+    const hostId = `${orgId}:host:${hostName}`;
 
-      const hasEnv = tagMap.has('env');
-      const hasService = tagMap.has('service');
-      const hasVersion = tagMap.has('version');
-      const hasTeam = tagMap.has('team');
+    hostRows.push({
+      id: uuidv4(),
+      org_id: orgId,
+      scan_run_id: scanRunId,
+      host_name: hostName,
+      aliases: JSON.stringify(host.aliases ?? []),
+      agent_version: host.agent_version ?? host.meta?.agent_version ?? null,
+      platform: host.meta?.platform ?? null,
+      has_env_tag: hasEnv ? 1 : 0,
+      has_service_tag: hasService ? 1 : 0,
+      has_version_tag: hasVersion ? 1 : 0,
+      has_team_tag: hasTeam ? 1 : 0,
+      tag_count: allTags.length,
+      raw_json: safeJsonSnapshot(host),
+      first_seen: now,
+      last_seen: now,
+    });
 
-      const hostId = `${orgId}:host:${hostName}`;
+    hostResourceRows.push({
+      id: uuidv4(),
+      org_id: orgId,
+      scan_run_id: scanRunId,
+      resource_type: 'host',
+      resource_id: hostName,
+      resource_name: hostName,
+      source_endpoint: '/api/v1/hosts',
+      first_seen: now,
+      last_seen: now,
+      raw_json: safeJsonSnapshot(host),
+    });
 
-      insertHost.run(
-        uuidv4(), orgId, scanRunId, hostName,
-        JSON.stringify(host.aliases ?? []),
-        host.agent_version ?? host.meta?.agent_version ?? null,
-        host.meta?.platform ?? null,
-        hasEnv ? 1 : 0, hasService ? 1 : 0, hasVersion ? 1 : 0, hasTeam ? 1 : 0,
-        allTags.length,
-        safeJsonSnapshot(host),
-        now, now
-      );
-
-      insertHost2.run(
-        uuidv4(), orgId, scanRunId, 'host', hostName, hostName,
-        '/api/v1/hosts', now, now, safeJsonSnapshot(host)
-      );
-
-      // Store tags preserving their source (aws, gcp, azure, kubernetes, agent…)
-      const seenTagKeys = new Set<string>(); // track to avoid exact duplicates across sources
-      for (const [sourceName, sourceTags] of Object.entries(host.tags_by_source ?? {})) {
-        const tagSource = normalizeTagSource(sourceName);
-        const sourceTagMap = parseTags(sourceTags);
-        for (const [key, values] of sourceTagMap.entries()) {
-          for (const value of values) {
-            const dedupeKey = `${tagSource}:${key}:${value}`;
-            if (seenTagKeys.has(dedupeKey)) continue;
-            seenTagKeys.add(dedupeKey);
-            insertTag.run(
-              uuidv4(), orgId, scanRunId, 'host', hostName,
-              key, value, tagSource
-            );
-          }
+    // Store tags preserving their source (aws, gcp, azure, kubernetes, agent…)
+    const seenTagKeys = new Set<string>(); // track to avoid exact duplicates across sources
+    for (const [sourceName, sourceTags] of Object.entries(host.tags_by_source ?? {})) {
+      const tagSource = normalizeTagSource(sourceName);
+      const sourceTagMap = parseTags(sourceTags);
+      for (const [key, values] of sourceTagMap.entries()) {
+        for (const value of values) {
+          const dedupeKey = `${tagSource}:${key}:${value}`;
+          if (seenTagKeys.has(dedupeKey)) continue;
+          seenTagKeys.add(dedupeKey);
+          tagRows.push({
+            id: uuidv4(),
+            org_id: orgId,
+            scan_run_id: scanRunId,
+            resource_type: 'host',
+            resource_id: hostName,
+            tag_key: key,
+            tag_value: value,
+            tag_source: tagSource,
+          });
         }
       }
     }
-  });
+  }
 
   try {
-    txn(result.data);
+    await db.transaction(async (trx) => {
+      if (hostRows.length > 0) await trx('hosts').insert(hostRows);
+      if (hostResourceRows.length > 0) await trx('resources').insert(hostResourceRows);
+      if (tagRows.length > 0) await trx('resource_tags').insert(tagRows);
+    });
   } catch (err) {
     logger.error(`[${orgId}] Failed to store infrastructure data`, err);
   }
@@ -164,46 +170,51 @@ export async function collectInfrastructure(
     }
   }
 
-  const insertSignal = db.prepare(`
-    INSERT OR REPLACE INTO product_usage_signals
-      (id, org_id, scan_run_id, product, signal, value, detected, evidence, checked_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-
   const now2 = new Date().toISOString();
 
   if (Object.keys(agentVersions).length > 0) {
-    insertSignal.run(uuidv4(), orgId, scanRunId, 'fleet', 'agent_versions',
-      JSON.stringify(agentVersions), 1, null, now2);
+    await db('product_usage_signals').insert({
+      id: uuidv4(), org_id: orgId, scan_run_id: scanRunId, product: 'fleet', signal: 'agent_versions',
+      value: JSON.stringify(agentVersions), detected: 1, evidence: null, checked_at: now2,
+    });
   }
   if (Object.keys(platforms).length > 0) {
-    insertSignal.run(uuidv4(), orgId, scanRunId, 'fleet', 'platforms',
-      JSON.stringify(platforms), 1, null, now2);
+    await db('product_usage_signals').insert({
+      id: uuidv4(), org_id: orgId, scan_run_id: scanRunId, product: 'fleet', signal: 'platforms',
+      value: JSON.stringify(platforms), detected: 1, evidence: null, checked_at: now2,
+    });
   }
   if (Object.keys(installedChecks).length > 0) {
     // Sort by host count descending, store top 100
     const sorted = Object.entries(installedChecks)
       .sort((a, b) => b[1] - a[1])
       .slice(0, 100);
-    insertSignal.run(uuidv4(), orgId, scanRunId, 'fleet', 'installed_checks',
-      JSON.stringify(Object.fromEntries(sorted)), 1, null, now2);
+    await db('product_usage_signals').insert({
+      id: uuidv4(), org_id: orgId, scan_run_id: scanRunId, product: 'fleet', signal: 'installed_checks',
+      value: JSON.stringify(Object.fromEntries(sorted)), detected: 1, evidence: null, checked_at: now2,
+    });
 
     // Also upsert into integrations table so analytics/integrations pages see them
-    const insertInteg = db.prepare(`
-      INSERT OR REPLACE INTO integrations
-        (id, org_id, scan_run_id, integration_name, integration_type, status,
-         is_configured, is_enabled, raw_json, first_seen, last_seen)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
+    const integrationRows: Record<string, unknown>[] = [];
     for (const [checkName, hostCount] of sorted) {
       // Skip Datadog built-in system checks — they're not "integrations"
       if (['disk', 'cpu', 'memory', 'io', 'network', 'ntp', 'load', 'uptime', 'datadog', 'agent'].includes(checkName)) continue;
-      insertInteg.run(
-        uuidv4(), orgId, scanRunId, checkName, 'agent_check',
-        'installed', 1, 1,
-        JSON.stringify({ host_count: hostCount }),
-        now2, now2
-      );
+      integrationRows.push({
+        id: uuidv4(),
+        org_id: orgId,
+        scan_run_id: scanRunId,
+        integration_name: checkName,
+        integration_type: 'agent_check',
+        status: 'installed',
+        is_configured: 1,
+        is_enabled: 1,
+        raw_json: JSON.stringify({ host_count: hostCount }),
+        first_seen: now2,
+        last_seen: now2,
+      });
+    }
+    if (integrationRows.length > 0) {
+      await db('integrations').insert(integrationRows);
     }
   }
 

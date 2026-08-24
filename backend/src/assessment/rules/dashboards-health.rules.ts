@@ -4,6 +4,11 @@ function pct(count: number, total: number): number {
   return total === 0 ? 100 : Math.round((count / total) * 100);
 }
 
+async function countDashboards(db: AssessmentContext['db'], orgId: string, scanRunId: string, extra?: Record<string, unknown>): Promise<number> {
+  const row = await db('dashboards').where({ org_id: orgId, scan_run_id: scanRunId, ...extra }).count({ c: '*' }).first();
+  return Number(row?.c ?? 0);
+}
+
 const dashboardsWithoutTemplateVarsRule: AssessmentRule = {
   id: 'dash-001',
   name: 'Dashboards without template variables',
@@ -12,8 +17,8 @@ const dashboardsWithoutTemplateVarsRule: AssessmentRule = {
   description: 'Dashboards should use template variables to enable env/service filtering',
   async run(ctx: AssessmentContext): Promise<RuleResult> {
     const { orgId, scanRunId, db } = ctx;
-    const total = (db.prepare('SELECT COUNT(*) as c FROM dashboards WHERE org_id = ? AND scan_run_id = ?').get(orgId, scanRunId) as { c: number })?.c ?? 0;
-    const withVars = (db.prepare('SELECT COUNT(*) as c FROM dashboards WHERE org_id = ? AND scan_run_id = ? AND has_template_variables = 1').get(orgId, scanRunId) as { c: number })?.c ?? 0;
+    const total = await countDashboards(db, orgId, scanRunId);
+    const withVars = await countDashboards(db, orgId, scanRunId, { has_template_variables: 1 });
     const missing = total - withVars;
     const percentage = pct(withVars, total);
     const passed = percentage >= 70;
@@ -43,10 +48,14 @@ const lowWidgetDashboardsRule: AssessmentRule = {
   description: 'Dashboards with very few widgets may be unused or incomplete',
   async run(ctx: AssessmentContext): Promise<RuleResult> {
     const { orgId, scanRunId, db } = ctx;
-    const sparse = (db.prepare(
-      'SELECT COUNT(*) as c FROM dashboards WHERE org_id = ? AND scan_run_id = ? AND widget_count < 3'
-    ).get(orgId, scanRunId) as { c: number })?.c ?? 0;
-    const total = (db.prepare('SELECT COUNT(*) as c FROM dashboards WHERE org_id = ? AND scan_run_id = ?').get(orgId, scanRunId) as { c: number })?.c ?? 0;
+    const sparse = Number(
+      (await db('dashboards')
+        .where({ org_id: orgId, scan_run_id: scanRunId })
+        .where('widget_count', '<', 3)
+        .count({ c: '*' })
+        .first())?.c ?? 0
+    );
+    const total = await countDashboards(db, orgId, scanRunId);
     const percentage = pct(sparse, total);
     const passed = percentage < 20;
 

@@ -57,20 +57,39 @@ export async function collectUsage(
   const db = getDatabase();
   const collectedAt = new Date().toISOString();
 
-  db.prepare(`
-    INSERT INTO usage_summary (id, org_id, scan_run_id, report_month, usage_json, cost_json, collected_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(org_id, scan_run_id) DO UPDATE SET
-      report_month=excluded.report_month,
-      usage_json=excluded.usage_json,
-      cost_json=excluded.cost_json,
-      collected_at=excluded.collected_at
-  `).run(
-    uuidv4(), orgId, scanRunId, reportMonth,
-    JSON.stringify(usageData ?? {}),
-    costData ? JSON.stringify(costData) : null,
-    collectedAt,
-  );
+  const usageJson = JSON.stringify(usageData ?? {});
+  const costJson = costData ? JSON.stringify(costData) : null;
+
+  // Composite-key upsert (org_id, scan_run_id) — done as explicit SELECT + conditional
+  // INSERT/UPDATE inside a transaction rather than .onConflict([...]).merge(), since
+  // composite conflict targets can behave inconsistently across knex versions/dialects.
+  await db.transaction(async (trx) => {
+    const existing = await trx('usage_summary')
+      .select('id')
+      .where({ org_id: orgId, scan_run_id: scanRunId })
+      .first();
+
+    if (existing) {
+      await trx('usage_summary')
+        .where({ org_id: orgId, scan_run_id: scanRunId })
+        .update({
+          report_month: reportMonth,
+          usage_json: usageJson,
+          cost_json: costJson,
+          collected_at: collectedAt,
+        });
+    } else {
+      await trx('usage_summary').insert({
+        id: uuidv4(),
+        org_id: orgId,
+        scan_run_id: scanRunId,
+        report_month: reportMonth,
+        usage_json: usageJson,
+        cost_json: costJson,
+        collected_at: collectedAt,
+      });
+    }
+  });
 
   const hasUsage = usageData !== null;
   return {

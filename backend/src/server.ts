@@ -5,7 +5,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import compression from 'compression';
 import rateLimit from 'express-rate-limit';
-import { getDatabase, closeDatabase } from './db/database';
+import { initDatabase, closeDatabase } from './db/database';
 import { requestLoggingMiddleware } from './api/middleware/logging.middleware';
 import { errorMiddleware } from './api/middleware/error.middleware';
 import orgsRouter from './api/routes/orgs.routes';
@@ -25,6 +25,8 @@ import sizingSnapshotsRouter from './api/routes/sizing-snapshots.routes';
 import idpRouter from './api/routes/idp.routes';
 import eventsRouter from './api/routes/events.routes';
 import featureFlagsRouter from './api/routes/feature-flags.routes';
+import authRouter from './api/routes/auth.routes';
+import { authMiddleware } from './api/middleware/auth.middleware';
 import { FeatureFlagRepository } from './feature-flags/repository';
 import { logger } from './utils/logger';
 import { resolveEncryptedEnv } from './utils/secrets';
@@ -94,6 +96,18 @@ app.use('/api', limiter);
 // Logging
 app.use(requestLoggingMiddleware);
 
+// Health check — must stay reachable without a token (container healthcheck).
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok', timestamp: new Date().toISOString(), version: '1.0.0' });
+});
+
+// Auth routes are public (register/login) or self-authenticating (/me checks its
+// own token) — mounted before the blanket /api gate below.
+app.use('/api/auth', authRouter);
+
+// Everything else under /api requires a valid Bearer token.
+app.use('/api', authMiddleware);
+
 // Routes
 app.use('/api/orgs', orgsRouter);
 app.use('/api/scans', scansRouter);
@@ -113,11 +127,6 @@ app.use('/api/idp', idpRouter);
 app.use('/api/events', eventsRouter);
 app.use('/api/feature-flags', featureFlagsRouter);
 
-// Health check
-app.get('/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString(), version: '1.0.0' });
-});
-
 // 404
 app.use((req, res) => {
   res.status(404).json({ error: 'Not Found', message: `Route ${req.path} not found` });
@@ -129,9 +138,9 @@ app.use(errorMiddleware);
 async function start() {
   await resolveEncryptedEnv(); // decrypts any ENC[...] values (e.g. DD_API_KEY/DD_APP_KEY) before the DB or routes touch them
 
-  getDatabase(); // runs runMigrations() on first access
+  await initDatabase();
 
-  FeatureFlagRepository.seedDefaults();
+  await FeatureFlagRepository.seedDefaults();
 
   const protocol = HTTPS_ENABLED ? 'https' : 'http';
   const listening = () => {
@@ -158,8 +167,7 @@ async function start() {
     // forever, leaving this process holding the port on the next `npm run dev`.
     server.closeAllConnections();
     server.close(() => {
-      closeDatabase();
-      process.exit(0);
+      closeDatabase().finally(() => process.exit(0));
     });
     setTimeout(() => process.exit(1), 5000).unref();
   };

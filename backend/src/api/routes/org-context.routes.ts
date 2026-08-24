@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { getDatabase } from '../../db/database';
 import { AppError } from '../middleware/error.middleware';
+import { assertOrgAccess } from '../../auth/org-access';
 import { v4 as uuidv4 } from 'uuid';
 
 const router = Router();
@@ -33,78 +34,65 @@ const OrgContextSchema = z.object({
 });
 
 // GET /api/orgs/:orgId/context
-router.get('/:orgId/context', (req, res, next) => {
+router.get('/:orgId/context', async (req, res, next) => {
   try {
     const { orgId } = req.params;
+    await assertOrgAccess(orgId, req.user!.id);
     const db = getDatabase();
-    const row = db.prepare('SELECT * FROM org_context WHERE org_id = ?').get(orgId) as Record<string, unknown> | undefined;
+    const row = await db<Record<string, unknown>>('org_context').where({ org_id: orgId }).first();
     if (!row) { res.json(null); return; }
     res.json(deserialize(row));
   } catch (err) { next(err); }
 });
 
 // PUT /api/orgs/:orgId/context
-router.put('/:orgId/context', (req, res, next) => {
+router.put('/:orgId/context', async (req, res, next) => {
   try {
     const { orgId } = req.params;
+    await assertOrgAccess(orgId, req.user!.id);
     const parse = OrgContextSchema.safeParse(req.body);
     if (!parse.success) throw new AppError('Invalid context data', 400);
 
     const db = getDatabase();
-    const org = db.prepare('SELECT id FROM orgs WHERE id = ?').get(orgId);
+    const org = await db('orgs').select('id').where({ id: orgId }).first();
     if (!org) throw new AppError('Org not found', 404);
 
     const d = parse.data;
     const now = new Date().toISOString();
 
-    db.prepare(`
-      INSERT INTO org_context (
-        id, org_id, industry, business_description, tech_stack, cloud_providers,
-        end_user_scale, transaction_volume, device_count,
-        tier0_description, tier1_description, tier2_description,
-        tier0_uptime_target, tier1_uptime_target, revenue_impact_per_hour,
-        seasonality_description, peak_periods, compliance_frameworks,
-        dev_team_size, has_dedicated_sre, oncall_setup,
-        current_pain_points, dd_goals, additional_context, updated_at
-      ) VALUES (
-        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-      )
-      ON CONFLICT(org_id) DO UPDATE SET
-        industry=excluded.industry, business_description=excluded.business_description,
-        tech_stack=excluded.tech_stack, cloud_providers=excluded.cloud_providers,
-        end_user_scale=excluded.end_user_scale, transaction_volume=excluded.transaction_volume,
-        device_count=excluded.device_count,
-        tier0_description=excluded.tier0_description, tier1_description=excluded.tier1_description,
-        tier2_description=excluded.tier2_description,
-        tier0_uptime_target=excluded.tier0_uptime_target, tier1_uptime_target=excluded.tier1_uptime_target,
-        revenue_impact_per_hour=excluded.revenue_impact_per_hour,
-        seasonality_description=excluded.seasonality_description, peak_periods=excluded.peak_periods,
-        compliance_frameworks=excluded.compliance_frameworks,
-        dev_team_size=excluded.dev_team_size, has_dedicated_sre=excluded.has_dedicated_sre,
-        oncall_setup=excluded.oncall_setup,
-        current_pain_points=excluded.current_pain_points, dd_goals=excluded.dd_goals,
-        additional_context=excluded.additional_context, updated_at=excluded.updated_at
-    `).run(
-      uuidv4(), orgId,
-      d.industry ?? null, d.businessDescription ?? null,
-      d.techStack ? JSON.stringify(d.techStack) : null,
-      d.cloudProviders ? JSON.stringify(d.cloudProviders) : null,
-      d.endUserScale ?? null, d.transactionVolume ?? null, d.deviceCount ?? null,
-      d.tier0Description ?? null, d.tier1Description ?? null, d.tier2Description ?? null,
-      d.tier0UptimeTarget ?? null, d.tier1UptimeTarget ?? null, d.revenueImpactPerHour ?? null,
-      d.seasonalityDescription ?? null,
-      d.peakPeriods ? JSON.stringify(d.peakPeriods) : null,
-      d.complianceFrameworks ? JSON.stringify(d.complianceFrameworks) : null,
-      d.devTeamSize ?? null, d.hasDedicatedSRE ? 1 : 0,
-      d.oncallSetup ?? null,
-      d.currentPainPoints ? JSON.stringify(d.currentPainPoints) : null,
-      d.ddGoals ? JSON.stringify(d.ddGoals) : null,
-      d.additionalContext ?? null,
-      now,
-    );
+    await db('org_context')
+      .insert({
+        id: uuidv4(),
+        org_id: orgId,
+        industry: d.industry ?? null,
+        business_description: d.businessDescription ?? null,
+        tech_stack: d.techStack ? JSON.stringify(d.techStack) : null,
+        cloud_providers: d.cloudProviders ? JSON.stringify(d.cloudProviders) : null,
+        end_user_scale: d.endUserScale ?? null,
+        transaction_volume: d.transactionVolume ?? null,
+        device_count: d.deviceCount ?? null,
+        tier0_description: d.tier0Description ?? null,
+        tier1_description: d.tier1Description ?? null,
+        tier2_description: d.tier2Description ?? null,
+        tier0_uptime_target: d.tier0UptimeTarget ?? null,
+        tier1_uptime_target: d.tier1UptimeTarget ?? null,
+        revenue_impact_per_hour: d.revenueImpactPerHour ?? null,
+        seasonality_description: d.seasonalityDescription ?? null,
+        peak_periods: d.peakPeriods ? JSON.stringify(d.peakPeriods) : null,
+        compliance_frameworks: d.complianceFrameworks ? JSON.stringify(d.complianceFrameworks) : null,
+        dev_team_size: d.devTeamSize ?? null,
+        has_dedicated_sre: d.hasDedicatedSRE ? 1 : 0,
+        oncall_setup: d.oncallSetup ?? null,
+        current_pain_points: d.currentPainPoints ? JSON.stringify(d.currentPainPoints) : null,
+        dd_goals: d.ddGoals ? JSON.stringify(d.ddGoals) : null,
+        additional_context: d.additionalContext ?? null,
+        updated_at: now,
+      })
+      .onConflict('org_id')
+      .merge();
 
-    const saved = db.prepare('SELECT * FROM org_context WHERE org_id = ?').get(orgId) as Record<string, unknown>;
-    res.json(deserialize(saved));
+    const saved = await db<Record<string, unknown>>('org_context').where({ org_id: orgId }).first();
+    res.json(deserialize(saved!));
   } catch (err) { next(err); }
 });
 
@@ -145,9 +133,9 @@ function deserialize(row: Record<string, unknown>) {
 
 export default router;
 
-export function getOrgContextBlock(orgId: string): string {
+export async function getOrgContextBlock(orgId: string): Promise<string> {
   const db = getDatabase();
-  const row = db.prepare('SELECT * FROM org_context WHERE org_id = ?').get(orgId) as Record<string, unknown> | undefined;
+  const row = await db<Record<string, unknown>>('org_context').where({ org_id: orgId }).first();
   if (!row) return '';
 
   const ctx = deserialize(row);

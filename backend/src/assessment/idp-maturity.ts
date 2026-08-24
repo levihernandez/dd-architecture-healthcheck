@@ -102,16 +102,17 @@ const DORA_SIGNAL_META: Array<{ signal: string; label: string; unit: string }> =
   { signal: 'time_to_restore', label: 'Time to Restore Service', unit: 'sec (avg)' },
 ];
 
-export function analyzeIdpMaturity(orgId: string, scanRunId: string): IdpMaturityAnalysis {
+export async function analyzeIdpMaturity(orgId: string, scanRunId: string): Promise<IdpMaturityAnalysis> {
   const db = getDatabase();
 
   // ── Teams ─────────────────────────────────────────────────────────────────
-  const teamRows = db.prepare(`
-    SELECT team_id, team_name, handle, user_count, link_count
-    FROM teams WHERE org_id = ? AND scan_run_id = ? ORDER BY team_name
-  `).all(orgId, scanRunId) as Array<{
+  const teamRows = await db<{
+    org_id: string; scan_run_id: string;
     team_id: string; team_name: string | null; handle: string | null; user_count: number; link_count: number;
-  }>;
+  }>('teams')
+    .select('team_id', 'team_name', 'handle', 'user_count', 'link_count')
+    .where({ org_id: orgId, scan_run_id: scanRunId })
+    .orderBy('team_name');
 
   const teams: TeamRow[] = teamRows.map((t) => ({
     teamId: t.team_id, teamName: t.team_name, handle: t.handle,
@@ -128,16 +129,16 @@ export function analyzeIdpMaturity(orgId: string, scanRunId: string): IdpMaturit
   };
 
   // ── Catalog health ────────────────────────────────────────────────────────
-  const totalServices = (db.prepare(
-    'SELECT COUNT(*) as n FROM services WHERE org_id = ? AND scan_run_id = ?'
-  ).get(orgId, scanRunId) as { n: number }).n;
-  const inCatalogCount = (db.prepare(
-    "SELECT COUNT(*) as n FROM services WHERE org_id = ? AND scan_run_id = ? AND has_service_catalog = 1"
-  ).get(orgId, scanRunId) as { n: number }).n;
+  const totalServices = Number(
+    (await db('services').where({ org_id: orgId, scan_run_id: scanRunId }).count({ n: '*' }).first())?.n ?? 0
+  );
+  const inCatalogCount = Number(
+    (await db('services').where({ org_id: orgId, scan_run_id: scanRunId, has_service_catalog: 1 }).count({ n: '*' }).first())?.n ?? 0
+  );
 
-  const catalogRows = db.prepare(
-    'SELECT tier, lifecycle, owner, link_count FROM service_catalog WHERE org_id = ? AND scan_run_id = ?'
-  ).all(orgId, scanRunId) as Array<{ tier: string | null; lifecycle: string | null; owner: string | null; link_count: number }>;
+  const catalogRows = await db<{ org_id: string; scan_run_id: string; tier: string | null; lifecycle: string | null; owner: string | null; link_count: number }>('service_catalog')
+    .select('tier', 'lifecycle', 'owner', 'link_count')
+    .where({ org_id: orgId, scan_run_id: scanRunId });
 
   const catalogCount = catalogRows.length;
   const pct = (n: number): number => catalogCount > 0 ? Math.round((n / catalogCount) * 100) : 0;
@@ -153,13 +154,13 @@ export function analyzeIdpMaturity(orgId: string, scanRunId: string): IdpMaturit
   };
 
   // ── Scorecards ────────────────────────────────────────────────────────────
-  const ruleRows = db.prepare(
-    'SELECT rule_id, rule_name, enabled, is_custom FROM scorecard_rules WHERE org_id = ? AND scan_run_id = ?'
-  ).all(orgId, scanRunId) as Array<{ rule_id: string; rule_name: string | null; enabled: number; is_custom: number }>;
+  const ruleRows = await db<{ org_id: string; scan_run_id: string; rule_id: string; rule_name: string | null; enabled: number; is_custom: number }>('scorecard_rules')
+    .select('rule_id', 'rule_name', 'enabled', 'is_custom')
+    .where({ org_id: orgId, scan_run_id: scanRunId });
 
-  const outcomeRows = db.prepare(
-    'SELECT rule_id, state FROM scorecard_outcomes WHERE org_id = ? AND scan_run_id = ?'
-  ).all(orgId, scanRunId) as Array<{ rule_id: string | null; state: string | null }>;
+  const outcomeRows = await db<{ org_id: string; scan_run_id: string; rule_id: string | null; state: string | null }>('scorecard_outcomes')
+    .select('rule_id', 'state')
+    .where({ org_id: orgId, scan_run_id: scanRunId });
 
   const rules: ScorecardRuleSummary[] = ruleRows.map((r) => {
     const outcomes = outcomeRows.filter((o) => o.rule_id === r.rule_id);
@@ -188,16 +189,16 @@ export function analyzeIdpMaturity(orgId: string, scanRunId: string): IdpMaturit
   };
 
   // ── Reliability (SLOs + incident MTTR) ───────────────────────────────────
-  const totalSLOs = (db.prepare(
-    'SELECT COUNT(*) as n FROM slos WHERE org_id = ? AND scan_run_id = ?'
-  ).get(orgId, scanRunId) as { n: number }).n;
-  const servicesWithSlo = (db.prepare(
-    'SELECT COUNT(*) as n FROM services WHERE org_id = ? AND scan_run_id = ? AND has_slo = 1'
-  ).get(orgId, scanRunId) as { n: number }).n;
+  const totalSLOs = Number(
+    (await db('slos').where({ org_id: orgId, scan_run_id: scanRunId }).count({ n: '*' }).first())?.n ?? 0
+  );
+  const servicesWithSlo = Number(
+    (await db('services').where({ org_id: orgId, scan_run_id: scanRunId, has_slo: 1 }).count({ n: '*' }).first())?.n ?? 0
+  );
 
-  const incidentRows = db.prepare(
-    'SELECT created_at_dd, resolved_at_dd FROM incidents WHERE org_id = ? AND scan_run_id = ?'
-  ).all(orgId, scanRunId) as Array<{ created_at_dd: string | null; resolved_at_dd: string | null }>;
+  const incidentRows = await db<{ org_id: string; scan_run_id: string; created_at_dd: string | null; resolved_at_dd: string | null }>('incidents')
+    .select('created_at_dd', 'resolved_at_dd')
+    .where({ org_id: orgId, scan_run_id: scanRunId });
 
   const resolutionHours = incidentRows
     .filter((i) => i.created_at_dd && i.resolved_at_dd)
@@ -215,9 +216,9 @@ export function analyzeIdpMaturity(orgId: string, scanRunId: string): IdpMaturit
   };
 
   // ── DORA ──────────────────────────────────────────────────────────────────
-  const doraRows = db.prepare(
-    "SELECT signal, value, detected FROM product_usage_signals WHERE org_id = ? AND scan_run_id = ? AND product = 'dora'"
-  ).all(orgId, scanRunId) as Array<{ signal: string; value: string | null; detected: number }>;
+  const doraRows = await db<{ org_id: string; scan_run_id: string; product: string; signal: string; value: string | null; detected: number }>('product_usage_signals')
+    .select('signal', 'value', 'detected')
+    .where({ org_id: orgId, scan_run_id: scanRunId, product: 'dora' });
   const doraBySignal = new Map(doraRows.map((r) => [r.signal, r]));
 
   const doraSignals: DoraSignal[] = DORA_SIGNAL_META.map((meta) => {

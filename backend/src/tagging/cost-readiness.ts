@@ -22,40 +22,45 @@ export interface CostReadinessResult {
   }>;
 }
 
-export function analyzeCostReadiness(orgId: string, scanRunId: string): CostReadinessResult {
+export async function analyzeCostReadiness(orgId: string, scanRunId: string): Promise<CostReadinessResult> {
   const db = getDatabase();
 
-  const totalHosts = (db.prepare(
-    'SELECT COUNT(*) as c FROM hosts WHERE org_id = ? AND scan_run_id = ?'
-  ).get(orgId, scanRunId) as { c: number })?.c ?? 0;
+  const totalHostsRow = await db('hosts')
+    .count({ c: '*' })
+    .where({ org_id: orgId, scan_run_id: scanRunId })
+    .first() as { c: number | string } | undefined;
+  const totalHosts = Number(totalHostsRow?.c ?? 0);
 
-  function tagCoverage(tagKey: string): number {
+  async function tagCoverage(tagKey: string): Promise<number> {
     if (totalHosts === 0) return 0;
-    const count = (db.prepare(
-      `SELECT COUNT(DISTINCT resource_id) as c FROM resource_tags
-       WHERE org_id = ? AND scan_run_id = ? AND resource_type = 'host' AND tag_key = ?`
-    ).get(orgId, scanRunId, tagKey) as { c: number })?.c ?? 0;
+    const row = await db('resource_tags')
+      .countDistinct({ c: 'resource_id' })
+      .where({ org_id: orgId, scan_run_id: scanRunId, resource_type: 'host', tag_key: tagKey })
+      .first() as { c: number | string } | undefined;
+    const count = Number(row?.c ?? 0);
     return Math.round((count / totalHosts) * 100);
   }
 
-  function tagExists(tagKey: string): boolean {
-    return (db.prepare(
-      'SELECT COUNT(*) as c FROM tag_analysis WHERE org_id = ? AND scan_run_id = ? AND tag_key = ?'
-    ).get(orgId, scanRunId, tagKey) as { c: number })?.c > 0;
+  async function tagExists(tagKey: string): Promise<boolean> {
+    const row = await db('tag_analysis')
+      .count({ c: '*' })
+      .where({ org_id: orgId, scan_run_id: scanRunId, tag_key: tagKey })
+      .first() as { c: number | string } | undefined;
+    return Number(row?.c ?? 0) > 0;
   }
 
-  const teamCov = tagCoverage('team');
-  const costCenterCov = tagCoverage('cost_center');
-  const envCov = tagCoverage('env');
-  const serviceCov = tagCoverage('service');
-  const appCov = tagCoverage('application');
-  const buCov = tagCoverage('business_unit');
-  const productCov = tagCoverage('product');
-  const hasCostCenter = tagExists('cost_center');
-  const hasTeam = tagExists('team');
-  const hasApplication = tagExists('application');
-  const hasProduct = tagExists('product');
-  const hasBusinessUnit = tagExists('business_unit');
+  const teamCov = await tagCoverage('team');
+  const costCenterCov = await tagCoverage('cost_center');
+  const envCov = await tagCoverage('env');
+  const serviceCov = await tagCoverage('service');
+  const appCov = await tagCoverage('application');
+  const buCov = await tagCoverage('business_unit');
+  const productCov = await tagCoverage('product');
+  const hasCostCenter = await tagExists('cost_center');
+  const hasTeam = await tagExists('team');
+  const hasApplication = await tagExists('application');
+  const hasProduct = await tagExists('product');
+  const hasBusinessUnit = await tagExists('business_unit');
 
   const checks: CostReadinessResult['checks'] = [
     {

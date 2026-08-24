@@ -123,29 +123,41 @@ this specific intersection of the two overlays.
 ## Database
 
 No separate init/migrate command to run — the backend does it automatically
-on startup.
+on startup, via [Knex](https://knexjs.org) migrations. Dialect is chosen with
+`DB_CLIENT` (`sqlite` by default, or `postgres`):
 
-- On the first call to `getDatabase()` (during server boot,
-  `backend/src/server.ts`), `better-sqlite3` opens the file at `DB_PATH`
-  (`./backend/data/health-check.db` in Docker — see the `backend` volume
-  mount in `docker-compose.yaml`), creating the directory and file if they
-  don't exist.
-- `runMigrations()` (`backend/src/db/schema.ts`) then runs idempotent
-  `CREATE TABLE IF NOT EXISTS` statements for all tables, plus a few one-off
-  data migrations. Safe to run on every startup — already-applied changes are
-  skipped.
-- WAL mode is enabled, so `health-check.db-shm` and `health-check.db-wal`
-  alongside `health-check.db` is normal.
-- The db file lives on the host at `./backend/data/`, so it survives
-  `docker:down`/`docker:up` cycles and image rebuilds. Delete that directory
-  to reset to a clean database.
+- **SQLite** (default): on first call to `getDatabase()` (during server boot,
+  `backend/src/server.ts` → `initDatabase()`), Knex opens the file at
+  `DB_PATH` (`./backend/data/health-check.db` in Docker — see the `backend`
+  volume mount in `docker-compose.yaml`) via the `better-sqlite3` driver,
+  creating the directory and file if they don't exist. WAL mode is enabled,
+  so `health-check.db-shm` and `health-check.db-wal` alongside
+  `health-check.db` is normal. The db file lives on the host at
+  `./backend/data/`, so it survives `docker:down`/`docker:up` cycles and
+  image rebuilds. Delete that directory to reset to a clean database.
+- **Postgres**: set `DB_CLIENT=postgres` and `DATABASE_URL=postgres://...`.
+  Knex connects via the `pg` driver instead.
+- Migrations live in `backend/src/db/migrations/` (`00000000000001_baseline.ts`
+  recreates the full schema, `00000000000002_users.ts` adds the auth `users`
+  table, `00000000000003_org_ownership.ts` adds per-user org ownership).
+  `knex.migrate.latest()` runs them on every boot — already-applied
+  migrations are skipped via the `knex_migrations` tracking table. A
+  pre-existing SQLite database from before this migration framework existed
+  is detected and bootstrapped automatically (`backend/src/db/bootstrap-legacy-db.ts`)
+  so upgrading in place doesn't lose data. Similarly, any org rows that
+  predate per-user ownership get backfilled to the earliest-registered user
+  (`backend/src/db/legacy-data-migrations.ts`'s `backfillOrgOwnership()`) —
+  if you're testing locally with throwaway accounts, register your real
+  account *before* any test accounts, or that heuristic will assign existing
+  orgs to whichever account happens to be earliest.
 
 ## `.env` reference
 
 Copy `.env.example` to `.env` and fill in what you need — see that file's
-inline comments for the full list (server port, encryption key, AI provider,
-HTTPS, CORS, Datadog credentials, APM/RUM, OpenBao). `npm run init` fills
-most of it in interactively, including generating `ENCRYPTION_KEY` for you.
+inline comments for the full list (server port, encryption key, JWT secret,
+database client, AI provider, HTTPS, CORS, Datadog credentials, APM/RUM,
+OpenBao). `npm run init` fills most of it in interactively, including
+generating `ENCRYPTION_KEY` and `JWT_SECRET` for you.
 
 See the main [README.md](README.md) for app features, usage, and the
 standalone (non-Docker) run mode.

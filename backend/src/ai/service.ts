@@ -19,7 +19,7 @@ export async function generateAIAssessment(
   orgId: string,
   scanRunId: string
 ): Promise<AIAssessmentResponse> {
-  const config = getAIConfig();
+  const config = await getAIConfig();
   const provider = config.provider;
 
   if (provider === 'none') {
@@ -28,13 +28,13 @@ export async function generateAIAssessment(
 
   const db = getDatabase();
 
-  const scorecard = ScorecardRepository.findByScan(orgId, scanRunId);
+  const scorecard = await ScorecardRepository.findByScan(orgId, scanRunId);
   if (!scorecard) throw new Error('No scorecard found. Run a scan first.');
 
-  const findings = FindingRepository.findByScan(scanRunId, orgId);
+  const findings = await FindingRepository.findByScan(scanRunId, orgId);
 
-  const inventorySummary = buildInventorySummary(orgId, scanRunId, db);
-  const tagAnalysis = buildTagAnalysis(orgId, scanRunId, db);
+  const inventorySummary = await buildInventorySummary(orgId, scanRunId, db);
+  const tagAnalysis = await buildTagAnalysis(orgId, scanRunId, db);
   const findingSummary = buildFindingSummary(findings);
 
   const req: AIAssessmentRequest = {
@@ -63,20 +63,21 @@ export async function generateAIAssessment(
 
   const promptHash = createHash('sha256').update(prompt).digest('hex');
 
-  // Persist the assessment
-  db.prepare(`
-    INSERT OR REPLACE INTO ai_assessments
-      (id, org_id, scan_run_id, provider, model, prompt_hash, response, evidence_count, generated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    uuidv4(), orgId, scanRunId,
-    provider,
-    config.model,
-    promptHash,
-    JSON.stringify(validatedResponse),
-    scorecard.totalFindings,
-    new Date().toISOString()
-  );
+  // Persist the assessment (replace any prior assessment for this org/scan)
+  await db.transaction(async (trx) => {
+    await trx('ai_assessments').where({ org_id: orgId, scan_run_id: scanRunId }).delete();
+    await trx('ai_assessments').insert({
+      id: uuidv4(),
+      org_id: orgId,
+      scan_run_id: scanRunId,
+      provider,
+      model: config.model,
+      prompt_hash: promptHash,
+      response: JSON.stringify(validatedResponse),
+      evidence_count: scorecard.totalFindings,
+      generated_at: new Date().toISOString(),
+    });
+  });
 
   logger.info(`[${orgId}] AI assessment generated via ${provider}`);
   return validatedResponse;
@@ -87,63 +88,71 @@ export async function getStoredAssessment(
   scanRunId: string
 ): Promise<AIAssessmentResponse | null> {
   const db = getDatabase();
-  const row = db.prepare(
-    'SELECT response FROM ai_assessments WHERE org_id = ? AND scan_run_id = ?'
-  ).get(orgId, scanRunId) as { response: string } | undefined;
+  const row = await db<{ org_id: string; scan_run_id: string; response: string }>('ai_assessments')
+    .select('response')
+    .where({ org_id: orgId, scan_run_id: scanRunId })
+    .first();
 
   if (!row) return null;
   try { return JSON.parse(row.response); } catch { return null; }
 }
 
-function buildInventorySummary(
+async function buildInventorySummary(
   orgId: string,
   scanRunId: string,
   db: ReturnType<typeof getDatabase>
-): InventorySummary {
-  const count = (table: string) =>
-    (db.prepare(`SELECT COUNT(*) as c FROM ${table} WHERE org_id = ? AND scan_run_id = ?`)
-      .get(orgId, scanRunId) as { c: number })?.c ?? 0;
+): Promise<InventorySummary> {
+  const count = async (table: string) => {
+    const row = await db(table).where({ org_id: orgId, scan_run_id: scanRunId }).count<{ c: string | number }>({ c: '*' }).first();
+    return Number(row?.c ?? 0);
+  };
 
-  const teamCount = (db.prepare(
-    "SELECT COUNT(*) as c FROM resources WHERE org_id = ? AND scan_run_id = ? AND resource_type = 'team'"
-  ).get(orgId, scanRunId) as { c: number })?.c ?? 0;
+  const teamCount = await (async () => {
+    const row = await db('resources')
+      .where({ org_id: orgId, scan_run_id: scanRunId, resource_type: 'team' })
+      .count<{ c: string | number }>({ c: '*' })
+      .first();
+    return Number(row?.c ?? 0);
+  })();
 
   return {
-    hostCount: count('hosts'),
-    serviceCount: count('services'),
-    monitorCount: count('monitors'),
-    dashboardCount: count('dashboards'),
-    syntheticsCount: count('synthetics_tests'),
-    integrationCount: count('integrations'),
-    sloCount: count('slos'),
+    hostCount: await count('hosts'),
+    serviceCount: await count('services'),
+    monitorCount: await count('monitors'),
+    dashboardCount: await count('dashboards'),
+    syntheticsCount: await count('synthetics_tests'),
+    integrationCount: await count('integrations'),
+    sloCount: await count('slos'),
     teamCount,
-    logsIndexCount: count('logs_indexes'),
-    logsPipelineCount: count('logs_pipelines'),
+    logsIndexCount: await count('logs_indexes'),
+    logsPipelineCount: await count('logs_pipelines'),
   };
 }
 
-function buildTagAnalysis(
+async function buildTagAnalysis(
   orgId: string,
   scanRunId: string,
   db: ReturnType<typeof getDatabase>
-): TagAnalysis {
-  const tagStats = db.prepare(`
-    SELECT tag_key, unique_value_count, host_occurrence_count, service_occurrence_count,
-           top_values, suggested_mapping
-    FROM tag_analysis
-    WHERE org_id = ? AND scan_run_id = ?
-    ORDER BY (host_occurrence_count + service_occurrence_count) DESC
-  `).all(orgId, scanRunId) as Array<{
+): Promise<TagAnalysis> {
+  const tagStats = await db<{
+    org_id: string; scan_run_id: string;
     tag_key: string; unique_value_count: number;
     host_occurrence_count: number; service_occurrence_count: number;
     top_values: string; suggested_mapping: string | null;
-  }>;
+  }>('tag_analysis')
+    .select('tag_key', 'unique_value_count', 'host_occurrence_count', 'service_occurrence_count', 'top_values', 'suggested_mapping')
+    .where({ org_id: orgId, scan_run_id: scanRunId })
+    .orderByRaw('(host_occurrence_count + service_occurrence_count) DESC');
 
-  const totalHosts = (db.prepare('SELECT COUNT(*) as c FROM hosts WHERE org_id = ? AND scan_run_id = ?').get(orgId, scanRunId) as { c: number })?.c ?? 0;
-  const totalServices = (db.prepare('SELECT COUNT(*) as c FROM services WHERE org_id = ? AND scan_run_id = ?').get(orgId, scanRunId) as { c: number })?.c ?? 0;
+  const totalHostsRow = await db('hosts').where({ org_id: orgId, scan_run_id: scanRunId }).count<{ c: string | number }>({ c: '*' }).first();
+  const totalHosts = Number(totalHostsRow?.c ?? 0);
 
-  const getTagCoverage = (key: string) => {
-    const hostCount = (db.prepare('SELECT COUNT(DISTINCT resource_id) as c FROM resource_tags WHERE org_id = ? AND scan_run_id = ? AND resource_type = ? AND tag_key = ?').get(orgId, scanRunId, 'host', key) as { c: number })?.c ?? 0;
+  const getTagCoverage = async (key: string) => {
+    const row = await db('resource_tags')
+      .where({ org_id: orgId, scan_run_id: scanRunId, resource_type: 'host', tag_key: key })
+      .countDistinct<{ c: string | number }>({ c: 'resource_id' })
+      .first();
+    const hostCount = Number(row?.c ?? 0);
     return totalHosts > 0 ? Math.round((hostCount / totalHosts) * 100) : 0;
   };
 
@@ -168,10 +177,10 @@ function buildTagAnalysis(
   return {
     totalTagKeys: tagStats.length,
     uniqueTagKeys: tagStats.map((t) => t.tag_key),
-    envCoverage: getTagCoverage('env'),
-    serviceCoverage: getTagCoverage('service'),
-    versionCoverage: getTagCoverage('version'),
-    teamCoverage: getTagCoverage('team'),
+    envCoverage: await getTagCoverage('env'),
+    serviceCoverage: await getTagCoverage('service'),
+    versionCoverage: await getTagCoverage('version'),
+    teamCoverage: await getTagCoverage('team'),
     topTagKeys: tagStats.slice(0, 20).map((t) => ({
       key: t.tag_key,
       count: t.host_occurrence_count + t.service_occurrence_count,
@@ -182,7 +191,7 @@ function buildTagAnalysis(
   };
 }
 
-function buildFindingSummary(findings: ReturnType<typeof FindingRepository.findByScan>): FindingSummary {
+function buildFindingSummary(findings: Awaited<ReturnType<typeof FindingRepository.findByScan>>): FindingSummary {
   const categories: FindingCategory[] = [
     'unified_tagging', 'service_architecture', 'monitors_health', 'logs_health',
     'dashboards_health', 'synthetics_health', 'integration_hygiene', 'network_cloud', 'governance',

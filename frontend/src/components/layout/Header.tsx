@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { useOrgs, useScans } from '../../hooks/useOrgs';
 import { useOrgScanContext } from '../../context/OrgScanContext';
+import { useAuthContext } from '../../context/AuthContext';
 import Breadcrumbs from '../ui/Breadcrumbs';
 import { PopoverRoot, PopoverTrigger, PopoverContent } from '../ui/Popover';
 import { DrawerRoot, DrawerTrigger, DrawerContent } from '../ui/Drawer';
@@ -10,8 +13,25 @@ import TemplateBadge from './TemplateBadge';
 export default function Header() {
   const { data: orgs = [] } = useOrgs();
   const { selectedOrgId, selectedScanId, setSelectedOrgId, setSelectedScanId } = useOrgScanContext();
+  const { user, logout } = useAuthContext();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [switcherOpen, setSwitcherOpen] = useState(false);
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+
+  const handleLogout = () => {
+    setUserMenuOpen(false);
+    // Clear the previous user's org/scan selection and every cached query
+    // (org lists, scans, findings, …) so no data from their session can
+    // flash on screen or get reused once a different user logs in here.
+    setSelectedOrgId('');
+    queryClient.clear();
+    logout();
+    navigate('/login', { replace: true });
+  };
+
+  const userInitial = (user?.name || user?.email || '?').charAt(0).toUpperCase();
 
   useEffect(() => {
     if (orgs.length === 0) return;
@@ -127,6 +147,24 @@ export default function Header() {
         >
           🔎
         </button>
+
+        <PopoverRoot open={userMenuOpen} onOpenChange={setUserMenuOpen}>
+          <PopoverTrigger
+            className="flex items-center justify-center w-8 h-8 rounded-full bg-surface-sunken border border-border-strong text-sm font-medium text-ink hover:border-ink-faint transition-colors shrink-0"
+            aria-label="Account menu"
+          >
+            {userInitial}
+          </PopoverTrigger>
+          <PopoverContent align="end" className="w-64 p-3">
+            <div className="mb-3">
+              <div className="text-sm font-medium text-ink truncate">{user?.name || 'Account'}</div>
+              <div className="text-xs text-ink-faint truncate">{user?.email}</div>
+            </div>
+            <button onClick={handleLogout} className="btn-secondary w-full text-sm">
+              Log out
+            </button>
+          </PopoverContent>
+        </PopoverRoot>
       </div>
     </header>
   );

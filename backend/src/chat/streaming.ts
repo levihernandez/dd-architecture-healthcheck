@@ -88,7 +88,7 @@ export async function streamChatResponse(
   messages: ChatMessage[],
   res: Response
 ): Promise<void> {
-  const config = getAIConfig();
+  const config = await getAIConfig();
 
   if (config.provider === 'none') {
     res.write(`data: ${JSON.stringify({ type: 'error', content: 'No AI provider configured. Go to AI Settings to set up a provider.' })}\n\n`);

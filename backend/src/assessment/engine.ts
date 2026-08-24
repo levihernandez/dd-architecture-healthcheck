@@ -1,4 +1,5 @@
 import { getDatabase } from '../db/database';
+import type { Knex } from 'knex';
 import { FindingRepository } from '../db/repositories/finding.repository';
 import { ScorecardRepository } from '../db/repositories/scorecard.repository';
 import { logger } from '../utils/logger';
@@ -54,24 +55,35 @@ export async function runAssessment(orgId: string, scanRunId: string): Promise<n
   }
 
   if (allFindings.length > 0) {
-    FindingRepository.insertMany(allFindings);
+    await FindingRepository.insertMany(allFindings);
   }
 
   // Compute and store scorecard
   const scorecard = computeScorecard(orgId, scanRunId, allFindings as Finding[]);
-  ScorecardRepository.upsert(scorecard);
+  await ScorecardRepository.upsert(scorecard);
 
   // Build tag analysis
-  buildTagAnalysis(orgId, scanRunId, db);
+  await buildTagAnalysis(orgId, scanRunId, db);
 
   return allFindings.length;
 }
 
-function buildTagAnalysis(orgId: string, scanRunId: string, db: ReturnType<typeof getDatabase>): void {
+// Normalizes db.raw() result shape across dialects: the better-sqlite3 driver
+// returns the rows array directly, while the pg driver returns { rows: [...] }.
+function rawRows<T>(result: unknown): T[] {
+  return Array.isArray(result) ? (result as T[]) : ((result as { rows: T[] }).rows);
+}
+
+async function buildTagAnalysis(orgId: string, scanRunId: string, db: Knex): Promise<void> {
   const now = new Date().toISOString();
 
-  // Aggregate tag usage across resource types
-  const tagStats = db.prepare(`
+  // Aggregate tag usage across resource types.
+  // GROUP_CONCAT is SQLite-specific (Postgres would need string_agg) and the
+  // COUNT(CASE WHEN ...) conditional aggregates aren't a clean fit for the
+  // Knex builder either, so this stays as a raw query — with its dialect-
+  // dependent result shape normalized immediately below.
+  const rawResult = await db.raw(
+    `
     SELECT tag_key,
       COUNT(DISTINCT tag_value) as unique_values,
       COUNT(CASE WHEN resource_type = 'host' THEN 1 END) as host_count,
@@ -81,10 +93,14 @@ function buildTagAnalysis(orgId: string, scanRunId: string, db: ReturnType<typeo
     WHERE org_id = ? AND scan_run_id = ?
     GROUP BY tag_key
     ORDER BY (host_count + service_count) DESC
-  `).all(orgId, scanRunId) as Array<{
+  `,
+    [orgId, scanRunId]
+  );
+
+  const tagStats = rawRows<{
     tag_key: string; unique_values: number; host_count: number;
     service_count: number; values_concat: string;
-  }>;
+  }>(rawResult);
 
   const standardKeys = new Set(['env', 'service', 'version', 'team', 'owner',
     'cost_center', 'application', 'business_unit', 'region', 'cloud_provider',
@@ -100,36 +116,39 @@ function buildTagAnalysis(orgId: string, scanRunId: string, db: ReturnType<typeo
     'ns': 'namespace', 'k8s-namespace': 'namespace',
   };
 
-  const insertTag = db.prepare(`
-    INSERT OR REPLACE INTO tag_analysis
-      (id, org_id, scan_run_id, tag_key, unique_value_count, host_occurrence_count,
-       service_occurrence_count, monitor_occurrence_count, top_values,
-       is_standard_key, suggested_mapping, computed_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-
   const { v4: uuidv4 } = require('uuid');
 
-  const txn = db.transaction(() => {
-    for (const stat of tagStats) {
-      const topValues = (stat.values_concat ?? '')
-        .split(',').slice(0, 10);
-      const isStandard = standardKeys.has(stat.tag_key);
-      const suggested = tagMappings[stat.tag_key] ?? null;
+  try {
+    await db.transaction(async (trx) => {
+      for (const stat of tagStats) {
+        const topValues = (stat.values_concat ?? '')
+          .split(',').slice(0, 10);
+        const isStandard = standardKeys.has(stat.tag_key);
+        const suggested = tagMappings[stat.tag_key] ?? null;
 
-      insertTag.run(
-        uuidv4(), orgId, scanRunId,
-        stat.tag_key, stat.unique_values,
-        stat.host_count, stat.service_count, 0,
-        JSON.stringify(topValues),
-        isStandard ? 1 : 0,
-        suggested,
-        now
-      );
-    }
-  });
-
-  try { txn(); } catch (err) {
+        // Original was `INSERT OR REPLACE` (SQLite-specific upsert-by-unique-key);
+        // onConflict(...).merge() is the dialect-portable Knex equivalent given
+        // the (org_id, scan_run_id, tag_key) unique constraint on this table.
+        await trx('tag_analysis')
+          .insert({
+            id: uuidv4(),
+            org_id: orgId,
+            scan_run_id: scanRunId,
+            tag_key: stat.tag_key,
+            unique_value_count: stat.unique_values,
+            host_occurrence_count: stat.host_count,
+            service_occurrence_count: stat.service_count,
+            monitor_occurrence_count: 0,
+            top_values: JSON.stringify(topValues),
+            is_standard_key: isStandard ? 1 : 0,
+            suggested_mapping: suggested,
+            computed_at: now,
+          })
+          .onConflict(['org_id', 'scan_run_id', 'tag_key'])
+          .merge();
+      }
+    });
+  } catch (err) {
     logger.error('Failed to build tag analysis', err);
   }
 }

@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { OrgRepository } from '../../db/repositories/org.repository';
 import { ScorecardRepository } from '../../db/repositories/scorecard.repository';
 import { createClient } from '../../datadog/client';
+import { assertOrgAccess } from '../../auth/org-access';
 import { AppError } from '../middleware/error.middleware';
 import { logger } from '../../utils/logger';
 
@@ -29,19 +30,20 @@ const UpdateOrgSchema = z.object({
   appKey: z.string().min(8).optional(),
 });
 
-// GET /api/orgs
-router.get('/', (req, res) => {
-  const orgs = OrgRepository.findAll();
-  res.json(orgs);
+// GET /api/orgs — only orgs this user connected
+router.get('/', async (req, res, next) => {
+  try {
+    const orgs = await OrgRepository.findAll(req.user!.id);
+    res.json(orgs);
+  } catch (err) { next(err); }
 });
 
-// GET /api/orgs/overview — every org plus its latest completed-scan scorecard, for
-// multi-org rollup views. Must be registered before GET /:id or "overview" would be
-// treated as an org id.
-router.get('/overview', (req, res, next) => {
+// GET /api/orgs/overview — every org this user owns, plus its latest completed-scan
+// scorecard. Must be registered before GET /:id or "overview" would be treated as an org id.
+router.get('/overview', async (req, res, next) => {
   try {
-    const orgs = OrgRepository.findAll();
-    const scorecards = ScorecardRepository.findAllLatest();
+    const orgs = await OrgRepository.findAll(req.user!.id);
+    const scorecards = await ScorecardRepository.findAllLatest();
     const scorecardByOrg = new Map(scorecards.map((sc) => [sc.orgId, sc]));
     const overview = orgs.map((org) => ({
       ...org,
@@ -52,10 +54,10 @@ router.get('/overview', (req, res, next) => {
 });
 
 // GET /api/orgs/:id
-router.get('/:id', (req, res, next) => {
+router.get('/:id', async (req, res, next) => {
   try {
-    const org = OrgRepository.findById(req.params.id);
-    if (!org) throw new AppError('Organization not found', 404);
+    await assertOrgAccess(req.params.id, req.user!.id);
+    const org = await OrgRepository.findById(req.params.id);
     res.json(org);
   } catch (err) { next(err); }
 });
@@ -78,21 +80,27 @@ router.post('/', async (req, res, next) => {
     }
 
     // This Datadog org is already connected (its detected org ID is the row's primary
-    // key) — treat this as a key rotation instead of creating a duplicate, empty-history org.
+    // key) — treat this as a key rotation instead of creating a duplicate, empty-history org,
+    // but only if the requesting user is the one who connected it originally. Another user
+    // pointing their own keys at the same real Datadog org must not be able to take over
+    // (or even detect) someone else's connection.
     if (validation.orgId) {
-      const existing = OrgRepository.findById(validation.orgId);
-      if (existing) {
-        const updated = OrgRepository.update(existing.id, { apiKey: body.apiKey, appKey: body.appKey })!;
+      const existing = await OrgRepository.findByIdUnscoped(validation.orgId);
+      if (existing && existing.createdByUserId === req.user!.id) {
+        const updated = (await OrgRepository.update(existing.id, { apiKey: body.apiKey, appKey: body.appKey }))!;
         logger.info(`Reconnected existing org: ${updated.name} (${updated.id}) — keys rotated, DD org: ${validation.orgName}`);
         res.status(200).json({ ...updated, ddOrgName: validation.orgName, ddOrgId: validation.orgId, reconnected: true });
         return;
       }
+      if (existing) {
+        throw new AppError('This Datadog organization is already connected by another account', 409);
+      }
     }
 
-    const org = OrgRepository.create({ ...body, ddOrgId: validation.orgId, ddOrgName: validation.orgName });
+    const org = await OrgRepository.create({ ...body, ddOrgId: validation.orgId, ddOrgName: validation.orgName }, req.user!.id);
 
     if (validation.orgName || validation.orgId) {
-      OrgRepository.updateScanStatus(org.id, 'pending', validation.orgName, validation.orgId);
+      await OrgRepository.updateScanStatus(org.id, 'pending', validation.orgName, validation.orgId);
     }
 
     logger.info(`Created org: ${org.name} (${org.id}) — DD org: ${validation.orgName}`);
@@ -110,10 +118,9 @@ router.post('/', async (req, res, next) => {
 router.put('/:id', async (req, res, next) => {
   try {
     const body = UpdateOrgSchema.parse(req.body);
-    const existing = OrgRepository.findById(req.params.id);
-    if (!existing) throw new AppError('Organization not found', 404);
+    await assertOrgAccess(req.params.id, req.user!.id);
 
-    const updated = OrgRepository.update(req.params.id, body);
+    const updated = await OrgRepository.update(req.params.id, body);
     res.json(updated);
   } catch (err) {
     if (err instanceof z.ZodError) {
@@ -125,9 +132,10 @@ router.put('/:id', async (req, res, next) => {
 });
 
 // DELETE /api/orgs/:id
-router.delete('/:id', (req, res, next) => {
+router.delete('/:id', async (req, res, next) => {
   try {
-    const deleted = OrgRepository.delete(req.params.id);
+    await assertOrgAccess(req.params.id, req.user!.id);
+    const deleted = await OrgRepository.delete(req.params.id);
     if (!deleted) throw new AppError('Organization not found', 404);
     res.json({ success: true });
   } catch (err) { next(err); }
@@ -136,7 +144,8 @@ router.delete('/:id', (req, res, next) => {
 // POST /api/orgs/:id/validate
 router.post('/:id/validate', async (req, res, next) => {
   try {
-    const creds = OrgRepository.getCredentials(req.params.id);
+    await assertOrgAccess(req.params.id, req.user!.id);
+    const creds = await OrgRepository.getCredentials(req.params.id);
     if (!creds) throw new AppError('Organization not found or credentials unavailable', 404);
 
     const client = createClient(creds);

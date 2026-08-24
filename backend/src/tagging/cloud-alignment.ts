@@ -81,20 +81,20 @@ export interface CloudAlignmentResult {
   }>;
 }
 
-export function analyzeCloudAlignment(orgId: string, scanRunId: string): CloudAlignmentResult {
+export async function analyzeCloudAlignment(orgId: string, scanRunId: string): Promise<CloudAlignmentResult> {
   const db = getDatabase();
 
   // Load host raw_json to extract tags_by_source
-  const hostRows = db.prepare(
-    `SELECT host_name, raw_json FROM hosts
-     WHERE org_id = ? AND scan_run_id = ? AND raw_json IS NOT NULL LIMIT 500`
-  ).all(orgId, scanRunId) as { host_name: string; raw_json: string }[];
+  const hostRows = await db<{ org_id: string; scan_run_id: string; host_name: string; raw_json: string }>('hosts')
+    .select('host_name', 'raw_json')
+    .where({ org_id: orgId, scan_run_id: scanRunId })
+    .whereNotNull('raw_json')
+    .limit(500);
 
   // Load all Datadog tags for hosts (from resource_tags)
-  const ddTagRows = db.prepare(
-    `SELECT resource_id, tag_key, tag_value FROM resource_tags
-     WHERE org_id = ? AND scan_run_id = ? AND resource_type = 'host'`
-  ).all(orgId, scanRunId) as { resource_id: string; tag_key: string; tag_value: string }[];
+  const ddTagRows = await db<{ org_id: string; scan_run_id: string; resource_type: string; resource_id: string; tag_key: string; tag_value: string }>('resource_tags')
+    .select('resource_id', 'tag_key', 'tag_value')
+    .where({ org_id: orgId, scan_run_id: scanRunId, resource_type: 'host' });
 
   const ddTagsByHost = new Map<string, Map<string, Set<string>>>();
   for (const row of ddTagRows) {

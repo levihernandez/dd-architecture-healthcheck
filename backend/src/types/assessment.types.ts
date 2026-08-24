@@ -79,7 +79,7 @@ export interface RuleResult {
 export interface AssessmentContext {
   orgId: string;
   scanRunId: string;
-  db: import('better-sqlite3').Database;
+  db: import('knex').Knex;
 }
 
 export interface CategoryScore {

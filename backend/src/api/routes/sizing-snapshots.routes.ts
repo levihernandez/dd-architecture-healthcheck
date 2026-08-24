@@ -1,26 +1,27 @@
 import { Router } from 'express';
 import { SizingSnapshotRepository, type SizingSnapshotInput } from '../../db/repositories/sizing-snapshot.repository';
+import { assertOrgAccess } from '../../auth/org-access';
 
 const router = Router();
 
 // GET /api/sizing-snapshots — every saved sizing, newest first (without the full state blob)
-router.get('/', (_req, res, next) => {
+router.get('/', async (_req, res, next) => {
   try {
-    res.json(SizingSnapshotRepository.listAll());
+    res.json(await SizingSnapshotRepository.listAll());
   } catch (err) { next(err); }
 });
 
 // GET /api/sizing-snapshots/:id — full record including the state blob, for loading
-router.get('/:id', (req, res, next) => {
+router.get('/:id', async (req, res, next) => {
   try {
-    const record = SizingSnapshotRepository.findById(req.params.id);
+    const record = await SizingSnapshotRepository.findById(req.params.id);
     if (!record) { res.status(404).json({ error: 'not found' }); return; }
     res.json(record);
   } catch (err) { next(err); }
 });
 
 // POST /api/sizing-snapshots — save a named snapshot of the current calculator configuration
-router.post('/', (req, res, next) => {
+router.post('/', async (req, res, next) => {
   try {
     const body = req.body as Partial<SizingSnapshotInput>;
     if (!body.name || typeof body.name !== 'string') { res.status(400).json({ error: 'name required' }); return; }
@@ -28,8 +29,9 @@ router.post('/', (req, res, next) => {
     if (typeof body.totalListPrice !== 'number') { res.status(400).json({ error: 'totalListPrice required' }); return; }
     if (typeof body.categoryCount !== 'number') { res.status(400).json({ error: 'categoryCount required' }); return; }
     if (!body.cart || !body.state) { res.status(400).json({ error: 'cart and state required' }); return; }
+    if (body.orgId) await assertOrgAccess(body.orgId, req.user!.id);
 
-    const created = SizingSnapshotRepository.create({
+    const created = await SizingSnapshotRepository.create({
       name: body.name,
       mode: body.mode,
       orgId: body.orgId,
@@ -45,9 +47,9 @@ router.post('/', (req, res, next) => {
 });
 
 // DELETE /api/sizing-snapshots/:id
-router.delete('/:id', (req, res, next) => {
+router.delete('/:id', async (req, res, next) => {
   try {
-    const deleted = SizingSnapshotRepository.delete(req.params.id);
+    const deleted = await SizingSnapshotRepository.delete(req.params.id);
     if (!deleted) { res.status(404).json({ error: 'not found' }); return; }
     res.status(204).send();
   } catch (err) { next(err); }

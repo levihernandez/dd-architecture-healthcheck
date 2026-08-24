@@ -83,24 +83,23 @@ function severityFor(coveragePct: number): 'critical' | 'high' | 'medium' | 'low
   return 'low';
 }
 
-export function analyzeHostGaps(orgId: string, scanRunId: string): HostGapAnalysis {
+export async function analyzeHostGaps(orgId: string, scanRunId: string): Promise<HostGapAnalysis> {
   const db = getDatabase();
 
-  const hostRows = db.prepare(`
-    SELECT host_name, platform, agent_version, has_env_tag, has_service_tag,
-           has_version_tag, has_team_tag, raw_json
-    FROM hosts WHERE org_id = ? AND scan_run_id = ?
-    ORDER BY host_name
-  `).all(orgId, scanRunId) as Array<{
+  const hostRows = await db<{
+    org_id: string; scan_run_id: string;
     host_name: string; platform: string | null; agent_version: string | null;
     has_env_tag: number; has_service_tag: number; has_version_tag: number; has_team_tag: number;
     raw_json: string | null;
-  }>;
+  }>('hosts')
+    .select('host_name', 'platform', 'agent_version', 'has_env_tag', 'has_service_tag', 'has_version_tag', 'has_team_tag', 'raw_json')
+    .where({ org_id: orgId, scan_run_id: scanRunId })
+    .orderBy('host_name');
 
   // (env, service) → service_name, for cross-referencing APM presence per host.
-  const serviceRows = db.prepare(`
-    SELECT service_name, env FROM services WHERE org_id = ? AND scan_run_id = ?
-  `).all(orgId, scanRunId) as Array<{ service_name: string; env: string | null }>;
+  const serviceRows = await db<{ org_id: string; scan_run_id: string; service_name: string; env: string | null }>('services')
+    .select('service_name', 'env')
+    .where({ org_id: orgId, scan_run_id: scanRunId });
   const serviceByEnvService = new Map<string, string>();
   for (const s of serviceRows) {
     serviceByEnvService.set(`${(s.env ?? '').toLowerCase()}|${s.service_name.toLowerCase()}`, s.service_name);
@@ -151,9 +150,10 @@ export function analyzeHostGaps(orgId: string, scanRunId: string): HostGapAnalys
   // infra host count against the org's actual billed host count for each product
   // (from usage_summary) — an accurate gap size even though which specific hosts
   // make up the gap can't be named.
-  const usageRow = db.prepare(
-    'SELECT usage_json FROM usage_summary WHERE org_id = ? AND scan_run_id = ?'
-  ).get(orgId, scanRunId) as { usage_json: string } | undefined;
+  const usageRow = await db<{ org_id: string; scan_run_id: string; usage_json: string }>('usage_summary')
+    .select('usage_json')
+    .where({ org_id: orgId, scan_run_id: scanRunId })
+    .first();
   const { latestUsage } = usageRow ? parseUsageSummary(usageRow.usage_json) : { latestUsage: {} as Record<string, unknown> };
   const usageNum = (key: string): number => {
     const v = latestUsage[key];
@@ -217,15 +217,15 @@ export function analyzeHostGaps(orgId: string, scanRunId: string): HostGapAnalys
   ].filter((g) => g.gapCount > 0 || g.hostsCoveredEstimate > 0) : [];
 
   // ── Service catalog maturity ─────────────────────────────────────────────────
-  const svcRows = db.prepare(`
-    SELECT service_name, env, team, has_service_catalog, has_monitor, has_slo, has_version_tag, has_owner
-    FROM services WHERE org_id = ? AND scan_run_id = ?
-    ORDER BY service_name
-  `).all(orgId, scanRunId) as Array<{
+  const svcRows = await db<{
+    org_id: string; scan_run_id: string;
     service_name: string; env: string | null; team: string | null;
     has_service_catalog: number; has_monitor: number; has_slo: number;
     has_version_tag: number; has_owner: number;
-  }>;
+  }>('services')
+    .select('service_name', 'env', 'team', 'has_service_catalog', 'has_monitor', 'has_slo', 'has_version_tag', 'has_owner')
+    .where({ org_id: orgId, scan_run_id: scanRunId })
+    .orderBy('service_name');
 
   const services: ServiceMaturityRow[] = svcRows.map((s) => {
     const hasServiceCatalog = Boolean(s.has_service_catalog);

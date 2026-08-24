@@ -8,9 +8,12 @@ const teamCoverageRule: AssessmentRule = {
   description: 'Organization should have teams defined for ownership tracking',
   async run(ctx: AssessmentContext): Promise<RuleResult> {
     const { orgId, scanRunId, db } = ctx;
-    const teamCount = (db.prepare(
-      "SELECT COUNT(*) as c FROM resources WHERE org_id = ? AND scan_run_id = ? AND resource_type = 'team'"
-    ).get(orgId, scanRunId) as { c: number })?.c ?? 0;
+    const teamCount = Number(
+      (await db('resources')
+        .where({ org_id: orgId, scan_run_id: scanRunId, resource_type: 'team' })
+        .count({ c: '*' })
+        .first())?.c ?? 0
+    );
     const passed = teamCount >= 2;
 
     return {
@@ -38,10 +41,10 @@ const ssoStatusRule: AssessmentRule = {
   description: 'High-level SSO enablement status check (no sensitive config collected)',
   async run(ctx: AssessmentContext): Promise<RuleResult> {
     const { orgId, scanRunId, db } = ctx;
-    const ssoSignal = db.prepare(`
-      SELECT value FROM product_usage_signals
-      WHERE org_id = ? AND scan_run_id = ? AND product = 'governance' AND signal = 'sso_status'
-    `).get(orgId, scanRunId) as { value: string } | undefined;
+    const ssoSignal = await db<{ org_id: string; scan_run_id: string; product: string; signal: string; value: string }>('product_usage_signals')
+      .select('value')
+      .where({ org_id: orgId, scan_run_id: scanRunId, product: 'governance', signal: 'sso_status' })
+      .first();
 
     if (!ssoSignal) {
       return { ruleId: 'gov-002', passed: true, score: 100, maxScore: 100, findings: [] };

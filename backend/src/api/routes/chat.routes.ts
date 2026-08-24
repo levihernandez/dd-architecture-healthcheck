@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { buildChatContext } from '../../chat/context-builder';
 import { streamChatResponse } from '../../chat/streaming';
+import { assertOrgAccess } from '../../auth/org-access';
 import { logger } from '../../utils/logger';
 
 const router = Router();
@@ -27,6 +28,15 @@ router.post('/stream', async (req, res) => {
 
   const { orgId, scanId, page, messages } = parse.data;
 
+  try {
+    await assertOrgAccess(orgId, req.user!.id);
+  } catch (err) {
+    const status = (err as { statusCode?: number }).statusCode ?? 404;
+    const msg = err instanceof Error ? err.message : 'Organization not found';
+    res.status(status).json({ error: msg });
+    return;
+  }
+
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
@@ -34,7 +44,7 @@ router.post('/stream', async (req, res) => {
   res.flushHeaders();
 
   try {
-    const context = buildChatContext(orgId, scanId, page);
+    const context = await buildChatContext(orgId, scanId, page);
     logger.info(`[chat] streaming response for org=${orgId} page=${page ?? 'none'} messages=${messages.length}`);
     await streamChatResponse(context, messages, res);
   } catch (err) {
@@ -50,14 +60,16 @@ router.post('/stream', async (req, res) => {
 });
 
 // Non-streaming context endpoint — useful for debugging / showing what context was built
-router.get('/context', (req, res) => {
+router.get('/context', async (req, res) => {
   const { orgId, scanId, page } = req.query as Record<string, string>;
   if (!orgId) { res.status(400).json({ error: 'orgId required' }); return; }
   try {
-    const context = buildChatContext(orgId, scanId, page);
+    await assertOrgAccess(orgId, req.user!.id);
+    const context = await buildChatContext(orgId, scanId, page);
     res.json({ context });
   } catch (err) {
-    res.status(500).json({ error: err instanceof Error ? err.message : 'Error' });
+    const status = (err as { statusCode?: number }).statusCode ?? 500;
+    res.status(status).json({ error: err instanceof Error ? err.message : 'Error' });
   }
 });
 

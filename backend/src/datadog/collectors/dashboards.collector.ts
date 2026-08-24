@@ -36,38 +36,49 @@ export async function collectDashboards(
   const db = getDatabase();
   const now = new Date().toISOString();
 
-  const insert = db.prepare(`
-    INSERT OR REPLACE INTO dashboards
-      (id, org_id, scan_run_id, dashboard_id, title, layout_type, widget_count,
-       has_template_variables, template_variable_count, author_handle, is_read_only, tags,
-       created_at_dd, modified_at_dd, raw_json, first_seen, last_seen)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
+  try {
+    await db.transaction(async (trx) => {
+      for (const dash of listResult.data) {
+        const widgetCount = countWidgets(dash.widgets ?? []);
+        const tvCount = dash.template_variables?.length ?? 0;
 
-  const txn = db.transaction((dashboards: DDDashboard[]) => {
-    for (const dash of dashboards) {
-      const widgetCount = countWidgets(dash.widgets ?? []);
-      const tvCount = dash.template_variables?.length ?? 0;
+        // dashboards has a composite unique constraint on (org_id, dashboard_id).
+        // Reproduce INSERT OR REPLACE explicitly (select then conditional
+        // insert/update) rather than onConflict().merge(), since composite-key
+        // conflict targets can behave inconsistently across knex versions/dialects.
+        const patch = {
+          scan_run_id: scanRunId,
+          dashboard_id: dash.id,
+          title: dash.title,
+          layout_type: dash.layout_type ?? null,
+          widget_count: widgetCount,
+          has_template_variables: tvCount > 0 ? 1 : 0,
+          template_variable_count: tvCount,
+          author_handle: dash.author_handle ?? null,
+          is_read_only: dash.is_read_only ? 1 : 0,
+          tags: JSON.stringify(dash.tags ?? []),
+          created_at_dd: dash.created_at ?? null,
+          modified_at_dd: dash.modified_at ?? null,
+          raw_json: safeJsonSnapshot({ id: dash.id, title: dash.title, layout_type: dash.layout_type,
+            template_variables: dash.template_variables, tags: dash.tags, is_read_only: dash.is_read_only }),
+          last_seen: now,
+        };
 
-      insert.run(
-        uuidv4(), orgId, scanRunId,
-        dash.id, dash.title, dash.layout_type ?? null,
-        widgetCount,
-        tvCount > 0 ? 1 : 0,
-        tvCount,
-        dash.author_handle ?? null,
-        dash.is_read_only ? 1 : 0,
-        JSON.stringify(dash.tags ?? []),
-        dash.created_at ?? null,
-        dash.modified_at ?? null,
-        safeJsonSnapshot({ id: dash.id, title: dash.title, layout_type: dash.layout_type,
-          template_variables: dash.template_variables, tags: dash.tags, is_read_only: dash.is_read_only }),
-        now, now
-      );
-    }
-  });
+        const existing = await trx('dashboards').where({ org_id: orgId, dashboard_id: dash.id }).first();
 
-  try { txn(listResult.data); } catch (err) {
+        if (existing) {
+          await trx('dashboards').where({ org_id: orgId, dashboard_id: dash.id }).update(patch);
+        } else {
+          await trx('dashboards').insert({
+            id: uuidv4(),
+            org_id: orgId,
+            ...patch,
+            first_seen: now,
+          });
+        }
+      }
+    });
+  } catch (err) {
     logger.error(`[${orgId}] Failed to store dashboard data`, err);
   }
 

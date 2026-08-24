@@ -1,42 +1,35 @@
-import Database from 'better-sqlite3';
-import path from 'path';
-import fs from 'fs';
-import { runMigrations } from './schema';
+import knexFactory, { type Knex } from 'knex';
+import { getKnexConfig } from './knexfile';
+import { bootstrapLegacyDb } from './bootstrap-legacy-db';
+import { migrateOrgIdsToDatadogOrgId, backfillOrgOwnership } from './legacy-data-migrations';
 import { logger } from '../utils/logger';
 
-let db: Database.Database | null = null;
+let db: Knex | null = null;
 
-export function getDatabase(): Database.Database {
+export function getDatabase(): Knex {
   if (!db) {
-    const dbPath = process.env.DB_PATH || path.join(process.cwd(), 'data', 'health-check.db');
-    const dbDir = path.dirname(dbPath);
-
-    if (!fs.existsSync(dbDir)) {
-      fs.mkdirSync(dbDir, { recursive: true });
-    }
-
-    db = new Database(dbPath);
-    db.pragma('journal_mode = WAL');
-    db.pragma('foreign_keys = ON');
-    db.pragma('synchronous = NORMAL');
-    db.pragma('cache_size = -32000');
-
-    runMigrations(db);
-    logger.info(`SQLite database opened at ${dbPath}`);
+    db = knexFactory(getKnexConfig());
   }
   return db;
 }
 
-export function closeDatabase(): void {
+export async function initDatabase(): Promise<void> {
+  const database = getDatabase();
+  await bootstrapLegacyDb(database);
+  await database.migrate.latest();
+  await migrateOrgIdsToDatadogOrgId(database);
+  await backfillOrgOwnership(database);
+  logger.info('Database schema migrations complete');
+}
+
+export async function closeDatabase(): Promise<void> {
   if (db) {
-    db.close();
+    await db.destroy();
     db = null;
     logger.info('Database closed');
   }
 }
 
-export function runInTransaction<T>(fn: (db: Database.Database) => T): T {
-  const database = getDatabase();
-  const txn = database.transaction(fn);
-  return txn(database);
+export async function runInTransaction<T>(fn: (trx: Knex.Transaction) => Promise<T>): Promise<T> {
+  return getDatabase().transaction(fn);
 }

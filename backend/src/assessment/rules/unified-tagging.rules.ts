@@ -1,3 +1,4 @@
+import type { Knex } from 'knex';
 import type { AssessmentRule, AssessmentContext, RuleResult, AffectedResource } from '../../types/assessment.types';
 import { recommendationForTagKey, severityFromPriority } from '../../tagging/recommendation';
 import { lookupTag } from '../../tagging/tag-dictionary';
@@ -6,6 +7,11 @@ const AFFECTED_CAP = 25;
 
 function pct(count: number, total: number): number {
   return total === 0 ? 100 : Math.round((count / total) * 100);
+}
+
+async function countRows(db: AssessmentContext['db'], table: string, orgId: string, scanRunId: string, extra?: Record<string, unknown>): Promise<number> {
+  const row = await db(table).where({ org_id: orgId, scan_run_id: scanRunId, ...extra }).count({ c: '*' }).first();
+  return Number(row?.c ?? 0);
 }
 
 const envTagRule: AssessmentRule = {
@@ -17,22 +23,18 @@ const envTagRule: AssessmentRule = {
   async run(ctx: AssessmentContext): Promise<RuleResult> {
     const { orgId, scanRunId, db } = ctx;
 
-    const total = (db.prepare(
-      'SELECT COUNT(*) as c FROM hosts WHERE org_id = ? AND scan_run_id = ?'
-    ).get(orgId, scanRunId) as { c: number })?.c ?? 0;
-
-    const withEnv = (db.prepare(
-      'SELECT COUNT(*) as c FROM hosts WHERE org_id = ? AND scan_run_id = ? AND has_env_tag = 1'
-    ).get(orgId, scanRunId) as { c: number })?.c ?? 0;
+    const total = await countRows(db, 'hosts', orgId, scanRunId);
+    const withEnv = await countRows(db, 'hosts', orgId, scanRunId, { has_env_tag: 1 });
 
     const missing = total - withEnv;
     const percentage = pct(withEnv, total);
     const passed = percentage >= 90;
 
     const affectedHosts = missing > 0
-      ? (db.prepare(
-          `SELECT host_name FROM hosts WHERE org_id = ? AND scan_run_id = ? AND has_env_tag = 0 LIMIT ${AFFECTED_CAP}`
-        ).all(orgId, scanRunId) as Array<{ host_name: string }>)
+      ? await db<{ org_id: string; scan_run_id: string; has_env_tag: number; host_name: string }>('hosts')
+          .select('host_name')
+          .where({ org_id: orgId, scan_run_id: scanRunId, has_env_tag: 0 })
+          .limit(AFFECTED_CAP)
       : [];
 
     return {
@@ -73,16 +75,17 @@ const versionTagRule: AssessmentRule = {
   description: 'APM services should report version tags for deployment tracking',
   async run(ctx: AssessmentContext): Promise<RuleResult> {
     const { orgId, scanRunId, db } = ctx;
-    const total = (db.prepare('SELECT COUNT(*) as c FROM services WHERE org_id = ? AND scan_run_id = ?').get(orgId, scanRunId) as { c: number })?.c ?? 0;
-    const withVersion = (db.prepare('SELECT COUNT(*) as c FROM services WHERE org_id = ? AND scan_run_id = ? AND has_version_tag = 1').get(orgId, scanRunId) as { c: number })?.c ?? 0;
+    const total = await countRows(db, 'services', orgId, scanRunId);
+    const withVersion = await countRows(db, 'services', orgId, scanRunId, { has_version_tag: 1 });
     const missing = total - withVersion;
     const percentage = pct(withVersion, total);
     const passed = percentage >= 70;
 
     const affectedServices = missing > 0
-      ? (db.prepare(
-          `SELECT service_name, env FROM services WHERE org_id = ? AND scan_run_id = ? AND has_version_tag = 0 LIMIT ${AFFECTED_CAP}`
-        ).all(orgId, scanRunId) as Array<{ service_name: string; env: string | null }>)
+      ? await db<{ org_id: string; scan_run_id: string; has_version_tag: number; service_name: string; env: string | null }>('services')
+          .select('service_name', 'env')
+          .where({ org_id: orgId, scan_run_id: scanRunId, has_version_tag: 0 })
+          .limit(AFFECTED_CAP)
       : [];
 
     return {
@@ -114,8 +117,8 @@ const monitorTagRule: AssessmentRule = {
   description: 'Monitors should be tagged with env and service for grouping and routing',
   async run(ctx: AssessmentContext): Promise<RuleResult> {
     const { orgId, scanRunId, db } = ctx;
-    const total = (db.prepare('SELECT COUNT(*) as c FROM monitors WHERE org_id = ? AND scan_run_id = ?').get(orgId, scanRunId) as { c: number })?.c ?? 0;
-    const withBoth = (db.prepare('SELECT COUNT(*) as c FROM monitors WHERE org_id = ? AND scan_run_id = ? AND has_env_tag = 1 AND has_service_tag = 1').get(orgId, scanRunId) as { c: number })?.c ?? 0;
+    const total = await countRows(db, 'monitors', orgId, scanRunId);
+    const withBoth = await countRows(db, 'monitors', orgId, scanRunId, { has_env_tag: 1, has_service_tag: 1 });
     const missing = total - withBoth;
     const percentage = pct(withBoth, total);
     const passed = percentage >= 75;
@@ -127,9 +130,11 @@ const monitorTagRule: AssessmentRule = {
     // monitor is flagged (has_env_tag AND has_service_tag), only the
     // recommendation/tagKey attached to the finding is narrowed to 'service'.
     const affectedMonitors = missing > 0
-      ? (db.prepare(
-          `SELECT monitor_id, monitor_name FROM monitors WHERE org_id = ? AND scan_run_id = ? AND (has_env_tag = 0 OR has_service_tag = 0) LIMIT ${AFFECTED_CAP}`
-        ).all(orgId, scanRunId) as Array<{ monitor_id: number; monitor_name: string | null }>)
+      ? await db<{ org_id: string; scan_run_id: string; has_env_tag: number; has_service_tag: number; monitor_id: number; monitor_name: string | null }>('monitors')
+          .select('monitor_id', 'monitor_name')
+          .where({ org_id: orgId, scan_run_id: scanRunId })
+          .where((b) => b.where('has_env_tag', 0).orWhere('has_service_tag', 0))
+          .limit(AFFECTED_CAP)
       : [];
 
     return {
@@ -161,8 +166,8 @@ const syntheticsTagRule: AssessmentRule = {
   description: 'Synthetics tests should be tagged with env and service',
   async run(ctx: AssessmentContext): Promise<RuleResult> {
     const { orgId, scanRunId, db } = ctx;
-    const total = (db.prepare('SELECT COUNT(*) as c FROM synthetics_tests WHERE org_id = ? AND scan_run_id = ?').get(orgId, scanRunId) as { c: number })?.c ?? 0;
-    const withBoth = (db.prepare('SELECT COUNT(*) as c FROM synthetics_tests WHERE org_id = ? AND scan_run_id = ? AND has_env_tag = 1 AND has_service_tag = 1').get(orgId, scanRunId) as { c: number })?.c ?? 0;
+    const total = await countRows(db, 'synthetics_tests', orgId, scanRunId);
+    const withBoth = await countRows(db, 'synthetics_tests', orgId, scanRunId, { has_env_tag: 1, has_service_tag: 1 });
     const missing = total - withBoth;
     const percentage = pct(withBoth, total);
     const passed = percentage >= 70;
@@ -170,9 +175,11 @@ const syntheticsTagRule: AssessmentRule = {
     // Same choice as ust-004: 'service' is the primary tagKey for this
     // finding since env coverage is already covered in detail by ust-001.
     const affectedTests = missing > 0
-      ? (db.prepare(
-          `SELECT public_id, test_name FROM synthetics_tests WHERE org_id = ? AND scan_run_id = ? AND (has_env_tag = 0 OR has_service_tag = 0) LIMIT ${AFFECTED_CAP}`
-        ).all(orgId, scanRunId) as Array<{ public_id: string; test_name: string | null }>)
+      ? await db<{ org_id: string; scan_run_id: string; has_env_tag: number; has_service_tag: number; public_id: string; test_name: string | null }>('synthetics_tests')
+          .select('public_id', 'test_name')
+          .where({ org_id: orgId, scan_run_id: scanRunId })
+          .where((b) => b.where('has_env_tag', 0).orWhere('has_service_tag', 0))
+          .limit(AFFECTED_CAP)
       : [];
 
     return {
@@ -208,18 +215,23 @@ const teamTagRule: AssessmentRule = {
   async run(ctx: AssessmentContext): Promise<RuleResult> {
     const { orgId, scanRunId, db } = ctx;
 
-    const hostTotal = (db.prepare('SELECT COUNT(*) as c FROM hosts WHERE org_id = ? AND scan_run_id = ?').get(orgId, scanRunId) as { c: number })?.c ?? 0;
-    const hostWithTeam = (db.prepare('SELECT COUNT(*) as c FROM hosts WHERE org_id = ? AND scan_run_id = ? AND has_team_tag = 1').get(orgId, scanRunId) as { c: number })?.c ?? 0;
+    const hostTotal = await countRows(db, 'hosts', orgId, scanRunId);
+    const hostWithTeam = await countRows(db, 'hosts', orgId, scanRunId, { has_team_tag: 1 });
 
-    const monitorTotal = (db.prepare('SELECT COUNT(*) as c FROM monitors WHERE org_id = ? AND scan_run_id = ?').get(orgId, scanRunId) as { c: number })?.c ?? 0;
-    const monitorWithTeam = (db.prepare('SELECT COUNT(*) as c FROM monitors WHERE org_id = ? AND scan_run_id = ? AND has_team_tag = 1').get(orgId, scanRunId) as { c: number })?.c ?? 0;
+    const monitorTotal = await countRows(db, 'monitors', orgId, scanRunId);
+    const monitorWithTeam = await countRows(db, 'monitors', orgId, scanRunId, { has_team_tag: 1 });
 
     // services table has a direct `team` text column (populated from the APM
     // services endpoint's `team` field) rather than a has_team_tag flag.
-    const serviceTotal = (db.prepare('SELECT COUNT(*) as c FROM services WHERE org_id = ? AND scan_run_id = ?').get(orgId, scanRunId) as { c: number })?.c ?? 0;
-    const serviceWithTeam = (db.prepare(
-      "SELECT COUNT(*) as c FROM services WHERE org_id = ? AND scan_run_id = ? AND team IS NOT NULL AND team != ''"
-    ).get(orgId, scanRunId) as { c: number })?.c ?? 0;
+    const serviceTotal = await countRows(db, 'services', orgId, scanRunId);
+    const serviceWithTeam = Number(
+      (await db('services')
+        .where({ org_id: orgId, scan_run_id: scanRunId })
+        .whereNotNull('team')
+        .where('team', '!=', '')
+        .count({ c: '*' })
+        .first())?.c ?? 0
+    );
 
     const total = hostTotal + monitorTotal + serviceTotal;
     const withTeam = hostWithTeam + monitorWithTeam + serviceWithTeam;
@@ -229,22 +241,26 @@ const teamTagRule: AssessmentRule = {
 
     const affectedResources: AffectedResource[] = [];
     if (!passed) {
-      const missingHosts = db.prepare(
-        `SELECT host_name FROM hosts WHERE org_id = ? AND scan_run_id = ? AND has_team_tag = 0 LIMIT ${AFFECTED_CAP}`
-      ).all(orgId, scanRunId) as Array<{ host_name: string }>;
+      const missingHosts = await db<{ org_id: string; scan_run_id: string; has_team_tag: number; host_name: string }>('hosts')
+        .select('host_name')
+        .where({ org_id: orgId, scan_run_id: scanRunId, has_team_tag: 0 })
+        .limit(AFFECTED_CAP);
       affectedResources.push(...missingHosts.map((h) => ({ type: 'host', id: h.host_name, name: h.host_name })));
 
       if (affectedResources.length < AFFECTED_CAP) {
-        const missingMonitors = db.prepare(
-          `SELECT monitor_id, monitor_name FROM monitors WHERE org_id = ? AND scan_run_id = ? AND has_team_tag = 0 LIMIT ${AFFECTED_CAP - affectedResources.length}`
-        ).all(orgId, scanRunId) as Array<{ monitor_id: number; monitor_name: string | null }>;
+        const missingMonitors = await db<{ org_id: string; scan_run_id: string; has_team_tag: number; monitor_id: number; monitor_name: string | null }>('monitors')
+          .select('monitor_id', 'monitor_name')
+          .where({ org_id: orgId, scan_run_id: scanRunId, has_team_tag: 0 })
+          .limit(AFFECTED_CAP - affectedResources.length);
         affectedResources.push(...missingMonitors.map((m) => ({ type: 'monitor', id: String(m.monitor_id), name: m.monitor_name ?? `Monitor ${m.monitor_id}` })));
       }
 
       if (affectedResources.length < AFFECTED_CAP) {
-        const missingServices = db.prepare(
-          `SELECT service_name, env FROM services WHERE org_id = ? AND scan_run_id = ? AND (team IS NULL OR team = '') LIMIT ${AFFECTED_CAP - affectedResources.length}`
-        ).all(orgId, scanRunId) as Array<{ service_name: string; env: string | null }>;
+        const missingServices = await db<{ org_id: string; scan_run_id: string; team: string | null; service_name: string; env: string | null }>('services')
+          .select('service_name', 'env')
+          .where({ org_id: orgId, scan_run_id: scanRunId })
+          .where((b) => b.whereNull('team').orWhere('team', ''))
+          .limit(AFFECTED_CAP - affectedResources.length);
         affectedResources.push(...missingServices.map((s) => ({ type: 'service', id: `${s.service_name}:${s.env ?? 'unknown'}`, name: s.service_name })));
       }
     }
@@ -281,7 +297,6 @@ const applicationTagDef = lookupTag('application');
 const applicationTagSeverity = severityFromPriority(applicationTagDef?.priority ?? 'critical');
 // aliases from the tag dictionary's 'application' entry
 const APPLICATION_TAG_KEYS = ['application', ...(applicationTagDef?.aliases ?? ['app_group', 'workload'])];
-const APPLICATION_TAG_PLACEHOLDERS = APPLICATION_TAG_KEYS.map(() => '?').join(', ');
 
 const applicationTagRule: AssessmentRule = {
   id: 'ust-007',
@@ -294,21 +309,33 @@ const applicationTagRule: AssessmentRule = {
 
     // Hosts: resource_tags is populated for resource_type='host' by the
     // infrastructure collector, so we can check tag presence directly.
-    const hostTotal = (db.prepare('SELECT COUNT(*) as c FROM hosts WHERE org_id = ? AND scan_run_id = ?').get(orgId, scanRunId) as { c: number })?.c ?? 0;
-    const hostWithApplication = (db.prepare(
-      `SELECT COUNT(DISTINCT resource_id) as c FROM resource_tags
-       WHERE org_id = ? AND scan_run_id = ? AND resource_type = 'host' AND tag_key IN (${APPLICATION_TAG_PLACEHOLDERS})`
-    ).get(orgId, scanRunId, ...APPLICATION_TAG_KEYS) as { c: number })?.c ?? 0;
+    const hostTotal = await countRows(db, 'hosts', orgId, scanRunId);
+    const hostWithApplication = Number(
+      (await db('resource_tags')
+        .where({ org_id: orgId, scan_run_id: scanRunId, resource_type: 'host' })
+        .whereIn('tag_key', APPLICATION_TAG_KEYS)
+        .countDistinct({ c: 'resource_id' })
+        .first())?.c ?? 0
+    );
 
     // Services: no resource_tags rows exist for resource_type='service', so
     // fall back to the service_catalog.tags JSON blob (array of "key:value"
     // strings) as a best-effort text search.
-    const serviceTotal = (db.prepare('SELECT COUNT(*) as c FROM service_catalog WHERE org_id = ? AND scan_run_id = ?').get(orgId, scanRunId) as { c: number })?.c ?? 0;
-    const likeClauses = APPLICATION_TAG_KEYS.map((k) => `tags LIKE '%${k}:%'`).join(' OR ');
+    const serviceTotal = await countRows(db, 'service_catalog', orgId, scanRunId);
+    const applyTagLikeClauses = <T extends Knex.QueryBuilder>(builder: T): T => {
+      for (const key of APPLICATION_TAG_KEYS) {
+        builder.orWhere('tags', 'like', `%${key}:%`);
+      }
+      return builder;
+    };
     const serviceWithApplication = serviceTotal > 0
-      ? (db.prepare(
-          `SELECT COUNT(*) as c FROM service_catalog WHERE org_id = ? AND scan_run_id = ? AND (${likeClauses})`
-        ).get(orgId, scanRunId) as { c: number })?.c ?? 0
+      ? Number(
+          (await db('service_catalog')
+            .where({ org_id: orgId, scan_run_id: scanRunId })
+            .where((b) => applyTagLikeClauses(b))
+            .count({ c: '*' })
+            .first())?.c ?? 0
+        )
       : 0;
 
     const total = hostTotal + serviceTotal;
@@ -319,25 +346,26 @@ const applicationTagRule: AssessmentRule = {
 
     const affectedResources: AffectedResource[] = [];
     if (!passed) {
-      const missingHosts = db.prepare(
-        `SELECT h.host_name FROM hosts h
-         WHERE h.org_id = ? AND h.scan_run_id = ?
-           AND NOT EXISTS (
-             SELECT 1 FROM resource_tags rt
-             WHERE rt.org_id = h.org_id AND rt.scan_run_id = h.scan_run_id
-               AND rt.resource_type = 'host' AND rt.resource_id = h.host_name
-               AND rt.tag_key IN (${APPLICATION_TAG_PLACEHOLDERS})
-           )
-         LIMIT ${AFFECTED_CAP}`
-      ).all(orgId, scanRunId, ...APPLICATION_TAG_KEYS) as Array<{ host_name: string }>;
+      const missingHosts = await db<{ org_id: string; scan_run_id: string; host_name: string }>({ h: 'hosts' })
+        .select('h.host_name')
+        .where('h.org_id', orgId)
+        .andWhere('h.scan_run_id', scanRunId)
+        .whereNotExists(function (this: Knex.QueryBuilder) {
+          this.select(1)
+            .from({ rt: 'resource_tags' })
+            .whereRaw('rt.org_id = h.org_id AND rt.scan_run_id = h.scan_run_id AND rt.resource_id = h.host_name')
+            .andWhere('rt.resource_type', 'host')
+            .whereIn('rt.tag_key', APPLICATION_TAG_KEYS);
+        })
+        .limit(AFFECTED_CAP);
       affectedResources.push(...missingHosts.map((h) => ({ type: 'host', id: h.host_name, name: h.host_name })));
 
       if (affectedResources.length < AFFECTED_CAP) {
-        const missingServices = db.prepare(
-          `SELECT service_name FROM service_catalog
-           WHERE org_id = ? AND scan_run_id = ? AND NOT (${likeClauses})
-           LIMIT ${AFFECTED_CAP - affectedResources.length}`
-        ).all(orgId, scanRunId) as Array<{ service_name: string }>;
+        const missingServices = await db<{ org_id: string; scan_run_id: string; tags: string | null; service_name: string }>('service_catalog')
+          .select('service_name')
+          .where({ org_id: orgId, scan_run_id: scanRunId })
+          .whereNot((b) => applyTagLikeClauses(b))
+          .limit(AFFECTED_CAP - affectedResources.length);
         affectedResources.push(...missingServices.map((s) => ({ type: 'service', id: s.service_name, name: s.service_name })));
       }
     }
@@ -387,19 +415,26 @@ const tierTagRule: AssessmentRule = {
     // the entity schema's `tier` field), which is a more reliable signal
     // than a resource_tags lookup — service_catalog rows aren't mirrored
     // into resource_tags at all.
-    const total = (db.prepare('SELECT COUNT(*) as c FROM service_catalog WHERE org_id = ? AND scan_run_id = ?').get(orgId, scanRunId) as { c: number })?.c ?? 0;
-    const withTier = (db.prepare(
-      "SELECT COUNT(*) as c FROM service_catalog WHERE org_id = ? AND scan_run_id = ? AND tier IS NOT NULL AND tier != ''"
-    ).get(orgId, scanRunId) as { c: number })?.c ?? 0;
+    const total = await countRows(db, 'service_catalog', orgId, scanRunId);
+    const withTier = Number(
+      (await db('service_catalog')
+        .where({ org_id: orgId, scan_run_id: scanRunId })
+        .whereNotNull('tier')
+        .where('tier', '!=', '')
+        .count({ c: '*' })
+        .first())?.c ?? 0
+    );
 
     const missing = total - withTier;
     const percentage = pct(withTier, total);
     const passed = percentage >= 60;
 
     const affectedServices = !passed
-      ? (db.prepare(
-          `SELECT service_name FROM service_catalog WHERE org_id = ? AND scan_run_id = ? AND (tier IS NULL OR tier = '') LIMIT ${AFFECTED_CAP}`
-        ).all(orgId, scanRunId) as Array<{ service_name: string }>)
+      ? await db<{ org_id: string; scan_run_id: string; tier: string | null; service_name: string }>('service_catalog')
+          .select('service_name')
+          .where({ org_id: orgId, scan_run_id: scanRunId })
+          .where((b) => b.whereNull('tier').orWhere('tier', ''))
+          .limit(AFFECTED_CAP)
       : [];
 
     return {

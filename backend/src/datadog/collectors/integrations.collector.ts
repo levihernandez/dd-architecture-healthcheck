@@ -33,74 +33,93 @@ export async function collectIntegrations(
     client.get<Record<string, unknown>>('/api/v1/integration/gcp'),
   ]);
 
-  const insertCloud = db.prepare(`
-    INSERT OR REPLACE INTO cloud_accounts
-      (id, org_id, scan_run_id, provider, account_id, account_name, status,
-       metrics_enabled, resource_collection_enabled, has_errors, raw_json, first_seen, last_seen)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-
   if (awsResult.status === 'success') {
-    const txn = db.transaction((accounts: DDCloudAccount[]) => {
-      for (const acc of accounts) {
-        insertCloud.run(
-          uuidv4(), orgId, scanRunId, 'aws',
-          acc.account_id ?? null, acc.account_name ?? null, 'configured',
-          acc.metrics_collection_enabled ? 1 : 0,
-          acc.resource_collection_enabled ? 1 : 0,
-          (acc.errors?.length ?? 0) > 0 ? 1 : 0,
-          safeJsonSnapshot({ account_id: acc.account_id, metrics_collection_enabled: acc.metrics_collection_enabled }),
-          now, now
-        );
-      }
-    });
-    try { txn(awsResult.data); } catch (err) {
+    try {
+      // cloud_accounts has UNIQUE(org_id, provider, account_id) but no scan_run_id in that
+      // key, so a repeat scan collides with the prior row — do an explicit select +
+      // conditional insert/update inside a transaction rather than a blind insert.
+      await db.transaction(async (trx) => {
+        for (const acc of awsResult.data) {
+          const patch = {
+            org_id: orgId,
+            scan_run_id: scanRunId,
+            provider: 'aws',
+            account_id: acc.account_id ?? null,
+            account_name: acc.account_name ?? null,
+            status: 'configured',
+            metrics_enabled: acc.metrics_collection_enabled ? 1 : 0,
+            resource_collection_enabled: acc.resource_collection_enabled ? 1 : 0,
+            has_errors: (acc.errors?.length ?? 0) > 0 ? 1 : 0,
+            raw_json: safeJsonSnapshot({ account_id: acc.account_id, metrics_collection_enabled: acc.metrics_collection_enabled }),
+            last_seen: now,
+          };
+          const existing = await trx<{ id: string; org_id: string; provider: string; account_id: string | null }>('cloud_accounts')
+            .select('id')
+            .where({ org_id: orgId, provider: 'aws', account_id: acc.account_id ?? null })
+            .first();
+          if (existing) {
+            await trx('cloud_accounts').where({ id: existing.id }).update(patch);
+          } else {
+            await trx('cloud_accounts').insert({ id: uuidv4(), first_seen: now, ...patch });
+          }
+        }
+      });
+    } catch (err) {
       logger.error(`[${orgId}] Failed to store AWS account data`, err);
     }
     totalItems += awsResult.itemCount;
   }
 
   // Store integration probe results in permissions_report
-  const insertPermission = db.prepare(`
-    INSERT OR REPLACE INTO permissions_report
-      (id, org_id, scan_run_id, endpoint, status, status_code, error, tested_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-
-  for (const [provider, result] of [
+  const permissionRows = ([
     ['aws', awsResult], ['azure', azureResult], ['gcp', gcpResult]
-  ] as const) {
-    insertPermission.run(
-      uuidv4(), orgId, scanRunId,
-      `/api/v1/integration/${provider}`,
-      result.status, null, result.error ?? null, now
-    );
-  }
+  ] as const).map(([provider, result]) => ({
+    id: uuidv4(),
+    org_id: orgId,
+    scan_run_id: scanRunId,
+    endpoint: `/api/v1/integration/${provider}`,
+    status: result.status,
+    status_code: null,
+    error: result.error ?? null,
+    tested_at: now,
+  }));
+  await db('permissions_report').insert(permissionRows);
 
   // Probe webhooks / notification integrations
   const webhooksResult = await client.get<unknown>('/api/v1/integration/webhooks');
   const pagerdutyResult = await client.get<unknown>('/api/v1/integration/pagerduty');
   const slackResult = await client.get<unknown>('/api/v1/integration/slack');
 
-  const insertIntegration = db.prepare(`
-    INSERT OR REPLACE INTO integrations
-      (id, org_id, scan_run_id, integration_name, integration_type, status,
-       is_configured, is_enabled, raw_json, first_seen, last_seen)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-
-  for (const [name, result] of [
-    ['webhooks', webhooksResult], ['pagerduty', pagerdutyResult], ['slack', slackResult]
-  ] as const) {
-    const isConfigured = result.status === 'success' && result.itemCount > 0;
-    insertIntegration.run(
-      uuidv4(), orgId, scanRunId, name, 'notification',
-      result.status === 'success' ? 'configured' : result.status,
-      isConfigured ? 1 : 0, isConfigured ? 1 : 0,
-      null, now, now
-    );
-    if (isConfigured) totalItems++;
-  }
+  // integrations has UNIQUE(org_id, integration_name) but no scan_run_id in that key, so a
+  // repeat scan collides with the prior row — explicit select + conditional insert/update.
+  await db.transaction(async (trx) => {
+    for (const [name, result] of [
+      ['webhooks', webhooksResult], ['pagerduty', pagerdutyResult], ['slack', slackResult]
+    ] as const) {
+      const isConfigured = result.status === 'success' && result.itemCount > 0;
+      if (isConfigured) totalItems++;
+      const patch = {
+        org_id: orgId,
+        scan_run_id: scanRunId,
+        integration_name: name,
+        integration_type: 'notification',
+        status: result.status === 'success' ? 'configured' : result.status,
+        is_configured: isConfigured ? 1 : 0,
+        is_enabled: isConfigured ? 1 : 0,
+        raw_json: null,
+        last_seen: now,
+      };
+      const existing = await trx<{ id: string; org_id: string; integration_name: string }>('integrations')
+        .select('id')
+        .where({ org_id: orgId, integration_name: name })
+        .first();
+      if (existing) {
+        await trx('integrations').where({ id: existing.id }).update(patch);
+      } else {
+        await trx('integrations').insert({ id: uuidv4(), first_seen: now, ...patch });
+      }
+    }
+  });
 
   const allResults = [awsResult, azureResult, gcpResult, webhooksResult, pagerdutyResult, slackResult];
   logger.info(`[${orgId}] Collected integration data in ${Date.now() - start}ms`);

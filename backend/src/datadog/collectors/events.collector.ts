@@ -60,21 +60,28 @@ export async function collectEvents(
   const db = getDatabase();
   const now = new Date().toISOString();
 
-  const insert = db.prepare(`
-    INSERT OR REPLACE INTO event_stats
-      (id, org_id, scan_run_id, dimension, dimension_value, event_count, computed_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `);
+  // event_stats is keyed uniquely on (org_id, scan_run_id, dimension, dimension_value).
+  // scan_run_id is freshly generated per scan, so within a single collector run these
+  // rows can never already exist — this is a plain multi-row insert, not an upsert.
+  const rows = (Object.keys(counts) as EventDimension[]).flatMap((dimension) =>
+    Array.from(counts[dimension], ([value, count]) => ({
+      id: uuidv4(),
+      org_id: orgId,
+      scan_run_id: scanRunId,
+      dimension,
+      dimension_value: value,
+      event_count: count,
+      computed_at: now,
+    }))
+  );
 
-  const txn = db.transaction(() => {
-    for (const dimension of Object.keys(counts) as EventDimension[]) {
-      for (const [value, count] of counts[dimension]) {
-        insert.run(uuidv4(), orgId, scanRunId, dimension, value, count, now);
-      }
+  try {
+    if (rows.length > 0) {
+      await db.transaction(async (trx) => {
+        await trx('event_stats').insert(rows);
+      });
     }
-  });
-
-  try { txn(); } catch (err) {
+  } catch (err) {
     logger.error(`[${orgId}] Failed to store event stats`, err);
   }
 

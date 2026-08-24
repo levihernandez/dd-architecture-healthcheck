@@ -34,40 +34,39 @@ export async function collectSynthetics(
   const db = getDatabase();
   const now = new Date().toISOString();
 
-  const insert = db.prepare(`
-    INSERT OR REPLACE INTO synthetics_tests
-      (id, org_id, scan_run_id, public_id, test_name, test_type, status,
-       has_env_tag, has_service_tag, has_notification, location_count, tags,
-       created_at_dd, modified_at_dd, raw_json, first_seen, last_seen)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
+  try {
+    await db.transaction(async (trx) => {
+      for (const test of result.data) {
+        const tags = test.tags ?? [];
+        const tagKeys = tags.map((t) => t.split(':')[0].toLowerCase());
+        const hasEnv = tagKeys.includes('env');
+        const hasService = tagKeys.includes('service');
+        const hasNotification = Boolean(
+          test.message && test.message.trim().length > 0 &&
+          (test.message.includes('@') || test.message.includes('{{'))
+        );
 
-  const txn = db.transaction((tests: DDSyntheticsTest[]) => {
-    for (const test of tests) {
-      const tags = test.tags ?? [];
-      const tagKeys = tags.map((t) => t.split(':')[0].toLowerCase());
-      const hasEnv = tagKeys.includes('env');
-      const hasService = tagKeys.includes('service');
-      const hasNotification = Boolean(
-        test.message && test.message.trim().length > 0 &&
-        (test.message.includes('@') || test.message.includes('{{'))
-      );
-
-      insert.run(
-        uuidv4(), orgId, scanRunId,
-        test.public_id, test.name, test.type, test.status,
-        hasEnv ? 1 : 0, hasService ? 1 : 0, hasNotification ? 1 : 0,
-        test.locations?.length ?? 0,
-        JSON.stringify(tags),
-        test.created_at ?? null, test.modified_at ?? null,
-        safeJsonSnapshot({ public_id: test.public_id, name: test.name, type: test.type,
-          status: test.status, tags: test.tags, locations: test.locations }),
-        now, now
-      );
-    }
-  });
-
-  try { txn(result.data); } catch (err) {
+        // `synthetics_tests` has unique(org_id, public_id) — the original
+        // INSERT OR REPLACE deletes any existing row for this test and inserts
+        // a fresh one (including a new id). Replicated here as an explicit
+        // delete+insert rather than onConflict().merge(), since a composite
+        // unique target can behave differently across the sqlite and postgres
+        // dialects this app supports.
+        await trx('synthetics_tests').where({ org_id: orgId, public_id: test.public_id }).delete();
+        await trx('synthetics_tests').insert({
+          id: uuidv4(), org_id: orgId, scan_run_id: scanRunId,
+          public_id: test.public_id, test_name: test.name, test_type: test.type, status: test.status,
+          has_env_tag: hasEnv ? 1 : 0, has_service_tag: hasService ? 1 : 0, has_notification: hasNotification ? 1 : 0,
+          location_count: test.locations?.length ?? 0,
+          tags: JSON.stringify(tags),
+          created_at_dd: test.created_at ?? null, modified_at_dd: test.modified_at ?? null,
+          raw_json: safeJsonSnapshot({ public_id: test.public_id, name: test.name, type: test.type,
+            status: test.status, tags: test.tags, locations: test.locations }),
+          first_seen: now, last_seen: now,
+        });
+      }
+    });
+  } catch (err) {
     logger.error(`[${orgId}] Failed to store synthetics data`, err);
   }
 

@@ -10,58 +10,63 @@ import type { FindingCategory } from '../types/assessment.types';
  * free-text field a human typed (org profile) gets scrubbed of the org's own
  * name plus a generic PII sweep (emails, key-shaped tokens) before it's
  * concatenated in. See redact-context.ts. */
-export function buildChatContext(orgId: string, scanId?: string, page?: string): string {
+export async function buildChatContext(orgId: string, scanId?: string, page?: string): Promise<string> {
   const db = getDatabase();
 
-  const org = db.prepare('SELECT * FROM orgs WHERE id = ?').get(orgId) as Record<string, unknown> | undefined;
+  const org = await db<Record<string, unknown>>('orgs').where({ id: orgId }).first();
   if (!org) return 'No organization data found.';
   const orgName = org.name as string;
 
   let scan: Record<string, unknown> | undefined;
   if (scanId) {
-    scan = db.prepare('SELECT * FROM scan_runs WHERE id = ? AND org_id = ?').get(scanId, orgId) as Record<string, unknown>;
+    scan = await db<Record<string, unknown>>('scan_runs').where({ id: scanId, org_id: orgId }).first();
   } else {
-    scan = db.prepare(
-      "SELECT * FROM scan_runs WHERE org_id = ? AND status = 'completed' ORDER BY completed_at DESC LIMIT 1"
-    ).get(orgId) as Record<string, unknown>;
+    scan = await db<Record<string, unknown>>('scan_runs')
+      .where({ org_id: orgId, status: 'completed' })
+      .orderBy('completed_at', 'desc')
+      .first();
   }
   if (!scan) return `This organization (site: ${org.site}) has no completed scans yet — run a scan first.`;
 
   const sid = scan.id as string;
 
-  const count = (table: string, extra = '') =>
-    (db.prepare(`SELECT COUNT(*) as c FROM ${table} WHERE org_id = ? AND scan_run_id = ? ${extra}`)
-      .get(orgId, sid) as { c: number })?.c ?? 0;
+  const countOf = async (table: string, extra: Record<string, unknown> = {}) => {
+    const row = await db(table).where({ org_id: orgId, scan_run_id: sid, ...extra }).count<{ c: string | number }>({ c: '*' }).first();
+    return Number(row?.c ?? 0);
+  };
+  const rawCount = async (r: { c?: string | number } | undefined) => Number(r?.c ?? 0);
 
-  const hosts = count('hosts');
-  const services = count('services');
-  const monitors = count('monitors');
-  const dashboards = count('dashboards');
-  const synthTests = count('synthetics_tests');
-  const logsIndexes = count('logs_indexes');
-  const slos = count('slos');
-  const integrations = count('integrations');
+  const hosts = await countOf('hosts');
+  const services = await countOf('services');
+  const monitors = await countOf('monitors');
+  const dashboards = await countOf('dashboards');
+  const synthTests = await countOf('synthetics_tests');
+  const logsIndexes = await countOf('logs_indexes');
+  const slos = await countOf('slos');
+  const integrations = await countOf('integrations');
 
   // Tag coverage
-  const hostTagCov = (key: string) => {
-    const n = (db.prepare(
-      "SELECT COUNT(DISTINCT resource_id) as c FROM resource_tags WHERE org_id=? AND scan_run_id=? AND resource_type='host' AND tag_key=?"
-    ).get(orgId, sid, key) as { c: number })?.c ?? 0;
+  const hostTagCov = async (key: string) => {
+    const row = await db('resource_tags')
+      .where({ org_id: orgId, scan_run_id: sid, resource_type: 'host', tag_key: key })
+      .countDistinct<{ c: string | number }>({ c: 'resource_id' })
+      .first();
+    const n = await rawCount(row);
     return hosts > 0 ? Math.round((n / hosts) * 100) : 0;
   };
-  const envCov = hostTagCov('env');
-  const svcCov = hostTagCov('service');
-  const verCov = hostTagCov('version');
-  const teamCov = hostTagCov('team');
+  const envCov = await hostTagCov('env');
+  const svcCov = await hostTagCov('service');
+  const verCov = await hostTagCov('version');
+  const teamCov = await hostTagCov('team');
 
   // Tag analysis
-  const tagRows = db.prepare(`
-    SELECT tag_key, unique_value_count, host_occurrence_count, is_standard_key
-    FROM tag_analysis WHERE org_id = ? AND scan_run_id = ?
-    ORDER BY unique_value_count DESC
-  `).all(orgId, sid) as Array<{
+  const tagRows = await db<{
+    org_id: string; scan_run_id: string;
     tag_key: string; unique_value_count: number; host_occurrence_count: number; is_standard_key: number;
-  }>;
+  }>('tag_analysis')
+    .select('tag_key', 'unique_value_count', 'host_occurrence_count', 'is_standard_key')
+    .where({ org_id: orgId, scan_run_id: sid })
+    .orderBy('unique_value_count', 'desc');
 
   const highCard = tagRows.filter(t => t.unique_value_count > 50);
   const topByCard = tagRows.slice(0, 8).map(t => `${t.tag_key}(${t.unique_value_count})`);
@@ -72,13 +77,13 @@ export function buildChatContext(orgId: string, scanId?: string, page?: string):
   const cmRisk = estCM > standardAllotment * 0.85 ? 'HIGH' : estCM > standardAllotment * 0.55 ? 'MEDIUM' : 'LOW';
 
   // Log indexes
-  const logRows = db.prepare(`
-    SELECT index_name, retention_days, daily_limit, exclusion_filter_count, is_rate_limited
-    FROM logs_indexes WHERE org_id = ? AND scan_run_id = ?
-  `).all(orgId, sid) as Array<{
+  const logRows = await db<{
+    org_id: string; scan_run_id: string;
     index_name: string; retention_days: number | null; daily_limit: number | null;
     exclusion_filter_count: number; is_rate_limited: number;
-  }>;
+  }>('logs_indexes')
+    .select('index_name', 'retention_days', 'daily_limit', 'exclusion_filter_count', 'is_rate_limited')
+    .where({ org_id: orgId, scan_run_id: sid });
 
   const totalDailyLimit = logRows.reduce((s, i) => s + (i.daily_limit ?? 0), 0);
   const rateLimited = logRows.filter(i => i.is_rate_limited).map(i => i.index_name);
@@ -88,9 +93,9 @@ export function buildChatContext(orgId: string, scanId?: string, page?: string):
   logRows.forEach(i => { const k = `${i.retention_days ?? '?'}d`; retDist[k] = (retDist[k] ?? 0) + 1; });
 
   // Synthetics
-  const synthRows = db.prepare(`
-    SELECT test_type, location_count FROM synthetics_tests WHERE org_id = ? AND scan_run_id = ?
-  `).all(orgId, sid) as Array<{ test_type: string | null; location_count: number | null }>;
+  const synthRows = await db<{ org_id: string; scan_run_id: string; test_type: string | null; location_count: number | null }>('synthetics_tests')
+    .select('test_type', 'location_count')
+    .where({ org_id: orgId, scan_run_id: sid });
 
   const apiTests = synthRows.filter(t => t.test_type !== 'browser').length;
   const browserTests = synthRows.filter(t => t.test_type === 'browser').length;
@@ -102,38 +107,36 @@ export function buildChatContext(orgId: string, scanId?: string, page?: string):
   }, 0);
 
   // Monitors
-  const mWithEnv = count('monitors', 'AND has_env_tag=1');
-  const mWithSvc = count('monitors', 'AND has_service_tag=1');
-  const mWithTeam = count('monitors', 'AND has_team_tag=1');
-  const muted = count('monitors', 'AND is_muted=1');
-  const alerting = (db.prepare(
-    "SELECT COUNT(*) as c FROM monitors WHERE org_id=? AND scan_run_id=? AND overall_state='Alert'"
-  ).get(orgId, sid) as { c: number })?.c ?? 0;
+  const mWithEnv = await countOf('monitors', { has_env_tag: 1 });
+  const mWithSvc = await countOf('monitors', { has_service_tag: 1 });
+  const mWithTeam = await countOf('monitors', { has_team_tag: 1 });
+  const muted = await countOf('monitors', { is_muted: 1 });
+  const alerting = await countOf('monitors', { overall_state: 'Alert' });
 
   // APM services
-  const sWithEnv = (db.prepare(
-    'SELECT COUNT(*) as c FROM services WHERE org_id=? AND scan_run_id=? AND env IS NOT NULL'
-  ).get(orgId, sid) as { c: number })?.c ?? 0;
-  const sWithVer = count('services', 'AND has_version_tag=1');
-  const sWithTeam = (db.prepare(
-    'SELECT COUNT(*) as c FROM services WHERE org_id=? AND scan_run_id=? AND team IS NOT NULL'
-  ).get(orgId, sid) as { c: number })?.c ?? 0;
-  const sInCatalog = count('services', 'AND has_service_catalog=1');
+  const sWithEnv = await rawCount(await db('services').where({ org_id: orgId, scan_run_id: sid }).whereNotNull('env').count<{ c: string | number }>({ c: '*' }).first());
+  const sWithVer = await countOf('services', { has_version_tag: 1 });
+  const sWithTeam = await rawCount(await db('services').where({ org_id: orgId, scan_run_id: sid }).whereNotNull('team').count<{ c: string | number }>({ c: '*' }).first());
+  const sInCatalog = await countOf('services', { has_service_catalog: 1 });
 
   // Product signals
-  const signals = db.prepare(
-    'SELECT product, signal, value, detected FROM product_usage_signals WHERE org_id=? AND scan_run_id=? ORDER BY product'
-  ).all(orgId, sid) as Array<{ product: string; signal: string; value: string | null; detected: number }>;
+  const signals = await db<{ org_id: string; scan_run_id: string; product: string; signal: string; value: string | null; detected: number }>('product_usage_signals')
+    .select('product', 'signal', 'value', 'detected')
+    .where({ org_id: orgId, scan_run_id: sid })
+    .orderBy('product');
 
   // Cloud accounts
-  const cloudRows = db.prepare(
-    'SELECT provider, COUNT(*) as c FROM cloud_accounts WHERE org_id=? AND scan_run_id=? GROUP BY provider'
-  ).all(orgId, sid) as Array<{ provider: string; c: number }>;
+  const cloudRows = await db<{ org_id: string; scan_run_id: string; provider: string; c: string | number }>('cloud_accounts')
+    .select('provider')
+    .count<{ c: string | number }>({ c: '*' })
+    .where({ org_id: orgId, scan_run_id: sid })
+    .groupBy('provider')
+    .then(rows => rows.map(r => ({ provider: r.provider, c: Number(r.c) })));
 
   // Integrations detail
-  const integRows = db.prepare(
-    'SELECT integration_name, integration_type, is_configured, is_enabled FROM integrations WHERE org_id=? AND scan_run_id=?'
-  ).all(orgId, sid) as Array<{ integration_name: string; integration_type: string | null; is_configured: number; is_enabled: number }>;
+  const integRows = await db<{ org_id: string; scan_run_id: string; integration_name: string; integration_type: string | null; is_configured: number; is_enabled: number }>('integrations')
+    .select('integration_name', 'integration_type', 'is_configured', 'is_enabled')
+    .where({ org_id: orgId, scan_run_id: sid });
   const integConfigured = integRows.filter(r => r.is_configured).length;
   const integEnabled = integRows.filter(r => r.is_enabled).length;
   const integByType: Record<string, number> = {};
@@ -141,41 +144,60 @@ export function buildChatContext(orgId: string, scanId?: string, page?: string):
   const integNameHit = (kws: string[]) => integRows.filter(r => kws.some(k => r.integration_name.toLowerCase().includes(k))).length;
 
   // Dashboards detail
-  const dashRows = db.prepare(
-    'SELECT widget_count, has_template_variables FROM dashboards WHERE org_id=? AND scan_run_id=?'
-  ).all(orgId, sid) as Array<{ widget_count: number | null; has_template_variables: number }>;
+  const dashRows = await db<{ org_id: string; scan_run_id: string; widget_count: number | null; has_template_variables: number }>('dashboards')
+    .select('widget_count', 'has_template_variables')
+    .where({ org_id: orgId, scan_run_id: sid });
   const emptyDash = dashRows.filter(d => (d.widget_count ?? 0) === 0).length;
   const dashWithVars = dashRows.filter(d => d.has_template_variables).length;
 
   // Network & Cloud detail
-  const ccmRows = db.prepare(
-    'SELECT provider, configured FROM cost_management_config WHERE org_id=? AND scan_run_id=?'
-  ).all(orgId, sid) as Array<{ provider: string; configured: number }>;
+  const ccmRows = await db<{ org_id: string; scan_run_id: string; provider: string; configured: number }>('cost_management_config')
+    .select('provider', 'configured')
+    .where({ org_id: orgId, scan_run_id: sid });
   const npmProxy = integNameHit(['network']);
   const ndmProxy = integNameHit(['snmp', 'ndm', 'cisco', 'juniper', 'palo_alto']);
   const dbmProxy = integNameHit(['postgres', 'mysql', 'sqlserver', 'oracle', 'mongodb']);
 
   // Security & incidents detail
-  const secBySev = db.prepare(
-    "SELECT severity, COUNT(*) as c FROM security_findings WHERE org_id=? AND scan_run_id=? GROUP BY severity"
-  ).all(orgId, sid) as Array<{ severity: string; c: number }>;
-  const secByCat = db.prepare(
-    "SELECT category, COUNT(*) as c FROM security_findings WHERE org_id=? AND scan_run_id=? GROUP BY category"
-  ).all(orgId, sid) as Array<{ category: string; c: number }>;
+  const secBySev = (await db<{ org_id: string; scan_run_id: string; severity: string; c: string | number }>('security_findings')
+    .select('severity')
+    .count<{ c: string | number }>({ c: '*' })
+    .where({ org_id: orgId, scan_run_id: sid })
+    .groupBy('severity')).map(r => ({ severity: r.severity, c: Number(r.c) }));
+  const secByCat = (await db<{ org_id: string; scan_run_id: string; category: string; c: string | number }>('security_findings')
+    .select('category')
+    .count<{ c: string | number }>({ c: '*' })
+    .where({ org_id: orgId, scan_run_id: sid })
+    .groupBy('category')).map(r => ({ category: r.category, c: Number(r.c) }));
   const secTotal = secBySev.reduce((s, r) => s + r.c, 0);
-  const secUnresolvedCritical = (db.prepare(
-    "SELECT COUNT(*) as c FROM security_findings WHERE org_id=? AND scan_run_id=? AND severity IN ('critical','high') AND (status IS NULL OR status NOT IN ('resolved','muted','skipped'))"
-  ).get(orgId, sid) as { c: number })?.c ?? 0;
-  const incBySev = db.prepare(
-    "SELECT severity, COUNT(*) as c FROM incidents WHERE org_id=? AND scan_run_id=? GROUP BY severity"
-  ).all(orgId, sid) as Array<{ severity: string; c: number }>;
-  const incOpen = (db.prepare(
-    "SELECT COUNT(*) as c FROM incidents WHERE org_id=? AND scan_run_id=? AND (state IS NULL OR state != 'resolved')"
-  ).get(orgId, sid) as { c: number })?.c ?? 0;
+  const secUnresolvedCritical = await rawCount(
+    await db('security_findings')
+      .where({ org_id: orgId, scan_run_id: sid })
+      .whereIn('severity', ['critical', 'high'])
+      .where(function () {
+        this.whereNull('status').orWhereNotIn('status', ['resolved', 'muted', 'skipped']);
+      })
+      .count<{ c: string | number }>({ c: '*' })
+      .first()
+  );
+  const incBySev = (await db<{ org_id: string; scan_run_id: string; severity: string; c: string | number }>('incidents')
+    .select('severity')
+    .count<{ c: string | number }>({ c: '*' })
+    .where({ org_id: orgId, scan_run_id: sid })
+    .groupBy('severity')).map(r => ({ severity: r.severity, c: Number(r.c) }));
+  const incOpen = await rawCount(
+    await db('incidents')
+      .where({ org_id: orgId, scan_run_id: sid })
+      .where(function () {
+        this.whereNull('state').orWhereNot('state', 'resolved');
+      })
+      .count<{ c: string | number }>({ c: '*' })
+      .first()
+  );
   const incTotal = incBySev.reduce((s, r) => s + r.c, 0);
 
   // Scorecard
-  const sc = db.prepare('SELECT * FROM scorecards WHERE org_id=? AND scan_run_id=?').get(orgId, sid) as Record<string, unknown> | undefined;
+  const sc = await db<Record<string, unknown>>('scorecards').where({ org_id: orgId, scan_run_id: sid }).first();
   const catScores: Record<string, number> = {};
   if (sc) {
     try {
@@ -188,24 +210,20 @@ export function buildChatContext(orgId: string, scanId?: string, page?: string):
   // scope findings to that category and lead with an explicit maturity statement.
   const pageContext = resolvePageContext(page);
 
-  const findings = pageContext
-    ? db.prepare(`
-        SELECT severity, category, title, affected_count, total_count, percentage, affected_resources
-        FROM findings WHERE org_id=? AND scan_run_id=? AND category=?
-        ORDER BY CASE severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
-                 percentage DESC LIMIT 10
-      `).all(orgId, sid, pageContext.category)
-    : db.prepare(`
-        SELECT severity, category, title, affected_count, total_count, percentage, affected_resources
-        FROM findings WHERE org_id=? AND scan_run_id=?
-        ORDER BY CASE severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
-                 percentage DESC LIMIT 12
-      `).all(orgId, sid);
-  const typedFindings = findings as Array<{
+  const severityOrder = db.raw("CASE severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END");
+  const findingsQuery = db<{
+    org_id: string; scan_run_id: string;
     severity: string; category: string; title: string;
     affected_count: number; total_count: number; percentage: number;
     affected_resources: string | null;
-  }>;
+  }>('findings')
+    .select('severity', 'category', 'title', 'affected_count', 'total_count', 'percentage', 'affected_resources')
+    .where({ org_id: orgId, scan_run_id: sid })
+    .orderBy([{ column: severityOrder as any }, { column: 'percentage', order: 'desc' }]);
+
+  const typedFindings = pageContext
+    ? await findingsQuery.clone().where('category', pageContext.category).limit(10)
+    : await findingsQuery.clone().limit(12);
 
   // Capped (top 3) concrete resource refs per finding, so chat can cite something
   // real instead of only a category-level percentage — mirrors the one-shot
@@ -226,7 +244,7 @@ export function buildChatContext(orgId: string, scanId?: string, page?: string):
   const pct = (n: number, d: number) => d > 0 ? Math.round((n / d) * 100) : 0;
   const tier = hosts < 50 ? 'Startup (<50)' : hosts < 250 ? 'Growth (50-250)' : hosts < 1000 ? 'Mid-Market (250-999)' : 'Enterprise (1000+)';
 
-  const orgProfileBlock = redactPII(redactOrgName(getOrgContextBlock(orgId), orgName));
+  const orgProfileBlock = redactPII(redactOrgName(await getOrgContextBlock(orgId), orgName));
 
   // Existing per-domain detail blocks, keyed by category — computed unconditionally
   // above (cheap), assembled conditionally below based on the page focus.

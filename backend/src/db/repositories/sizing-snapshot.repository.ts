@@ -45,41 +45,47 @@ interface SizingSnapshotRow {
 }
 
 export const SizingSnapshotRepository = {
-  create(input: SizingSnapshotInput): SizingSnapshotRecord {
+  async create(input: SizingSnapshotInput): Promise<SizingSnapshotRecord> {
     const db = getDatabase();
     const id = uuidv4();
     const now = new Date().toISOString();
-    db.prepare(`
-      INSERT INTO sizing_snapshots
-        (id, name, created_at, mode, org_id, org_name, total_list_price, total_real_cost, category_count, cart_json, state_json)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      id, input.name, now, input.mode, input.orgId ?? null, input.orgName ?? null,
-      input.totalListPrice, input.totalRealCost ?? null, input.categoryCount,
-      JSON.stringify(input.cart), JSON.stringify(input.state)
-    );
-    return this.findById(id)!;
+
+    await db('sizing_snapshots').insert({
+      id,
+      name: input.name,
+      created_at: now,
+      mode: input.mode,
+      org_id: input.orgId ?? null,
+      org_name: input.orgName ?? null,
+      total_list_price: input.totalListPrice,
+      total_real_cost: input.totalRealCost ?? null,
+      category_count: input.categoryCount,
+      cart_json: JSON.stringify(input.cart),
+      state_json: JSON.stringify(input.state),
+    });
+
+    return (await this.findById(id))!;
   },
 
-  listAll(): SizingSnapshotSummary[] {
+  async listAll(): Promise<SizingSnapshotSummary[]> {
     const db = getDatabase();
-    const rows = db.prepare(
-      'SELECT id, name, created_at, mode, org_id, org_name, total_list_price, total_real_cost, category_count, cart_json FROM sizing_snapshots ORDER BY created_at DESC'
-    ).all() as Omit<SizingSnapshotRow, 'state_json'>[];
+    const rows = await db<Omit<SizingSnapshotRow, 'state_json'>>('sizing_snapshots')
+      .select('id', 'name', 'created_at', 'mode', 'org_id', 'org_name', 'total_list_price', 'total_real_cost', 'category_count', 'cart_json')
+      .orderBy('created_at', 'desc');
     return rows.map(rowToSummary);
   },
 
-  findById(id: string): SizingSnapshotRecord | null {
+  async findById(id: string): Promise<SizingSnapshotRecord | null> {
     const db = getDatabase();
-    const row = db.prepare('SELECT * FROM sizing_snapshots WHERE id = ?').get(id) as SizingSnapshotRow | undefined;
+    const row = await db<SizingSnapshotRow>('sizing_snapshots').where({ id }).first();
     if (!row) return null;
     return { ...rowToSummary(row), state: JSON.parse(row.state_json) };
   },
 
-  delete(id: string): boolean {
+  async delete(id: string): Promise<boolean> {
     const db = getDatabase();
-    const result = db.prepare('DELETE FROM sizing_snapshots WHERE id = ?').run(id);
-    return result.changes > 0;
+    const result = await db('sizing_snapshots').where({ id }).delete();
+    return result > 0;
   },
 };
 

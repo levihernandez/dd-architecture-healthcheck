@@ -17,9 +17,9 @@ const ANTHROPIC_MODELS = [
 ];
 
 // GET /api/ai-settings — current settings (no raw key)
-router.get('/', (_req, res) => {
+router.get('/', async (_req, res) => {
   try {
-    const settings = AISettingsRepository.get();
+    const settings = await AISettingsRepository.get();
     const envFallback = settings.provider === 'none' ? {
       envProvider: process.env.AI_PROVIDER ?? 'none',
     } : {};
@@ -38,16 +38,16 @@ const SaveSchema = z.object({
   baseUrl: z.string().url().optional().or(z.literal('')),
 });
 
-router.put('/', (req, res) => {
+router.put('/', async (req, res) => {
   const parse = SaveSchema.safeParse(req.body);
   if (!parse.success) {
     res.status(400).json({ error: 'Invalid request', details: parse.error.flatten() });
     return;
   }
   try {
-    AISettingsRepository.save(parse.data);
+    await AISettingsRepository.save(parse.data);
     logger.info(`[ai-settings] saved provider=${parse.data.provider} model=${parse.data.model}`);
-    res.json({ ok: true, settings: AISettingsRepository.get() });
+    res.json({ ok: true, settings: await AISettingsRepository.get() });
   } catch (err) {
     res.status(500).json({ error: err instanceof Error ? err.message : 'Error' });
   }
@@ -58,7 +58,7 @@ router.put('/', (req, res) => {
 router.get('/models', async (req, res) => {
   const { provider: qProvider, baseUrl: qBaseUrl, apiKey: qApiKey } = req.query as Record<string, string>;
 
-  const config = getAIConfig();
+  const config = await getAIConfig();
   const provider = qProvider || config.provider;
   const baseUrl = qBaseUrl || config.baseUrl;
   const apiKey = qApiKey || config.apiKey || '';
@@ -109,7 +109,7 @@ router.get('/models', async (req, res) => {
 
 // POST /api/ai-settings/test — test the current (or provided) config
 router.post('/test', async (req, res) => {
-  const config = getAIConfig();
+  const config = await getAIConfig();
 
   if (config.provider === 'none') {
     res.json({ ok: false, message: 'No AI provider configured. Save settings first.' });

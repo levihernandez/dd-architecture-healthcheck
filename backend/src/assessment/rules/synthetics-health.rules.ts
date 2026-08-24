@@ -4,6 +4,11 @@ function pct(count: number, total: number): number {
   return total === 0 ? 100 : Math.round((count / total) * 100);
 }
 
+async function countSynthetics(db: AssessmentContext['db'], orgId: string, scanRunId: string, extra?: Record<string, unknown>): Promise<number> {
+  const row = await db('synthetics_tests').where({ org_id: orgId, scan_run_id: scanRunId, ...extra }).count({ c: '*' }).first();
+  return Number(row?.c ?? 0);
+}
+
 const syntheticsWithoutNotificationsRule: AssessmentRule = {
   id: 'syn-001',
   name: 'Synthetics tests without notifications',
@@ -12,8 +17,8 @@ const syntheticsWithoutNotificationsRule: AssessmentRule = {
   description: 'Synthetic test failures should trigger notifications',
   async run(ctx: AssessmentContext): Promise<RuleResult> {
     const { orgId, scanRunId, db } = ctx;
-    const total = (db.prepare('SELECT COUNT(*) as c FROM synthetics_tests WHERE org_id = ? AND scan_run_id = ?').get(orgId, scanRunId) as { c: number })?.c ?? 0;
-    const withNotif = (db.prepare('SELECT COUNT(*) as c FROM synthetics_tests WHERE org_id = ? AND scan_run_id = ? AND has_notification = 1').get(orgId, scanRunId) as { c: number })?.c ?? 0;
+    const total = await countSynthetics(db, orgId, scanRunId);
+    const withNotif = await countSynthetics(db, orgId, scanRunId, { has_notification: 1 });
     const missing = total - withNotif;
     const percentage = pct(withNotif, total);
     const passed = percentage >= 80;
@@ -43,8 +48,8 @@ const syntheticsLocationCoverageRule: AssessmentRule = {
   description: 'Tests should run from multiple locations to avoid false positives',
   async run(ctx: AssessmentContext): Promise<RuleResult> {
     const { orgId, scanRunId, db } = ctx;
-    const total = (db.prepare('SELECT COUNT(*) as c FROM synthetics_tests WHERE org_id = ? AND scan_run_id = ?').get(orgId, scanRunId) as { c: number })?.c ?? 0;
-    const singleLoc = (db.prepare('SELECT COUNT(*) as c FROM synthetics_tests WHERE org_id = ? AND scan_run_id = ? AND location_count = 1').get(orgId, scanRunId) as { c: number })?.c ?? 0;
+    const total = await countSynthetics(db, orgId, scanRunId);
+    const singleLoc = await countSynthetics(db, orgId, scanRunId, { location_count: 1 });
     const percentage = pct(singleLoc, total);
     const passed = percentage < 30;
 

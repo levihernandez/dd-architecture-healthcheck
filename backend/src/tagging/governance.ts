@@ -29,16 +29,24 @@ export interface GovernanceResult {
 
 const UST_KEYS = ['env', 'service', 'version', 'team', 'application'];
 
-export function analyzeMultiOrgGovernance(): GovernanceResult {
+export async function analyzeMultiOrgGovernance(userId: string): Promise<GovernanceResult> {
   const db = getDatabase();
 
-  // Get all orgs and their latest scan
-  const orgs = db.prepare(
-    `SELECT o.id, o.name,
-            (SELECT id FROM scan_runs WHERE org_id = o.id AND status = 'completed'
-             ORDER BY started_at DESC LIMIT 1) as latest_scan_id
-     FROM orgs o`
-  ).all() as Array<{ id: string; name: string; latest_scan_id: string | null }>;
+  // Get this user's orgs (and only this user's — cross-org tag comparison must
+  // never surface another user's org names/tag data) and their latest scan
+  const orgs = await db('orgs as o')
+    .select(
+      'o.id',
+      'o.name',
+      db('scan_runs')
+        .select('id')
+        .whereRaw('org_id = o.id')
+        .andWhere('status', 'completed')
+        .orderBy('started_at', 'desc')
+        .limit(1)
+        .as('latest_scan_id')
+    )
+    .where('o.created_by_user_id', userId) as Array<{ id: string; name: string; latest_scan_id: string | null }>;
 
   const orgSummaries: OrgTagSummary[] = [];
   const allTagKeySets: Map<string, Set<string>> = new Map(); // orgId → Set of tag keys
@@ -47,10 +55,9 @@ export function analyzeMultiOrgGovernance(): GovernanceResult {
   for (const org of orgs) {
     if (!org.latest_scan_id) continue;
 
-    const tagRows = db.prepare(
-      `SELECT tag_key, top_values FROM tag_analysis
-       WHERE org_id = ? AND scan_run_id = ?`
-    ).all(org.id, org.latest_scan_id) as Array<{ tag_key: string; top_values: string }>;
+    const tagRows = await db<{ org_id: string; scan_run_id: string; tag_key: string; top_values: string }>('tag_analysis')
+      .select('tag_key', 'top_values')
+      .where({ org_id: org.id, scan_run_id: org.latest_scan_id });
 
     const keySet = new Set(tagRows.map((r) => r.tag_key));
     const valueMap = new Map<string, Set<string>>();

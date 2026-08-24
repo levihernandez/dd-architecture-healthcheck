@@ -37,48 +37,57 @@ export async function collectServiceCatalog(
   const db = getDatabase();
   const now = new Date().toISOString();
 
-  const insertCatalog = db.prepare(`
-    INSERT OR REPLACE INTO service_catalog
-      (id, org_id, scan_run_id, service_name, team, owner, tier, lifecycle,
-       description, tags, contacts, raw_json, first_seen, last_seen)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
+  try {
+    await db.transaction(async (trx) => {
+      for (const entry of result.data) {
+        const schema = entry.attributes?.schema;
+        const serviceName = schema?.['dd-service'] ?? entry.id ?? 'unknown';
+        const team = schema?.['dd-team'] ?? entry.attributes?.teams?.[0];
+        const owner = entry.attributes?.owner;
+        const tags = schema?.tags ?? entry.attributes?.tags ?? [];
+        const contacts = schema?.contacts ?? [];
 
-  const updateServiceHasCatalog = db.prepare(`
-    UPDATE services SET has_service_catalog = 1
-    WHERE org_id = ? AND service_name = ?
-  `);
+        // service_catalog has a composite unique constraint on (org_id, service_name).
+        // Reproduce INSERT OR REPLACE explicitly (select then conditional
+        // insert/update) rather than onConflict().merge(), since composite-key
+        // conflict targets can behave inconsistently across knex versions/dialects.
+        const patch = {
+          scan_run_id: scanRunId,
+          service_name: serviceName,
+          team: team ?? null,
+          owner: owner ?? null,
+          tier: schema?.tier ?? null,
+          lifecycle: schema?.lifecycle ?? null,
+          description: schema?.description ?? null,
+          tags: JSON.stringify(tags),
+          contacts: JSON.stringify(contacts),
+          raw_json: safeJsonSnapshot({ service_name: serviceName, team, owner, tier: schema?.tier,
+            lifecycle: schema?.lifecycle, tags }),
+          last_seen: now,
+        };
 
-  const txn = db.transaction((entries: DDServiceCatalogEntry[]) => {
-    for (const entry of entries) {
-      const schema = entry.attributes?.schema;
-      const serviceName = schema?.['dd-service'] ?? entry.id ?? 'unknown';
-      const team = schema?.['dd-team'] ?? entry.attributes?.teams?.[0];
-      const owner = entry.attributes?.owner;
-      const tags = schema?.tags ?? entry.attributes?.tags ?? [];
-      const contacts = schema?.contacts ?? [];
+        const existing = await trx('service_catalog')
+          .where({ org_id: orgId, service_name: serviceName })
+          .first();
 
-      insertCatalog.run(
-        uuidv4(), orgId, scanRunId,
-        serviceName,
-        team ?? null,
-        owner ?? null,
-        schema?.tier ?? null,
-        schema?.lifecycle ?? null,
-        schema?.description ?? null,
-        JSON.stringify(tags),
-        JSON.stringify(contacts),
-        safeJsonSnapshot({ service_name: serviceName, team, owner, tier: schema?.tier,
-          lifecycle: schema?.lifecycle, tags }),
-        now, now
-      );
+        if (existing) {
+          await trx('service_catalog')
+            .where({ org_id: orgId, service_name: serviceName })
+            .update(patch);
+        } else {
+          await trx('service_catalog').insert({
+            id: uuidv4(),
+            org_id: orgId,
+            ...patch,
+            first_seen: now,
+          });
+        }
 
-      // Mark corresponding service entry
-      updateServiceHasCatalog.run(orgId, serviceName);
-    }
-  });
-
-  try { txn(result.data); } catch (err) {
+        // Mark corresponding service entry
+        await trx('services').where({ org_id: orgId, service_name: serviceName }).update({ has_service_catalog: 1 });
+      }
+    });
+  } catch (err) {
     logger.error(`[${orgId}] Failed to store service catalog data`, err);
   }
 

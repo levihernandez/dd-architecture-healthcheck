@@ -4,6 +4,7 @@ A production-quality, local-first web application for auditing and improving Dat
 
 ## Features
 
+- **Multi-user accounts** — email/password login (JWT-based); each user's Datadog org connections and scan data are private to them
 - **Multi-org support** — connect multiple Datadog organizations
 - **Read-only API access** — only GET requests, never modifies your Datadog config
 - **Encrypted credential storage** — AES encryption, never logged or exported
@@ -12,7 +13,7 @@ A production-quality, local-first web application for auditing and improving Dat
 - **Unified Service Tagging analysis** — env/service/version coverage with tag mapping suggestions
 - **AI assessment** — optional OpenAI or Anthropic integration for executive summaries and remediation plans
 - **Export** — JSON, CSV, Markdown, and printable HTML reports
-- **SQLite storage** — all data local, no cloud dependencies
+- **SQLite or Postgres storage** — local-first by default, or point at Postgres for a shared/hosted deployment
 
 ## Quick Start
 
@@ -48,7 +49,12 @@ Edit `backend/.env`:
 ```env
 # Required
 ENCRYPTION_KEY=<generate with: openssl rand -base64 32>
+JWT_SECRET=<generate with: openssl rand -base64 32>
 PORT=3001
+
+# Database — sqlite (default) needs nothing else; for Postgres:
+# DB_CLIENT=postgres
+# DATABASE_URL=postgres://user:pass@host:5432/dbname
 
 # Optional AI assessment
 AI_PROVIDER=anthropic       # or: openai, ollama, none
@@ -96,6 +102,28 @@ For HTTPS, the Datadog Agent, OpenBao secret resolution, and combinations of the
 ---
 
 ## Usage
+
+### Signing in
+
+The app requires an account. On first run, go to `/register` to create one
+(email + password), or `/login` if you already have one — every route under
+`/api/*` (other than `/api/auth/*`) requires a valid session. Each user only
+sees the Datadog org connections (and everything scoped to them — scans,
+findings, tagging analysis) that their own account created; other users'
+orgs are invisible and inaccessible, even by guessing an org id.
+
+There's no self-service or emailed password reset (this app has no email
+sending set up). To reset a user's password, an operator with server/DB
+access runs, from `backend/`:
+
+```bash
+npm run reset-password -- --email user@example.com
+# or, to set a specific password instead of generating one:
+npm run reset-password -- --email user@example.com --password newPassword123
+```
+
+Omitting `--password` generates and prints a random one-time password to
+share with the user out-of-band — it's never stored or logged anywhere else.
 
 ### Connecting an Organization
 
@@ -159,12 +187,18 @@ See **[docs/bits-ai-prompts.md](docs/bits-ai-prompts.md)** for these two plus ad
 ```
 dd-api-ai/
 ├── backend/                    # Node.js + Express + TypeScript
+│   ├── scripts/
+│   │   └── reset-password.ts   # Admin-driven password reset (no email flow)
 │   ├── src/
 │   │   ├── server.ts           # Express app entry point
+│   │   ├── auth/
+│   │   │   ├── auth.service.ts     # register/login, JWT sign/verify, bcrypt hashing
+│   │   │   └── org-access.ts       # assertOrgAccess() — per-user org ownership check
 │   │   ├── db/
-│   │   │   ├── schema.ts       # SQLite migrations (20+ tables)
-│   │   │   ├── database.ts     # Connection management
-│   │   │   └── repositories/   # Type-safe DB access
+│   │   │   ├── knexfile.ts     # Knex config — sqlite (default) or postgres via DB_CLIENT
+│   │   │   ├── migrations/     # Versioned Knex migrations (schema + users + org ownership)
+│   │   │   ├── database.ts     # Connection management (initDatabase() runs migrations)
+│   │   │   └── repositories/   # Type-safe async DB access (Knex query builder)
 │   │   ├── datadog/
 │   │   │   ├── client.ts       # Axios-based DD API client
 │   │   │   ├── scan-orchestrator.ts
@@ -177,22 +211,31 @@ dd-api-ai/
 │   │   │   ├── service.ts      # Orchestrates AI calls
 │   │   │   ├── prompts.ts      # Evidence-grounded prompts
 │   │   │   └── providers/      # OpenAI + Anthropic
-│   │   └── api/routes/         # Express REST routes
+│   │   └── api/
+│   │       ├── routes/         # Express REST routes (auth.routes.ts + org-scoped routes)
+│   │       └── middleware/     # auth.middleware.ts (JWT gate), error, logging
 │   └── tests/                  # Jest unit tests
 │       ├── fixtures/           # Mock DD API responses
 │       └── rules/              # Rule engine tests
 └── frontend/                   # React + TypeScript + Vite
     └── src/
-        ├── pages/              # 18 pages
-        ├── components/         # Layout, common, charts, forms
+        ├── pages/              # 18 pages + Login.tsx, Register.tsx
+        ├── components/         # Layout, common, charts, forms, PrivateRoute.tsx
+        ├── context/            # AuthContext, OrgScanContext, FeatureFlagsContext
         ├── hooks/              # React Query hooks
-        ├── services/           # API client wrapper
+        ├── services/           # API client wrapper (attaches JWT, handles 401)
         └── types/              # Shared TypeScript types
 ```
 
-## Data Model (SQLite)
+## Data Model (SQLite or Postgres)
+
+The database dialect is chosen with `DB_CLIENT` (`sqlite`, the default, or
+`postgres` — see [`.env` reference](#env-reference)). Both dialects share the
+same schema, applied via [Knex](https://knexjs.org) migrations in
+`backend/src/db/migrations/`.
 
 Key tables:
+- `users` — local app accounts (email + bcrypt password hash); gates access, does not scope data
 - `orgs` — org connections
 - `api_credentials_metadata` — encrypted keys, never plaintext
 - `scan_runs` — scan history and status
@@ -210,7 +253,7 @@ Key tables:
 - `permissions_report` — which endpoints succeeded/failed per scan
 - `product_usage_signals` — SSO status, user counts, etc.
 
-No separate init/migrate command to run — the backend creates the SQLite file and applies idempotent migrations automatically on first startup (`runMigrations()` in `backend/src/db/schema.ts`). To reset to a clean database, stop the app and delete `./data/` (standalone) or `./backend/data/` (Docker), then start again.
+No separate init/migrate command to run — the backend applies migrations automatically on first startup (`initDatabase()` in `backend/src/db/database.ts`). To reset a SQLite database to clean, stop the app and delete `./data/` (standalone) or `./backend/data/` (Docker), then start again; for Postgres, drop and recreate the database.
 
 ## Datadog API Endpoints Used
 
@@ -231,6 +274,8 @@ All endpoints are read-only (GET requests only):
 
 ## Security
 
+- **Authentication required** — every `/api/*` route (other than `/api/auth/*`) requires a valid JWT Bearer token; passwords are bcrypt-hashed, never stored or logged in plaintext
+- **Per-user data isolation** — org connections and everything scoped to them (scans, findings, tagging analysis) are only visible to the user who created them; other users get a 404, not a permissions error, so existence isn't leaked either
 - **No write API calls** — all Datadog operations are read-only
 - **Encrypted storage** — API/App keys AES-encrypted with your `ENCRYPTION_KEY`
 - **No key logging** — keys never appear in logs, exports, or console output
@@ -253,9 +298,14 @@ Tests cover:
 
 ## API Reference
 
+Every path below except `/api/auth/*` and `/health` requires `Authorization: Bearer <token>`, and every org-scoped path (`orgId` param or an id that resolves to one) is further restricted to orgs the token's user owns.
+
 | Method | Path | Description |
 |--------|------|--------------|
-| GET | `/api/orgs` | List organizations |
+| POST | `/api/auth/register` | Create an account, returns a JWT |
+| POST | `/api/auth/login` | Log in, returns a JWT |
+| GET | `/api/auth/me` | Current user (requires token) |
+| GET | `/api/orgs` | List organizations owned by the current user |
 | POST | `/api/orgs` | Create org (validates credentials) |
 | DELETE | `/api/orgs/:id` | Remove org and all data |
 | POST | `/api/orgs/:id/validate` | Test credentials |
@@ -271,11 +321,11 @@ Tests cover:
 | POST | `/api/ai/assess` | Generate AI assessment |
 | GET | `/api/ai/assess/:scanRunId` | Get stored assessment |
 | GET | `/api/export/:scanRunId?format=` | Export (json/csv/markdown/html) |
-| GET | `/health` | Health check |
+| GET | `/health` | Health check (no auth) |
 
 ## `.env` reference
 
-Copy `.env.example` to `.env` (standalone: `backend/.env`) and fill in what you need — see that file's inline comments for the full list (server port, encryption key, AI provider, HTTPS, CORS, Datadog credentials, APM/RUM, OpenBao). `npm run init` fills most of it in interactively.
+Copy `.env.example` to `.env` (standalone: `backend/.env`) and fill in what you need — see that file's inline comments for the full list (server port, encryption key, JWT secret, database client, AI provider, HTTPS, CORS, Datadog credentials, APM/RUM, OpenBao). `npm run init` fills most of it in interactively. `JWT_SECRET` has no default — the app refuses to boot without one, since a fallback would make session tokens forgeable.
 
 ## License
 

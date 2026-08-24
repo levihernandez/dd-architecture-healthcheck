@@ -7,6 +7,9 @@ import type { DDTeamLink, DDTeamMembership, DDScorecardRule, DDScorecardOutcome 
 import type { CollectorResultSummary } from '../../types/api.types';
 
 interface TeamResourceRow {
+  org_id: string;
+  scan_run_id: string;
+  resource_type: string;
   resource_id: string;
   resource_name: string | null;
   raw_json: string | null;
@@ -67,16 +70,9 @@ export async function collectIdp(
 
   // ── Teams: enrich the team list governance.collector.ts already stored in
   // `resources` (resource_type='team') with per-team membership and links data.
-  const teamRows = db.prepare(
-    `SELECT resource_id, resource_name, raw_json FROM resources WHERE org_id = ? AND scan_run_id = ? AND resource_type = 'team'`
-  ).all(orgId, scanRunId) as TeamResourceRow[];
-
-  const insertTeam = db.prepare(`
-    INSERT OR REPLACE INTO teams
-      (id, org_id, scan_run_id, team_id, team_name, handle, description,
-       user_count, link_count, member_handles, link_labels, raw_json, first_seen, last_seen)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
+  const teamRows = await db<TeamResourceRow>('resources')
+    .where({ org_id: orgId, scan_run_id: scanRunId, resource_type: 'team' })
+    .select('resource_id', 'resource_name', 'raw_json');
 
   for (const t of teamRows) {
     let snapshot: { handle?: string; user_count?: number } = {};
@@ -88,14 +84,21 @@ export async function collectIdp(
     ]);
     requestCount += 2;
 
-    insertTeam.run(
-      uuidv4(), orgId, scanRunId,
-      t.resource_id, t.resource_name, snapshot.handle ?? null, null,
-      Math.max(members.count, snapshot.user_count ?? 0), links.count,
-      JSON.stringify(members.handles), JSON.stringify(links.labels),
-      safeJsonSnapshot({ team_id: t.resource_id, name: t.resource_name, member_count: members.count, link_count: links.count }),
-      now, now
-    );
+    // `teams` has a unique(org_id, team_id) constraint (not on id), so the
+    // original INSERT OR REPLACE deletes any existing row for this team and
+    // inserts a fresh one (including a new id) — replicate that exactly with
+    // an explicit delete+insert rather than onConflict().merge(), since a
+    // composite/partial unique target can behave differently across the
+    // sqlite and postgres dialects this app supports.
+    await db('teams').where({ org_id: orgId, team_id: t.resource_id }).delete();
+    await db('teams').insert({
+      id: uuidv4(), org_id: orgId, scan_run_id: scanRunId,
+      team_id: t.resource_id, team_name: t.resource_name, handle: snapshot.handle ?? null, description: null,
+      user_count: Math.max(members.count, snapshot.user_count ?? 0), link_count: links.count,
+      member_handles: JSON.stringify(members.handles), link_labels: JSON.stringify(links.labels),
+      raw_json: safeJsonSnapshot({ team_id: t.resource_id, name: t.resource_name, member_count: members.count, link_count: links.count }),
+      first_seen: now, last_seen: now,
+    });
     totalItems++;
   }
 
@@ -105,23 +108,22 @@ export async function collectIdp(
 
   const ruleNameById = new Map<string, string>();
   if (rulesResult.status === 'success') {
-    const insertRule = db.prepare(`
-      INSERT OR REPLACE INTO scorecard_rules
-        (id, org_id, scan_run_id, rule_id, rule_name, description, enabled, is_custom, raw_json, first_seen, last_seen)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-    const txn = db.transaction((rules: DDScorecardRule[]) => {
-      for (const rule of rules) {
-        ruleNameById.set(rule.id, rule.attributes?.name ?? rule.id);
-        insertRule.run(
-          uuidv4(), orgId, scanRunId,
-          rule.id, rule.attributes?.name ?? null, rule.attributes?.description ?? null,
-          rule.attributes?.enabled ? 1 : 0, rule.attributes?.custom ? 1 : 0,
-          safeJsonSnapshot(rule), now, now
-        );
-      }
-    });
-    try { txn(rulesResult.data); } catch (err) { logger.error(`[${orgId}] Failed to store scorecard rules`, err); }
+    try {
+      await db.transaction(async (trx) => {
+        for (const rule of rulesResult.data) {
+          ruleNameById.set(rule.id, rule.attributes?.name ?? rule.id);
+          // `scorecard_rules` has unique(org_id, rule_id) — see teams note above
+          // for why this is an explicit delete+insert instead of onConflict().merge().
+          await trx('scorecard_rules').where({ org_id: orgId, rule_id: rule.id }).delete();
+          await trx('scorecard_rules').insert({
+            id: uuidv4(), org_id: orgId, scan_run_id: scanRunId,
+            rule_id: rule.id, rule_name: rule.attributes?.name ?? null, description: rule.attributes?.description ?? null,
+            enabled: rule.attributes?.enabled ? 1 : 0, is_custom: rule.attributes?.custom ? 1 : 0,
+            raw_json: safeJsonSnapshot(rule), first_seen: now, last_seen: now,
+          });
+        }
+      });
+    } catch (err) { logger.error(`[${orgId}] Failed to store scorecard rules`, err); }
     totalItems += rulesResult.itemCount;
   }
 
@@ -131,24 +133,27 @@ export async function collectIdp(
   if (outcomesResult) requestCount += outcomesResult.requestCount;
 
   if (outcomesResult?.status === 'success') {
-    const insertOutcome = db.prepare(`
-      INSERT OR REPLACE INTO scorecard_outcomes
-        (id, org_id, scan_run_id, rule_id, rule_name, service_name, state, remarks, raw_json, first_seen, last_seen)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-    const txn = db.transaction((outcomes: DDScorecardOutcome[]) => {
-      for (const o of outcomes) {
-        const ruleId = o.attributes?.rule_id ?? o.relationships?.rule?.data?.id ?? '';
-        insertOutcome.run(
-          uuidv4(), orgId, scanRunId,
-          ruleId, ruleNameById.get(ruleId) ?? ruleId,
-          o.attributes?.service ?? null, o.attributes?.outcome ?? null,
-          JSON.stringify((o.attributes?.remarks ?? []).map((r) => r.message).filter(Boolean)),
-          safeJsonSnapshot(o), now, now
-        );
-      }
-    });
-    try { txn(outcomesResult.data); } catch (err) { logger.error(`[${orgId}] Failed to store scorecard outcomes`, err); }
+    try {
+      await db.transaction(async (trx) => {
+        for (const o of outcomesResult.data) {
+          const ruleId = o.attributes?.rule_id ?? o.relationships?.rule?.data?.id ?? '';
+          const serviceName = o.attributes?.service ?? null;
+          // `scorecard_outcomes` has unique(org_id, scan_run_id, rule_id, service_name)
+          // — see teams note above for why this is an explicit delete+insert
+          // instead of onConflict().merge().
+          await trx('scorecard_outcomes')
+            .where({ org_id: orgId, scan_run_id: scanRunId, rule_id: ruleId, service_name: serviceName })
+            .delete();
+          await trx('scorecard_outcomes').insert({
+            id: uuidv4(), org_id: orgId, scan_run_id: scanRunId,
+            rule_id: ruleId, rule_name: ruleNameById.get(ruleId) ?? ruleId,
+            service_name: serviceName, state: o.attributes?.outcome ?? null,
+            remarks: JSON.stringify((o.attributes?.remarks ?? []).map((r) => r.message).filter(Boolean)),
+            raw_json: safeJsonSnapshot(o), first_seen: now, last_seen: now,
+          });
+        }
+      });
+    } catch (err) { logger.error(`[${orgId}] Failed to store scorecard outcomes`, err); }
     totalItems += outcomesResult.itemCount;
   }
 
@@ -162,24 +167,22 @@ export async function collectIdp(
     ['time_to_restore', 'avg:dora.failure.time_to_restore{*}'],
   ];
 
-  const insertSignal = db.prepare(`
-    INSERT OR REPLACE INTO product_usage_signals
-      (id, org_id, scan_run_id, product, signal, value, detected, evidence, checked_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-
   let doraDetectedAny = false;
   for (const [signal, query] of doraQueries) {
     const result = await queryDoraMetric(client, query, fromSec, toSec);
     requestCount++;
     if (result.detected) doraDetectedAny = true;
-    insertSignal.run(
-      uuidv4(), orgId, scanRunId, 'dora', signal,
-      result.value != null ? String(result.value) : null,
-      result.detected ? 1 : 0,
-      JSON.stringify({ query, windowDays: 30, note: 'Best-effort detection via the dora.* metric namespace — empty means DORA Metrics is not yet configured for this org.' }),
-      now
-    );
+    // `product_usage_signals` has unique(org_id, product, signal) — see teams
+    // note above for why this is an explicit delete+insert instead of
+    // onConflict().merge().
+    await db('product_usage_signals').where({ org_id: orgId, product: 'dora', signal }).delete();
+    await db('product_usage_signals').insert({
+      id: uuidv4(), org_id: orgId, scan_run_id: scanRunId, product: 'dora', signal,
+      value: result.value != null ? String(result.value) : null,
+      detected: result.detected ? 1 : 0,
+      evidence: JSON.stringify({ query, windowDays: 30, note: 'Best-effort detection via the dora.* metric namespace — empty means DORA Metrics is not yet configured for this org.' }),
+      checked_at: now,
+    });
   }
   totalItems += doraQueries.length;
 

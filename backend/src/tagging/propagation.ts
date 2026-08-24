@@ -38,96 +38,126 @@ export interface PropagationResult {
   }>;
 }
 
-export function analyzeTagPropagation(orgId: string, scanRunId: string): PropagationResult {
+export async function analyzeTagPropagation(orgId: string, scanRunId: string): Promise<PropagationResult> {
   const db = getDatabase();
 
   // Get all APM services
-  const apmServices = db.prepare(
-    `SELECT service_name, env, has_version_tag, team FROM services
-     WHERE org_id = ? AND scan_run_id = ?`
-  ).all(orgId, scanRunId) as Array<{
+  const apmServices = await db<{
+    org_id: string;
+    scan_run_id: string;
     service_name: string;
     env: string | null;
     has_version_tag: number;
     team: string | null;
-  }>;
+  }>('services')
+    .select('service_name', 'env', 'has_version_tag', 'team')
+    .where({ org_id: orgId, scan_run_id: scanRunId });
 
-  const totalHosts = (db.prepare(
-    'SELECT COUNT(*) as c FROM hosts WHERE org_id = ? AND scan_run_id = ?'
-  ).get(orgId, scanRunId) as { c: number })?.c ?? 0;
+  const totalHostsRow = await db('hosts')
+    .count({ c: '*' })
+    .where({ org_id: orgId, scan_run_id: scanRunId })
+    .first() as { c: number | string } | undefined;
+  const totalHosts = Number(totalHostsRow?.c ?? 0);
 
   // Hosts that have each tag
-  function hostCoverage(tagKey: string): number {
-    const count = (db.prepare(
-      `SELECT COUNT(DISTINCT resource_id) as c FROM resource_tags
-       WHERE org_id = ? AND scan_run_id = ? AND resource_type = 'host' AND tag_key = ?`
-    ).get(orgId, scanRunId, tagKey) as { c: number })?.c ?? 0;
+  async function hostCoverage(tagKey: string): Promise<number> {
+    const row = await db('resource_tags')
+      .countDistinct({ c: 'resource_id' })
+      .where({ org_id: orgId, scan_run_id: scanRunId, resource_type: 'host', tag_key: tagKey })
+      .first() as { c: number | string } | undefined;
+    const count = Number(row?.c ?? 0);
     return totalHosts > 0 ? Math.round((count / totalHosts) * 100) : 0;
   }
 
   // Hosts with a specific service tag value
-  function hostsWithService(serviceName: string): number {
-    return (db.prepare(
-      `SELECT COUNT(DISTINCT resource_id) as c FROM resource_tags
-       WHERE org_id = ? AND scan_run_id = ? AND resource_type = 'host'
-         AND tag_key = 'service' AND tag_value = ?`
-    ).get(orgId, scanRunId, serviceName) as { c: number })?.c ?? 0;
+  async function hostsWithService(serviceName: string): Promise<number> {
+    const row = await db('resource_tags')
+      .countDistinct({ c: 'resource_id' })
+      .where({ org_id: orgId, scan_run_id: scanRunId, resource_type: 'host', tag_key: 'service', tag_value: serviceName })
+      .first() as { c: number | string } | undefined;
+    return Number(row?.c ?? 0);
   }
 
-  function hostsWithServiceAndTag(serviceName: string, tagKey: string): number {
-    return (db.prepare(
-      `SELECT COUNT(DISTINCT rt1.resource_id) as c
-       FROM resource_tags rt1
-       JOIN resource_tags rt2 ON rt1.org_id = rt2.org_id
-         AND rt1.scan_run_id = rt2.scan_run_id
-         AND rt1.resource_id = rt2.resource_id
-         AND rt1.resource_type = rt2.resource_type
-       WHERE rt1.org_id = ? AND rt1.scan_run_id = ?
-         AND rt1.resource_type = 'host'
-         AND rt1.tag_key = 'service' AND rt1.tag_value = ?
-         AND rt2.tag_key = ?`
-    ).get(orgId, scanRunId, serviceName, tagKey) as { c: number })?.c ?? 0;
+  async function hostsWithServiceAndTag(serviceName: string, tagKey: string): Promise<number> {
+    const row = await db('resource_tags as rt1')
+      .join('resource_tags as rt2', function () {
+        this.on('rt1.org_id', '=', 'rt2.org_id')
+          .andOn('rt1.scan_run_id', '=', 'rt2.scan_run_id')
+          .andOn('rt1.resource_id', '=', 'rt2.resource_id')
+          .andOn('rt1.resource_type', '=', 'rt2.resource_type');
+      })
+      .where({
+        'rt1.org_id': orgId,
+        'rt1.scan_run_id': scanRunId,
+        'rt1.resource_type': 'host',
+        'rt1.tag_key': 'service',
+        'rt1.tag_value': serviceName,
+        'rt2.tag_key': tagKey,
+      })
+      .countDistinct({ c: 'rt1.resource_id' })
+      .first() as { c: number | string } | undefined;
+    return Number(row?.c ?? 0);
   }
 
-  const totalMonitors = (db.prepare(
-    'SELECT COUNT(*) as c FROM monitors WHERE org_id = ? AND scan_run_id = ?'
-  ).get(orgId, scanRunId) as { c: number })?.c ?? 0;
+  const totalMonitorsRow = await db('monitors')
+    .count({ c: '*' })
+    .where({ org_id: orgId, scan_run_id: scanRunId })
+    .first() as { c: number | string } | undefined;
+  const totalMonitors = Number(totalMonitorsRow?.c ?? 0);
 
-  function monitorCoverageForService(serviceName: string, colName: string): number {
+  async function monitorCoverageForService(serviceName: string, colName: string): Promise<number> {
     // Monitors tagged with this service that also have the tag
-    const withService = (db.prepare(
-      `SELECT COUNT(*) as c FROM monitors m
-       JOIN resource_tags rt ON rt.org_id = m.org_id AND rt.scan_run_id = m.scan_run_id
-         AND rt.resource_type = 'monitor' AND rt.resource_id = CAST(m.monitor_id AS TEXT)
-         AND rt.tag_key = 'service' AND rt.tag_value = ?
-       WHERE m.org_id = ? AND m.scan_run_id = ?`
-    ).get(serviceName, orgId, scanRunId) as { c: number })?.c ?? 0;
+    const withServiceRow = await db('monitors as m')
+      .join('resource_tags as rt', function () {
+        this.on('rt.org_id', '=', 'm.org_id')
+          .andOn('rt.scan_run_id', '=', 'm.scan_run_id')
+          .andOnVal('rt.resource_type', 'monitor')
+          .andOn('rt.resource_id', '=', db.raw('CAST(m.monitor_id AS TEXT)'))
+          .andOnVal('rt.tag_key', 'service')
+          .andOnVal('rt.tag_value', serviceName);
+      })
+      .where({ 'm.org_id': orgId, 'm.scan_run_id': scanRunId })
+      .count({ c: '*' })
+      .first() as { c: number | string } | undefined;
+    const withService = Number(withServiceRow?.c ?? 0);
 
-    if (withService === 0) return totalMonitors > 0
-      ? (db.prepare(`SELECT CAST(SUM(${colName}) AS REAL) * 100 / COUNT(*) as pct FROM monitors WHERE org_id = ? AND scan_run_id = ?`).get(orgId, scanRunId) as { pct: number | null })?.pct ?? 0
-      : 0;
+    if (withService === 0) {
+      if (totalMonitors === 0) return 0;
+      const avgRow = await db('monitors')
+        .avg({ pct: colName })
+        .where({ org_id: orgId, scan_run_id: scanRunId })
+        .first() as { pct: number | string | null } | undefined;
+      return Math.round(Number(avgRow?.pct ?? 0) * 100);
+    }
 
-    const withServiceAndTag = (db.prepare(
-      `SELECT COUNT(*) as c FROM monitors WHERE org_id = ? AND scan_run_id = ? AND ${colName} = 1
-         AND monitor_id IN (
-           SELECT CAST(resource_id AS INTEGER) FROM resource_tags
-           WHERE org_id = ? AND scan_run_id = ? AND resource_type = 'monitor'
-             AND tag_key = 'service' AND tag_value = ?
-         )`
-    ).get(orgId, scanRunId, orgId, scanRunId, serviceName) as { c: number })?.c ?? 0;
+    const taggedMonitorIds = db('resource_tags')
+      .select(db.raw('CAST(resource_id AS INTEGER) as resource_id'))
+      .where({ org_id: orgId, scan_run_id: scanRunId, resource_type: 'monitor', tag_key: 'service', tag_value: serviceName });
+
+    const withServiceAndTagRow = await db('monitors')
+      .where({ org_id: orgId, scan_run_id: scanRunId })
+      .andWhere(colName, 1)
+      .whereIn('monitor_id', taggedMonitorIds)
+      .count({ c: '*' })
+      .first() as { c: number | string } | undefined;
+    const withServiceAndTag = Number(withServiceAndTagRow?.c ?? 0);
 
     return withService > 0 ? Math.round((withServiceAndTag / withService) * 100) : 0;
   }
 
-  const totalSynthetics = (db.prepare(
-    'SELECT COUNT(*) as c FROM synthetics_tests WHERE org_id = ? AND scan_run_id = ?'
-  ).get(orgId, scanRunId) as { c: number })?.c ?? 0;
+  const totalSyntheticsRow = await db('synthetics_tests')
+    .count({ c: '*' })
+    .where({ org_id: orgId, scan_run_id: scanRunId })
+    .first() as { c: number | string } | undefined;
+  const totalSynthetics = Number(totalSyntheticsRow?.c ?? 0);
 
-  function syntheticsCoverage(colName: string): number {
+  async function syntheticsCoverage(colName: string): Promise<number> {
     if (totalSynthetics === 0) return 0;
-    const count = (db.prepare(
-      `SELECT SUM(${colName}) as c FROM synthetics_tests WHERE org_id = ? AND scan_run_id = ?`
-    ).get(orgId, scanRunId) as { c: number })?.c ?? 0;
+    const row = await db('synthetics_tests')
+      .sum({ c: colName })
+      .where({ org_id: orgId, scan_run_id: scanRunId })
+      .first() as { c: number | string | null } | undefined;
+    const count = Number(row?.c ?? 0);
     return Math.round((count / totalSynthetics) * 100);
   }
 
@@ -140,7 +170,7 @@ export function analyzeTagPropagation(orgId: string, scanRunId: string): Propaga
 
   for (const svc of apmServices.slice(0, 50)) { // cap at 50 for perf
     const serviceName = svc.service_name;
-    const hostsWithThisService = hostsWithService(serviceName);
+    const hostsWithThisService = await hostsWithService(serviceName);
     const tagResults: ServicePropagation['tags'] = {};
 
     const tagsToCheck = [...UST_TAGS, ...IMPORTANT_TAGS];
@@ -159,13 +189,13 @@ export function analyzeTagPropagation(orgId: string, scanRunId: string): Propaga
 
       // Infrastructure layer
       if (hostsWithThisService > 0) {
-        const hostsWithTag = hostsWithServiceAndTag(serviceName, tag);
+        const hostsWithTag = await hostsWithServiceAndTag(serviceName, tag);
         const infraCov = Math.round((hostsWithTag / hostsWithThisService) * 100);
         layers.infra = { present: infraCov > 0, coverage: infraCov };
         if (infraCov === 0) breakdownByLayer.infra[tag]?.push(serviceName);
       } else {
         // No hosts with this service — use global host coverage
-        const globalCov = hostCoverage(tag);
+        const globalCov = await hostCoverage(tag);
         layers.infra = { present: globalCov > 0, coverage: globalCov };
       }
 
@@ -187,7 +217,7 @@ export function analyzeTagPropagation(orgId: string, scanRunId: string): Propaga
         const colMap: Record<string, string> = { env: 'has_env_tag', service: 'has_service_tag', team: 'has_team_tag' };
         const col = colMap[tag];
         if (col) {
-          const cov = monitorCoverageForService(serviceName, col);
+          const cov = await monitorCoverageForService(serviceName, col);
           layers.monitors = { present: cov > 0, coverage: cov };
           if (cov === 0) breakdownByLayer.monitors[tag]?.push(serviceName);
         }
@@ -198,7 +228,7 @@ export function analyzeTagPropagation(orgId: string, scanRunId: string): Propaga
         const colMap: Record<string, string> = { env: 'has_env_tag', service: 'has_service_tag' };
         const col = colMap[tag];
         if (col) {
-          const cov = syntheticsCoverage(col);
+          const cov = await syntheticsCoverage(col);
           layers.synthetics = { present: cov > 0, coverage: cov };
           if (cov === 0 && isUst) breakdownByLayer.synthetics[tag]?.push(serviceName);
         }

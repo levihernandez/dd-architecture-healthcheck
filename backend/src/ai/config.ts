@@ -15,12 +15,12 @@ const MODEL_DEFAULTS: Record<string, string> = {
   ollama: 'llama3.2',
 };
 
-export function getAIConfig(): AIConfig {
+export async function getAIConfig(): Promise<AIConfig> {
   // DB settings take priority over env vars
   try {
-    const settings = AISettingsRepository.get();
+    const settings = await AISettingsRepository.get();
     if (settings.provider && settings.provider !== 'none') {
-      const apiKey = AISettingsRepository.getDecryptedKey();
+      const apiKey = await AISettingsRepository.getDecryptedKey();
       return {
         provider: settings.provider as AIProvider,
         apiKey,

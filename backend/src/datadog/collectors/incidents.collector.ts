@@ -20,11 +20,16 @@ export async function collectIncidents(
 
   const db = getDatabase();
   const now = new Date().toISOString();
-  db.prepare(`
-    INSERT OR REPLACE INTO permissions_report
-      (id, org_id, scan_run_id, endpoint, status, status_code, error, tested_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(uuidv4(), orgId, scanRunId, ENDPOINT, result.status, null, result.error ?? null, now);
+  await db('permissions_report').insert({
+    id: uuidv4(),
+    org_id: orgId,
+    scan_run_id: scanRunId,
+    endpoint: ENDPOINT,
+    status: result.status,
+    status_code: null,
+    error: result.error ?? null,
+    tested_at: now,
+  });
 
   if (result.status !== 'success') {
     return {
@@ -41,32 +46,34 @@ export async function collectIncidents(
     };
   }
 
-  const insert = db.prepare(`
-    INSERT OR REPLACE INTO incidents
-      (id, org_id, scan_run_id, incident_id, title, severity, state,
-       created_at_dd, resolved_at_dd, raw_json, first_seen, last_seen)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
+  const incidentRows: Record<string, unknown>[] = [];
+  for (const incident of result.data) {
+    const incidentId = incident.id;
+    if (!incidentId) continue;
+    const attrs = incident.attributes;
+    incidentRows.push({
+      id: uuidv4(),
+      org_id: orgId,
+      scan_run_id: scanRunId,
+      incident_id: incidentId,
+      title: attrs?.title ?? null,
+      severity: attrs?.fields?.severity?.value ?? attrs?.severity ?? null,
+      state: attrs?.state ?? null,
+      created_at_dd: attrs?.created ?? null,
+      resolved_at_dd: attrs?.resolved ?? null,
+      raw_json: safeJsonSnapshot(incident),
+      first_seen: now,
+      last_seen: now,
+    });
+  }
 
-  const txn = db.transaction((incidents: DDIncident[]) => {
-    for (const incident of incidents) {
-      const incidentId = incident.id;
-      if (!incidentId) continue;
-      const attrs = incident.attributes;
-      insert.run(
-        uuidv4(), orgId, scanRunId, incidentId,
-        attrs?.title ?? null,
-        attrs?.fields?.severity?.value ?? attrs?.severity ?? null,
-        attrs?.state ?? null,
-        attrs?.created ?? null,
-        attrs?.resolved ?? null,
-        safeJsonSnapshot(incident),
-        now, now
-      );
+  try {
+    if (incidentRows.length > 0) {
+      await db.transaction(async (trx) => {
+        await trx('incidents').insert(incidentRows);
+      });
     }
-  });
-
-  try { txn(result.data); } catch (err) {
+  } catch (err) {
     logger.error(`[${orgId}] Failed to store incidents`, err);
   }
 

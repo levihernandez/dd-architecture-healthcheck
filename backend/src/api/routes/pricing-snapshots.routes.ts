@@ -4,23 +4,23 @@ import { PricingSnapshotRepository, type PricingSnapshotItem } from '../../db/re
 const router = Router();
 
 // GET /api/pricing-snapshots — every snapshot ever captured, newest first
-router.get('/', (_req, res, next) => {
+router.get('/', async (_req, res, next) => {
   try {
-    res.json(PricingSnapshotRepository.listAll());
+    res.json(await PricingSnapshotRepository.listAll());
   } catch (err) { next(err); }
 });
 
 // GET /api/pricing-snapshots/latest — most recent price per product
-router.get('/latest', (_req, res, next) => {
+router.get('/latest', async (_req, res, next) => {
   try {
-    res.json(PricingSnapshotRepository.latestPerProduct());
+    res.json(await PricingSnapshotRepository.latestPerProduct());
   } catch (err) { next(err); }
 });
 
 // GET /api/pricing-snapshots/history/:product — full price history for one product
-router.get('/history/:product', (req, res, next) => {
+router.get('/history/:product', async (req, res, next) => {
   try {
-    res.json(PricingSnapshotRepository.history(req.params.product));
+    res.json(await PricingSnapshotRepository.history(req.params.product));
   } catch (err) { next(err); }
 });
 
@@ -29,7 +29,7 @@ router.get('/history/:product', (req, res, next) => {
 // client-side, so there's no reliable server-side scrape — snapshots are captured by
 // fetching https://www.datadoghq.com/pricing/list/ (e.g. via Claude/an operator) and
 // posting the parsed line items here.
-router.post('/capture', (req, res, next) => {
+router.post('/capture', async (req, res, next) => {
   try {
     const { sourceUrl, capturedAt, items } = req.body as {
       sourceUrl?: string;
@@ -44,7 +44,7 @@ router.post('/capture', (req, res, next) => {
         return;
       }
     }
-    const captured = PricingSnapshotRepository.capture(sourceUrl, items, capturedAt);
+    const captured = await PricingSnapshotRepository.capture(sourceUrl, items, capturedAt);
     res.status(201).json(captured);
   } catch (err) { next(err); }
 });

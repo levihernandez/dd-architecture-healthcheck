@@ -42,49 +42,53 @@ export async function collectAPM(
   const db = getDatabase();
   const now = new Date().toISOString();
 
-  const insertService = db.prepare(`
-    INSERT OR REPLACE INTO services
-      (id, org_id, scan_run_id, service_name, env, version, team,
-       has_service_catalog, has_monitor, has_slo, has_version_tag, has_owner,
-       resource_count, raw_json, first_seen, last_seen)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
+  const serviceRows: Record<string, unknown>[] = [];
+  const resourceRows: Record<string, unknown>[] = [];
 
-  const insertResource = db.prepare(`
-    INSERT OR REPLACE INTO resources
-      (id, org_id, scan_run_id, resource_type, resource_id, resource_name,
-       source_endpoint, first_seen, last_seen, raw_json)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
+  for (const svc of result.data) {
+    if (!svc.service_name) continue;
+    const hasVersion = Boolean(svc.version);
 
-  const txn = db.transaction((services: DDService[]) => {
-    for (const svc of services) {
-      if (!svc.service_name) continue;
-      const hasVersion = Boolean(svc.version);
+    serviceRows.push({
+      id: uuidv4(),
+      org_id: orgId,
+      scan_run_id: scanRunId,
+      service_name: svc.service_name,
+      env: svc.env ?? null,
+      version: svc.version ?? null,
+      team: svc.team ?? null,
+      has_service_catalog: 0,
+      has_monitor: 0,
+      has_slo: 0,
+      has_version_tag: hasVersion ? 1 : 0,
+      has_owner: svc.team ? 1 : 0,
+      resource_count: svc.resources?.length ?? 0,
+      raw_json: safeJsonSnapshot(svc),
+      first_seen: now,
+      last_seen: now,
+    });
 
-      insertService.run(
-        uuidv4(), orgId, scanRunId,
-        svc.service_name, svc.env ?? null, svc.version ?? null, svc.team ?? null,
-        0, 0, 0,
-        hasVersion ? 1 : 0,
-        svc.team ? 1 : 0,
-        svc.resources?.length ?? 0,
-        safeJsonSnapshot(svc),
-        now, now
-      );
+    resourceRows.push({
+      id: uuidv4(),
+      org_id: orgId,
+      scan_run_id: scanRunId,
+      resource_type: 'service',
+      resource_id: `${svc.service_name}:${svc.env ?? 'unknown'}`,
+      resource_name: svc.service_name,
+      source_endpoint: '/api/v1/services',
+      first_seen: now,
+      last_seen: now,
+      raw_json: safeJsonSnapshot(svc),
+    });
+  }
 
-      insertResource.run(
-        uuidv4(), orgId, scanRunId, 'service',
-        `${svc.service_name}:${svc.env ?? 'unknown'}`,
-        svc.service_name,
-        '/api/v1/services', now, now,
-        safeJsonSnapshot(svc)
-      );
-    }
-  });
-
-  if (result.data.length > 0) {
-    try { txn(result.data); } catch (err) {
+  if (serviceRows.length > 0) {
+    try {
+      await db.transaction(async (trx) => {
+        await trx('services').insert(serviceRows);
+        await trx('resources').insert(resourceRows);
+      });
+    } catch (err) {
       logger.error(`[${orgId}] Failed to store APM data`, err);
     }
   }

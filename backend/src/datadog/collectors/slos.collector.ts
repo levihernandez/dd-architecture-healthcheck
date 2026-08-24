@@ -34,44 +34,54 @@ export async function collectSLOs(
   const db = getDatabase();
   const now = new Date().toISOString();
 
-  const insert = db.prepare(`
-    INSERT OR REPLACE INTO slos
-      (id, org_id, scan_run_id, slo_id, slo_name, slo_type, tags,
-       has_env_tag, has_service_tag, raw_json, first_seen, last_seen)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
+  try {
+    await db.transaction(async (trx) => {
+      for (const slo of result.data) {
+        const tags = slo.tags ?? [];
+        const tagKeys = tags.map((t) => t.split(':')[0].toLowerCase());
+        const hasEnv = tagKeys.includes('env');
+        const hasService = tagKeys.includes('service');
 
-  const updateServiceHasSLO = db.prepare(`
-    UPDATE services SET has_slo = 1
-    WHERE org_id = ? AND service_name = ?
-  `);
+        // slos has a composite unique constraint on (org_id, slo_id). Reproduce
+        // INSERT OR REPLACE explicitly (select then conditional insert/update)
+        // rather than onConflict().merge(), since composite-key conflict targets
+        // can behave inconsistently across knex versions/dialects.
+        const patch = {
+          scan_run_id: scanRunId,
+          slo_id: slo.id,
+          slo_name: slo.name,
+          slo_type: slo.type,
+          tags: JSON.stringify(tags),
+          has_env_tag: hasEnv ? 1 : 0,
+          has_service_tag: hasService ? 1 : 0,
+          raw_json: safeJsonSnapshot({ id: slo.id, name: slo.name, type: slo.type, tags }),
+          last_seen: now,
+        };
 
-  const txn = db.transaction((slos: DDSLO[]) => {
-    for (const slo of slos) {
-      const tags = slo.tags ?? [];
-      const tagKeys = tags.map((t) => t.split(':')[0].toLowerCase());
-      const hasEnv = tagKeys.includes('env');
-      const hasService = tagKeys.includes('service');
+        const existing = await trx('slos').where({ org_id: orgId, slo_id: slo.id }).first();
 
-      insert.run(
-        uuidv4(), orgId, scanRunId,
-        slo.id, slo.name, slo.type,
-        JSON.stringify(tags),
-        hasEnv ? 1 : 0, hasService ? 1 : 0,
-        safeJsonSnapshot({ id: slo.id, name: slo.name, type: slo.type, tags }),
-        now, now
-      );
+        if (existing) {
+          await trx('slos').where({ org_id: orgId, slo_id: slo.id }).update(patch);
+        } else {
+          await trx('slos').insert({
+            id: uuidv4(),
+            org_id: orgId,
+            ...patch,
+            first_seen: now,
+          });
+        }
 
-      // Cross-reference: mark services that have SLOs
-      const serviceTags = tags.filter((t) => t.startsWith('service:'));
-      for (const st of serviceTags) {
-        const svcName = st.split(':')[1];
-        if (svcName) updateServiceHasSLO.run(orgId, svcName);
+        // Cross-reference: mark services that have SLOs
+        const serviceTags = tags.filter((t) => t.startsWith('service:'));
+        for (const st of serviceTags) {
+          const svcName = st.split(':')[1];
+          if (svcName) {
+            await trx('services').where({ org_id: orgId, service_name: svcName }).update({ has_slo: 1 });
+          }
+        }
       }
-    }
-  });
-
-  try { txn(result.data); } catch (err) {
+    });
+  } catch (err) {
     logger.error(`[${orgId}] Failed to store SLO data`, err);
   }
 

@@ -16,56 +16,59 @@ interface ScorecardRow {
 }
 
 export const ScorecardRepository = {
-  upsert(scorecard: Omit<OrgScorecard, 'id'>): OrgScorecard {
+  async upsert(scorecard: Omit<OrgScorecard, 'id'>): Promise<OrgScorecard> {
     const db = getDatabase();
     const id = uuidv4();
-    db.prepare(`
-      INSERT OR REPLACE INTO scorecards
-        (id, org_id, scan_run_id, overall_score, overall_grade, category_scores,
-         total_findings, critical_findings, high_findings, computed_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      id,
-      scorecard.orgId,
-      scorecard.scanRunId,
-      scorecard.overallScore,
-      scorecard.overallGrade,
-      JSON.stringify(scorecard.categoryScores),
-      scorecard.totalFindings,
-      scorecard.criticalFindings,
-      scorecard.highFindings,
-      scorecard.computedAt
-    );
+    await db('scorecards')
+      .insert({
+        id,
+        org_id: scorecard.orgId,
+        scan_run_id: scorecard.scanRunId,
+        overall_score: scorecard.overallScore,
+        overall_grade: scorecard.overallGrade,
+        category_scores: JSON.stringify(scorecard.categoryScores),
+        total_findings: scorecard.totalFindings,
+        critical_findings: scorecard.criticalFindings,
+        high_findings: scorecard.highFindings,
+        computed_at: scorecard.computedAt,
+      })
+      .onConflict(['org_id', 'scan_run_id'])
+      .merge();
     return { ...scorecard } as OrgScorecard;
   },
 
-  findByScan(orgId: string, scanRunId: string): OrgScorecard | null {
+  async findByScan(orgId: string, scanRunId: string): Promise<OrgScorecard | null> {
     const db = getDatabase();
-    const row = db.prepare(
-      'SELECT * FROM scorecards WHERE org_id = ? AND scan_run_id = ?'
-    ).get(orgId, scanRunId) as ScorecardRow | undefined;
+    const row = await db<ScorecardRow>('scorecards')
+      .where({ org_id: orgId, scan_run_id: scanRunId })
+      .first();
     return row ? rowToScorecard(row) : null;
   },
 
-  findLatestByOrg(orgId: string): OrgScorecard | null {
+  async findLatestByOrg(orgId: string): Promise<OrgScorecard | null> {
     const db = getDatabase();
-    const row = db.prepare(`
-      SELECT s.* FROM scorecards s
-      JOIN scan_runs sr ON s.scan_run_id = sr.id
-      WHERE s.org_id = ? AND sr.status = 'completed'
-      ORDER BY s.computed_at DESC LIMIT 1
-    `).get(orgId) as ScorecardRow | undefined;
+    const row = await db<ScorecardRow>('scorecards as s')
+      .join('scan_runs as sr', 's.scan_run_id', 'sr.id')
+      .where('s.org_id', orgId)
+      .andWhere('sr.status', 'completed')
+      .orderBy('s.computed_at', 'desc')
+      .select('s.*')
+      .first();
     return row ? rowToScorecard(row) : null;
   },
 
-  findAllLatest(): OrgScorecard[] {
+  async findAllLatest(): Promise<OrgScorecard[]> {
     const db = getDatabase();
-    const rows = db.prepare(`
-      SELECT s.* FROM scorecards s
-      INNER JOIN (
-        SELECT org_id, MAX(computed_at) as max_date FROM scorecards GROUP BY org_id
-      ) latest ON s.org_id = latest.org_id AND s.computed_at = latest.max_date
-    `).all() as ScorecardRow[];
+    const latest = db('scorecards')
+      .select('org_id')
+      .max('computed_at as max_date')
+      .groupBy('org_id')
+      .as('latest');
+    const rows = await db<ScorecardRow>('scorecards as s')
+      .innerJoin(latest, function () {
+        this.on('s.org_id', '=', 'latest.org_id').andOn('s.computed_at', '=', 'latest.max_date');
+      })
+      .select('s.*');
     return rows.map(rowToScorecard);
   },
 };

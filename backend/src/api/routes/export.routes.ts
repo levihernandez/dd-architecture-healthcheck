@@ -3,6 +3,7 @@ import { ScanRepository } from '../../db/repositories/scan.repository';
 import { ScorecardRepository } from '../../db/repositories/scorecard.repository';
 import { FindingRepository } from '../../db/repositories/finding.repository';
 import { getStoredAssessment } from '../../ai/service';
+import { assertOrgAccess } from '../../auth/org-access';
 import { AppError } from '../middleware/error.middleware';
 import { gradeLabel, gradeColor } from '../../assessment/scorer';
 
@@ -12,14 +13,14 @@ const router = Router();
 router.get('/:scanRunId', async (req, res, next) => {
   try {
     const { format = 'json' } = req.query;
-    const orgId = req.query.orgId as string;
-    if (!orgId) throw new AppError('orgId required', 400);
 
-    const scan = ScanRepository.findById(req.params.scanRunId);
+    const scan = await ScanRepository.findById(req.params.scanRunId);
     if (!scan) throw new AppError('Scan not found', 404);
+    await assertOrgAccess(scan.orgId, req.user!.id);
+    const orgId = scan.orgId;
 
-    const scorecard = ScorecardRepository.findByScan(orgId, req.params.scanRunId);
-    const findings = FindingRepository.findByScan(req.params.scanRunId, orgId);
+    const scorecard = await ScorecardRepository.findByScan(orgId, req.params.scanRunId);
+    const findings = await FindingRepository.findByScan(req.params.scanRunId, orgId);
     const aiAssessment = await getStoredAssessment(orgId, req.params.scanRunId);
 
     switch (format) {
@@ -53,7 +54,7 @@ router.get('/:scanRunId', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-function buildCSV(findings: ReturnType<typeof FindingRepository.findByScan>): string {
+function buildCSV(findings: Awaited<ReturnType<typeof FindingRepository.findByScan>>): string {
   const header = 'Category,Rule ID,Severity,Title,Affected Count,Total Count,Percentage,Recommendation\n';
   const rows = findings.map((f) =>
     [f.category, f.ruleId, f.severity, `"${f.title.replace(/"/g, '""')}"`,
@@ -64,9 +65,9 @@ function buildCSV(findings: ReturnType<typeof FindingRepository.findByScan>): st
 }
 
 function buildMarkdown(
-  scan: ReturnType<typeof ScanRepository.findById>,
-  scorecard: ReturnType<typeof ScorecardRepository.findByScan>,
-  findings: ReturnType<typeof FindingRepository.findByScan>,
+  scan: Awaited<ReturnType<typeof ScanRepository.findById>>,
+  scorecard: Awaited<ReturnType<typeof ScorecardRepository.findByScan>>,
+  findings: Awaited<ReturnType<typeof FindingRepository.findByScan>>,
   ai: Awaited<ReturnType<typeof getStoredAssessment>>
 ): string {
   const lines: string[] = [
@@ -111,9 +112,9 @@ function buildMarkdown(
 }
 
 function buildHTML(
-  scan: ReturnType<typeof ScanRepository.findById>,
-  scorecard: ReturnType<typeof ScorecardRepository.findByScan>,
-  findings: ReturnType<typeof FindingRepository.findByScan>,
+  scan: Awaited<ReturnType<typeof ScanRepository.findById>>,
+  scorecard: Awaited<ReturnType<typeof ScorecardRepository.findByScan>>,
+  findings: Awaited<ReturnType<typeof FindingRepository.findByScan>>,
   ai: Awaited<ReturnType<typeof getStoredAssessment>>
 ): string {
   const grade = scorecard?.overallGrade ?? 'needs_attention';

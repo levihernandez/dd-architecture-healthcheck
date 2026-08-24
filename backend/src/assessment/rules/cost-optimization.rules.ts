@@ -8,18 +8,20 @@ import { parseUsageSummary, parseCostJson, groupChargesByProduct } from '../cost
 // are worded as likely contributing factors, not proven root causes, since this
 // is correlation across independently-collected signals, not causal tracing.
 
-function getLatestUsage(ctx: AssessmentContext): Record<string, unknown> {
-  const row = ctx.db.prepare(
-    'SELECT usage_json FROM usage_summary WHERE org_id = ? AND scan_run_id = ?'
-  ).get(ctx.orgId, ctx.scanRunId) as { usage_json: string } | undefined;
+async function getLatestUsage(ctx: AssessmentContext): Promise<Record<string, unknown>> {
+  const row = await ctx.db<{ org_id: string; scan_run_id: string; usage_json: string }>('usage_summary')
+    .select('usage_json')
+    .where({ org_id: ctx.orgId, scan_run_id: ctx.scanRunId })
+    .first();
   if (!row) return {};
   return parseUsageSummary(row.usage_json).latestUsage;
 }
 
-function getCostByProduct(ctx: AssessmentContext): Record<string, { committed: number; on_demand: number }> {
-  const row = ctx.db.prepare(
-    'SELECT cost_json FROM usage_summary WHERE org_id = ? AND scan_run_id = ?'
-  ).get(ctx.orgId, ctx.scanRunId) as { cost_json: string | null } | undefined;
+async function getCostByProduct(ctx: AssessmentContext): Promise<Record<string, { committed: number; on_demand: number }>> {
+  const row = await ctx.db<{ org_id: string; scan_run_id: string; cost_json: string | null }>('usage_summary')
+    .select('cost_json')
+    .where({ org_id: ctx.orgId, scan_run_id: ctx.scanRunId })
+    .first();
   if (!row) return {};
   return groupChargesByProduct(parseCostJson(row.cost_json));
 }
@@ -33,18 +35,19 @@ const customMetricsCardinalityRule: AssessmentRule = {
   severity: 'medium',
   description: 'High-cardinality tags are a common driver of custom-metrics cost growth',
   async run(ctx: AssessmentContext): Promise<RuleResult> {
-    const usage = getLatestUsage(ctx);
+    const usage = await getLatestUsage(ctx);
     const customMetricsValue = typeof usage.custom_ts_avg === 'number' ? usage.custom_ts_avg : 0;
 
     if (customMetricsValue <= 0) {
       return { ruleId: 'cost-001', passed: true, score: 100, maxScore: 100, findings: [] };
     }
 
-    const highCardinalityTags = ctx.db.prepare(`
-      SELECT tag_key, unique_value_count FROM tag_analysis
-      WHERE org_id = ? AND scan_run_id = ? AND is_standard_key = 0 AND unique_value_count >= ?
-      ORDER BY unique_value_count DESC LIMIT 10
-    `).all(ctx.orgId, ctx.scanRunId, HIGH_CARDINALITY_THRESHOLD) as Array<{ tag_key: string; unique_value_count: number }>;
+    const highCardinalityTags = await ctx.db<{ org_id: string; scan_run_id: string; is_standard_key: number; tag_key: string; unique_value_count: number }>('tag_analysis')
+      .select('tag_key', 'unique_value_count')
+      .where({ org_id: ctx.orgId, scan_run_id: ctx.scanRunId, is_standard_key: 0 })
+      .where('unique_value_count', '>=', HIGH_CARDINALITY_THRESHOLD)
+      .orderBy('unique_value_count', 'desc')
+      .limit(10);
 
     if (highCardinalityTags.length === 0) {
       return { ruleId: 'cost-001', passed: true, score: 100, maxScore: 100, findings: [] };
@@ -76,18 +79,17 @@ const logIngestionCatchAllRule: AssessmentRule = {
   severity: 'medium',
   description: 'Log indexes with no exclusion filters ingest broadly and drive log cost',
   async run(ctx: AssessmentContext): Promise<RuleResult> {
-    const usage = getLatestUsage(ctx);
+    const usage = await getLatestUsage(ctx);
     const logsIngestedBytes = typeof usage.logs_ingested_bytes_sum === 'number' ? usage.logs_ingested_bytes_sum : 0;
 
     if (logsIngestedBytes <= 0) {
       return { ruleId: 'cost-002', passed: true, score: 100, maxScore: 100, findings: [] };
     }
 
-    const catchAllIndexes = ctx.db.prepare(`
-      SELECT index_name FROM logs_indexes
-      WHERE org_id = ? AND scan_run_id = ? AND exclusion_filter_count = 0
-        AND (filter_query IS NULL OR filter_query = '' OR filter_query = '*')
-    `).all(ctx.orgId, ctx.scanRunId) as Array<{ index_name: string }>;
+    const catchAllIndexes = await ctx.db<{ org_id: string; scan_run_id: string; exclusion_filter_count: number; index_name: string }>('logs_indexes')
+      .select('index_name')
+      .where({ org_id: ctx.orgId, scan_run_id: ctx.scanRunId, exclusion_filter_count: 0 })
+      .where((b) => b.whereNull('filter_query').orWhere('filter_query', '').orWhere('filter_query', '*'));
 
     if (catchAllIndexes.length === 0) {
       return { ruleId: 'cost-002', passed: true, score: 100, maxScore: 100, findings: [] };
@@ -117,7 +119,7 @@ const onDemandUntaggedHostsRule: AssessmentRule = {
   severity: 'high',
   description: 'Untagged hosts driving on-demand overage cannot be attributed to a team or service',
   async run(ctx: AssessmentContext): Promise<RuleResult> {
-    const costByProduct = getCostByProduct(ctx);
+    const costByProduct = await getCostByProduct(ctx);
     const hasHostOnDemand = Object.entries(costByProduct).some(
       ([name, cost]) => /host|infrastructure/i.test(name) && cost.on_demand > 0
     );
@@ -126,8 +128,15 @@ const onDemandUntaggedHostsRule: AssessmentRule = {
       return { ruleId: 'cost-003', passed: true, score: 100, maxScore: 100, findings: [] };
     }
 
-    const total = (ctx.db.prepare('SELECT COUNT(*) as c FROM hosts WHERE org_id = ? AND scan_run_id = ?').get(ctx.orgId, ctx.scanRunId) as { c: number })?.c ?? 0;
-    const tagged = (ctx.db.prepare('SELECT COUNT(*) as c FROM hosts WHERE org_id = ? AND scan_run_id = ? AND has_env_tag = 1 AND has_service_tag = 1').get(ctx.orgId, ctx.scanRunId) as { c: number })?.c ?? 0;
+    const total = Number(
+      (await ctx.db('hosts').where({ org_id: ctx.orgId, scan_run_id: ctx.scanRunId }).count({ c: '*' }).first())?.c ?? 0
+    );
+    const tagged = Number(
+      (await ctx.db('hosts')
+        .where({ org_id: ctx.orgId, scan_run_id: ctx.scanRunId, has_env_tag: 1, has_service_tag: 1 })
+        .count({ c: '*' })
+        .first())?.c ?? 0
+    );
     const percentage = total === 0 ? 100 : Math.round((tagged / total) * 100);
 
     if (total === 0 || percentage >= 50) {
@@ -158,9 +167,10 @@ const unconfiguredCloudChecksRule: AssessmentRule = {
   severity: 'low',
   description: 'A cloud-provider agent check running without the matching integration configured suggests ad-hoc setup',
   async run(ctx: AssessmentContext): Promise<RuleResult> {
-    const signal = ctx.db.prepare(
-      `SELECT value FROM product_usage_signals WHERE org_id = ? AND scan_run_id = ? AND product = 'fleet' AND signal = 'installed_checks'`
-    ).get(ctx.orgId, ctx.scanRunId) as { value: string } | undefined;
+    const signal = await ctx.db<{ org_id: string; scan_run_id: string; product: string; signal: string; value: string }>('product_usage_signals')
+      .select('value')
+      .where({ org_id: ctx.orgId, scan_run_id: ctx.scanRunId, product: 'fleet', signal: 'installed_checks' })
+      .first();
 
     if (!signal) {
       return { ruleId: 'cost-004', passed: true, score: 100, maxScore: 100, findings: [] };
@@ -171,7 +181,9 @@ const unconfiguredCloudChecksRule: AssessmentRule = {
 
     const CLOUD_CHECKS: Record<string, string> = { aws: 'aws', azure: 'azure', gcp: 'gcp', 'google cloud platform': 'gcp' };
     const configuredProviders = new Set(
-      (ctx.db.prepare('SELECT DISTINCT provider FROM cloud_accounts WHERE org_id = ? AND scan_run_id = ?').all(ctx.orgId, ctx.scanRunId) as Array<{ provider: string }>)
+      (await ctx.db<{ org_id: string; scan_run_id: string; provider: string }>('cloud_accounts')
+        .distinct('provider')
+        .where({ org_id: ctx.orgId, scan_run_id: ctx.scanRunId }))
         .map((r) => r.provider)
     );
 
@@ -208,18 +220,19 @@ const unconfiguredCostManagementRule: AssessmentRule = {
   severity: 'medium',
   description: 'A configured cloud integration without Cloud Cost Management means no cost-by-tag/resource visibility for that provider',
   async run(ctx: AssessmentContext): Promise<RuleResult> {
-    const configuredCloudAccounts = ctx.db.prepare(
-      'SELECT DISTINCT provider FROM cloud_accounts WHERE org_id = ? AND scan_run_id = ?'
-    ).all(ctx.orgId, ctx.scanRunId) as Array<{ provider: string }>;
+    const configuredCloudAccounts = await ctx.db<{ org_id: string; scan_run_id: string; provider: string }>('cloud_accounts')
+      .distinct('provider')
+      .where({ org_id: ctx.orgId, scan_run_id: ctx.scanRunId });
 
     if (configuredCloudAccounts.length === 0) {
       return { ruleId: 'cost-005', passed: true, score: 100, maxScore: 100, findings: [] };
     }
 
     const ccmConfigured = new Set(
-      (ctx.db.prepare(
-        'SELECT provider FROM cost_management_config WHERE org_id = ? AND scan_run_id = ? AND configured = 1'
-      ).all(ctx.orgId, ctx.scanRunId) as Array<{ provider: string }>).map((r) => r.provider)
+      (await ctx.db<{ org_id: string; scan_run_id: string; provider: string; configured: number }>('cost_management_config')
+        .select('provider')
+        .where({ org_id: ctx.orgId, scan_run_id: ctx.scanRunId, configured: 1 }))
+        .map((r) => r.provider)
     );
 
     const gaps = configuredCloudAccounts.filter((a) => !ccmConfigured.has(a.provider));

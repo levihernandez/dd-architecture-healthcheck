@@ -17,15 +17,17 @@ interface OrgRow {
   last_scan_at: string | null;
   last_scan_status: string | null;
   notes: string | null;
+  created_by_user_id: string | null;
 }
 
 interface CredRow {
+  org_id?: string;
   encrypted_api_key: string;
   encrypted_app_key: string;
 }
 
 export const OrgRepository = {
-  create(req: CreateOrgRequest & { ddOrgId?: string; ddOrgName?: string }): OrgResponse {
+  async create(req: CreateOrgRequest & { ddOrgId?: string; ddOrgName?: string }, userId: string): Promise<OrgResponse> {
     const db = getDatabase();
     // Prefer the org ID Datadog itself reports at connection time — keeps the row's
     // primary key stable across reconnects instead of minting a fresh app-generated UUID.
@@ -38,106 +40,108 @@ export const OrgRepository = {
     const keyHintApi = req.apiKey.slice(-4).padStart(8, '*');
     const keyHintApp = req.appKey.slice(-4).padStart(8, '*');
 
-    db.transaction(() => {
-      db.prepare(`
-        INSERT INTO orgs (id, name, site, session_only, dd_org_id, dd_org_name, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(id, req.name, req.site, req.sessionOnly ? 1 : 0, req.ddOrgId ?? null, req.ddOrgName ?? null, now, now);
+    await db.transaction(async (trx) => {
+      await trx('orgs').insert({
+        id,
+        name: req.name,
+        site: req.site,
+        session_only: req.sessionOnly ? 1 : 0,
+        dd_org_id: req.ddOrgId ?? null,
+        dd_org_name: req.ddOrgName ?? null,
+        created_by_user_id: userId,
+        created_at: now,
+        updated_at: now,
+      });
 
-      db.prepare(`
-        INSERT INTO api_credentials_metadata
-          (id, org_id, encrypted_api_key, encrypted_app_key, key_hint_api, key_hint_app, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(credId, id, encApiKey, encAppKey, keyHintApi, keyHintApp, now, now);
-    })();
+      await trx('api_credentials_metadata').insert({
+        id: credId,
+        org_id: id,
+        encrypted_api_key: encApiKey,
+        encrypted_app_key: encAppKey,
+        key_hint_api: keyHintApi,
+        key_hint_app: keyHintApp,
+        created_at: now,
+        updated_at: now,
+      });
+    });
 
-    return this.findById(id)!;
+    return (await this.findById(id))!;
   },
 
-  findById(id: string): OrgResponse | null {
+  async findById(id: string): Promise<OrgResponse | null> {
     const db = getDatabase();
-    const row = db.prepare('SELECT * FROM orgs WHERE id = ?').get(id) as OrgRow | undefined;
+    const row = await db<OrgRow>('orgs').where({ id }).first();
     if (!row) return null;
     return rowToResponse(row);
   },
 
-  findAll(): OrgResponse[] {
+  async findAll(userId: string): Promise<OrgResponse[]> {
     const db = getDatabase();
-    const rows = db.prepare('SELECT * FROM orgs ORDER BY created_at DESC').all() as OrgRow[];
-    return rows.map(rowToResponse);
+    const rows = await db<OrgRow>('orgs').where({ created_by_user_id: userId }).orderBy('created_at', 'desc');
+    return Promise.all(rows.map(rowToResponse));
   },
 
-  update(id: string, updates: { name?: string; site?: string; apiKey?: string; appKey?: string }): OrgResponse | null {
+  /** Owner-agnostic lookup by Datadog org id — used only to detect an
+   * existing connection for the reconnect-vs-conflict check in the create
+   * route; ownership must still be enforced by the caller. */
+  async findByIdUnscoped(id: string): Promise<{ id: string; createdByUserId: string | null } | null> {
+    const db = getDatabase();
+    const row = await db<OrgRow>('orgs').select('id', 'created_by_user_id').where({ id }).first();
+    return row ? { id: row.id, createdByUserId: row.created_by_user_id } : null;
+  },
+
+  async update(id: string, updates: { name?: string; site?: string; apiKey?: string; appKey?: string }): Promise<OrgResponse | null> {
     const db = getDatabase();
     const now = new Date().toISOString();
 
     if (updates.name || updates.site) {
-      const sets: string[] = [];
-      const params: unknown[] = [];
-      if (updates.name) { sets.push('name = ?'); params.push(updates.name); }
-      if (updates.site) { sets.push('site = ?'); params.push(updates.site); }
-      sets.push('updated_at = ?');
-      params.push(now, id);
-      db.prepare(`UPDATE orgs SET ${sets.join(', ')} WHERE id = ?`).run(...params);
+      const patch: Record<string, unknown> = { updated_at: now };
+      if (updates.name) patch.name = updates.name;
+      if (updates.site) patch.site = updates.site;
+      await db('orgs').where({ id }).update(patch);
     }
 
     if (updates.apiKey || updates.appKey) {
-      const cred = db.prepare(
-        'SELECT * FROM api_credentials_metadata WHERE org_id = ?'
-      ).get(id) as CredRow | undefined;
+      const cred = await db<CredRow>('api_credentials_metadata').where({ org_id: id }).first();
 
       if (cred) {
-        const newEncApi = updates.apiKey ? encrypt(updates.apiKey) : cred.encrypted_api_key;
-        const newEncApp = updates.appKey ? encrypt(updates.appKey) : cred.encrypted_app_key;
-        const hintApi = updates.apiKey ? updates.apiKey.slice(-4).padStart(8, '*') : undefined;
-        const hintApp = updates.appKey ? updates.appKey.slice(-4).padStart(8, '*') : undefined;
+        const patch: Record<string, unknown> = {
+          encrypted_api_key: updates.apiKey ? encrypt(updates.apiKey) : cred.encrypted_api_key,
+          encrypted_app_key: updates.appKey ? encrypt(updates.appKey) : cred.encrypted_app_key,
+          updated_at: now,
+        };
+        if (updates.apiKey) patch.key_hint_api = updates.apiKey.slice(-4).padStart(8, '*');
+        if (updates.appKey) patch.key_hint_app = updates.appKey.slice(-4).padStart(8, '*');
 
-        db.prepare(`
-          UPDATE api_credentials_metadata
-          SET encrypted_api_key = ?, encrypted_app_key = ?,
-              ${hintApi ? 'key_hint_api = ?,' : ''} ${hintApp ? 'key_hint_app = ?,' : ''}
-              updated_at = ?
-          WHERE org_id = ?
-        `).run(
-          newEncApi, newEncApp,
-          ...(hintApi ? [hintApi] : []),
-          ...(hintApp ? [hintApp] : []),
-          now, id
-        );
+        await db('api_credentials_metadata').where({ org_id: id }).update(patch);
       }
     }
 
     return this.findById(id);
   },
 
-  updateScanStatus(id: string, status: string, ddOrgName?: string, ddOrgId?: string): void {
+  async updateScanStatus(id: string, status: string, ddOrgName?: string, ddOrgId?: string): Promise<void> {
     const db = getDatabase();
     const now = new Date().toISOString();
-    db.prepare(`
-      UPDATE orgs SET last_scan_at = ?, last_scan_status = ?,
-        ${ddOrgName ? 'dd_org_name = ?,' : ''} ${ddOrgId ? 'dd_org_id = ?,' : ''}
-        updated_at = ?
-      WHERE id = ?
-    `).run(
-      now, status,
-      ...(ddOrgName ? [ddOrgName] : []),
-      ...(ddOrgId ? [ddOrgId] : []),
-      now, id
-    );
+    const patch: Record<string, unknown> = { last_scan_at: now, last_scan_status: status, updated_at: now };
+    if (ddOrgName) patch.dd_org_name = ddOrgName;
+    if (ddOrgId) patch.dd_org_id = ddOrgId;
+    await db('orgs').where({ id }).update(patch);
   },
 
-  delete(id: string): boolean {
+  async delete(id: string): Promise<boolean> {
     const db = getDatabase();
-    const result = db.prepare('DELETE FROM orgs WHERE id = ?').run(id);
-    return result.changes > 0;
+    const result = await db('orgs').where({ id }).delete();
+    return result > 0;
   },
 
-  getCredentials(orgId: string): { apiKey: string; appKey: string; site: string } | null {
+  async getCredentials(orgId: string): Promise<{ apiKey: string; appKey: string; site: string } | null> {
     const db = getDatabase();
-    const org = db.prepare('SELECT site FROM orgs WHERE id = ?').get(orgId) as { site: string } | undefined;
-    const cred = db.prepare(
-      'SELECT encrypted_api_key, encrypted_app_key FROM api_credentials_metadata WHERE org_id = ?'
-    ).get(orgId) as CredRow | undefined;
+    const org = await db<{ id: string; site: string }>('orgs').select('site').where({ id: orgId }).first();
+    const cred = await db<CredRow>('api_credentials_metadata')
+      .select('encrypted_api_key', 'encrypted_app_key')
+      .where({ org_id: orgId })
+      .first();
 
     if (!org || !cred) return null;
 
@@ -154,12 +158,7 @@ export const OrgRepository = {
   },
 };
 
-function rowToResponse(row: OrgRow): OrgResponse {
-  const db = getDatabase();
-  const cred = db.prepare(
-    'SELECT key_hint_api, key_hint_app FROM api_credentials_metadata WHERE org_id = ?'
-  ).get(row.id) as { key_hint_api?: string; key_hint_app?: string } | undefined;
-
+async function rowToResponse(row: OrgRow): Promise<OrgResponse> {
   return {
     id: row.id,
     name: row.name,

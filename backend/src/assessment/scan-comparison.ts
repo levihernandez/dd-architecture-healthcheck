@@ -89,16 +89,16 @@ function categoryScoreOf(scorecard: OrgScorecard | null, category: FindingCatego
   return entry?.percentage ?? null;
 }
 
-export function compareScans(orgId: string, previousScanId: string, currentScanId: string): ScanComparisonResult {
-  const previousScan = ScanRepository.findById(previousScanId);
-  const currentScan = ScanRepository.findById(currentScanId);
+export async function compareScans(orgId: string, previousScanId: string, currentScanId: string): Promise<ScanComparisonResult> {
+  const previousScan = await ScanRepository.findById(previousScanId);
+  const currentScan = await ScanRepository.findById(currentScanId);
   if (!previousScan || previousScan.orgId !== orgId) throw new AppError('Previous scan not found for this org', 404);
   if (!currentScan || currentScan.orgId !== orgId) throw new AppError('Current scan not found for this org', 404);
 
-  const previousFindings = FindingRepository.findByScan(previousScanId, orgId);
-  const currentFindings = FindingRepository.findByScan(currentScanId, orgId);
-  const previousScorecard = ScorecardRepository.findByScan(orgId, previousScanId);
-  const currentScorecard = ScorecardRepository.findByScan(orgId, currentScanId);
+  const previousFindings = await FindingRepository.findByScan(previousScanId, orgId);
+  const currentFindings = await FindingRepository.findByScan(currentScanId, orgId);
+  const previousScorecard = await ScorecardRepository.findByScan(orgId, previousScanId);
+  const currentScorecard = await ScorecardRepository.findByScan(orgId, currentScanId);
 
   const prevByRule = new Map(previousFindings.map((f) => [f.ruleId, f]));
   const currByRule = new Map(currentFindings.map((f) => [f.ruleId, f]));

@@ -21,9 +21,9 @@ function invalidateCache(): void {
   flatCache = null;
 }
 
-function loadStoredEnabled(): Map<string, boolean> {
+async function loadStoredEnabled(): Promise<Map<string, boolean>> {
   const db = getDatabase();
-  const rows = db.prepare('SELECT key, enabled FROM feature_flags').all() as Array<{ key: string; enabled: number }>;
+  const rows = await db<{ key: string; enabled: number }>('feature_flags').select('key', 'enabled');
   const map = new Map<string, boolean>();
   for (const row of rows) map.set(row.key, row.enabled === 1);
   return map;
@@ -72,63 +72,67 @@ function buildTree(stored: Map<string, boolean>, effective: Map<string, boolean>
 export const FeatureFlagRepository = {
   // INSERT OR IGNORE one row per FEATURE_TREE entry, enabled=1. Call once at
   // boot, right after runMigrations() has created the table.
-  seedDefaults(): void {
+  async seedDefaults(): Promise<void> {
     const db = getDatabase();
     const now = new Date().toISOString();
-    const insert = db.prepare(`
-      INSERT OR IGNORE INTO feature_flags (key, parent_key, node_type, enabled, updated_at)
-      VALUES (?, ?, ?, 1, ?)
-    `);
-    const txn = db.transaction(() => {
-      for (const node of FEATURE_TREE) {
-        insert.run(node.key, node.parentKey, node.nodeType, now);
-      }
-    });
-    txn();
+
+    const rows = FEATURE_TREE.map((node) => ({
+      key: node.key,
+      parent_key: node.parentKey,
+      node_type: node.nodeType,
+      enabled: 1,
+      updated_at: now,
+    }));
+
+    await db('feature_flags').insert(rows).onConflict('key').ignore();
     invalidateCache();
     logger.info(`[feature-flags] Seeded ${FEATURE_TREE.length} default flag(s)`);
   },
 
-  getTree(): FeatureFlagState[] {
-    const stored = loadStoredEnabled();
+  async getTree(): Promise<FeatureFlagState[]> {
+    const stored = await loadStoredEnabled();
     const effective = computeEffective(stored);
     return buildTree(stored, effective);
   },
 
-  getFlatEffective(): Map<string, boolean> {
+  async getFlatEffective(): Promise<Map<string, boolean>> {
     if (flatCache) return flatCache;
-    const stored = loadStoredEnabled();
+    const stored = await loadStoredEnabled();
     flatCache = computeEffective(stored);
     return flatCache;
   },
 
-  setEnabled(key: string, enabled: boolean): void {
+  async setEnabled(key: string, enabled: boolean): Promise<void> {
     if (!NODE_BY_KEY.has(key)) {
       throw new Error(`Unknown feature flag key: ${key}`);
     }
     const db = getDatabase();
     const now = new Date().toISOString();
-    db.prepare('UPDATE feature_flags SET enabled = ?, updated_at = ? WHERE key = ?')
-      .run(enabled ? 1 : 0, now, key);
+    await db('feature_flags').where({ key }).update({ enabled: enabled ? 1 : 0, updated_at: now });
     invalidateCache();
   },
 
   // Fail-open (returns true) if the node isn't found — this should only happen
   // for a genuine data bug (e.g. a collector renamed without updating the registry).
-  isCollectorEnabled(collectorName: string): boolean {
+  async isCollectorEnabled(collectorName: string): Promise<boolean> {
     const key = `collector.${collectorName}`;
     if (!NODE_BY_KEY.has(key)) return true;
-    return this.getFlatEffective().get(key) ?? true;
+    const effective = await this.getFlatEffective();
+    return effective.get(key) ?? true;
   },
 
-  isRuleCategoryEnabled(category: string): boolean {
+  async isRuleCategoryEnabled(category: string): Promise<boolean> {
     const key = `rule.${category}`;
     if (!NODE_BY_KEY.has(key)) return true;
-    const ownEnabled = this.getFlatEffective().get(key) ?? true;
+    const effective = await this.getFlatEffective();
+    const ownEnabled = effective.get(key) ?? true;
     if (!ownEnabled) return false;
 
     const dependencies = RULE_COLLECTOR_DEPENDENCIES[category];
     if (!dependencies) return true;
-    return dependencies.every((collectorName) => this.isCollectorEnabled(collectorName));
+    for (const collectorName of dependencies) {
+      if (!(await this.isCollectorEnabled(collectorName))) return false;
+    }
+    return true;
   },
 };

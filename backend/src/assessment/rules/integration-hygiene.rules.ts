@@ -8,8 +8,12 @@ const cloudIntegrationCoverageRule: AssessmentRule = {
   description: 'Cloud integrations should be configured for all detected cloud accounts',
   async run(ctx: AssessmentContext): Promise<RuleResult> {
     const { orgId, scanRunId, db } = ctx;
-    const total = (db.prepare('SELECT COUNT(*) as c FROM cloud_accounts WHERE org_id = ? AND scan_run_id = ?').get(orgId, scanRunId) as { c: number })?.c ?? 0;
-    const withErrors = (db.prepare('SELECT COUNT(*) as c FROM cloud_accounts WHERE org_id = ? AND scan_run_id = ? AND has_errors = 1').get(orgId, scanRunId) as { c: number })?.c ?? 0;
+    const total = Number(
+      (await db('cloud_accounts').where({ org_id: orgId, scan_run_id: scanRunId }).count({ c: '*' }).first())?.c ?? 0
+    );
+    const withErrors = Number(
+      (await db('cloud_accounts').where({ org_id: orgId, scan_run_id: scanRunId, has_errors: 1 }).count({ c: '*' }).first())?.c ?? 0
+    );
     const passed = withErrors === 0;
 
     return {
@@ -37,11 +41,13 @@ const notificationIntegrationRule: AssessmentRule = {
   description: 'At least one notification integration (PagerDuty, Slack, etc.) should be configured',
   async run(ctx: AssessmentContext): Promise<RuleResult> {
     const { orgId, scanRunId, db } = ctx;
-    const notifIntegrations = db.prepare(`
-      SELECT COUNT(*) as c FROM integrations
-      WHERE org_id = ? AND scan_run_id = ? AND integration_type = 'notification' AND is_configured = 1
-    `).get(orgId, scanRunId) as { c: number };
-    const hasNotif = (notifIntegrations?.c ?? 0) > 0;
+    const notifIntegrationsCount = Number(
+      (await db('integrations')
+        .where({ org_id: orgId, scan_run_id: scanRunId, integration_type: 'notification', is_configured: 1 })
+        .count({ c: '*' })
+        .first())?.c ?? 0
+    );
+    const hasNotif = notifIntegrationsCount > 0;
 
     return {
       ruleId: 'int-002', passed: hasNotif, score: hasNotif ? 100 : 0, maxScore: 100,

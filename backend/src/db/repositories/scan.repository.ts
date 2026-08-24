@@ -15,89 +15,93 @@ interface ScanRow {
 }
 
 export const ScanRepository = {
-  create(orgId: string): ScanRunResponse {
+  async create(orgId: string): Promise<ScanRunResponse> {
     const db = getDatabase();
     const id = uuidv4();
     const now = new Date().toISOString();
 
-    db.prepare(`
-      INSERT INTO scan_runs (id, org_id, status, started_at, created_at)
-      VALUES (?, ?, 'pending', ?, ?)
-    `).run(id, orgId, now, now);
+    await db('scan_runs').insert({
+      id,
+      org_id: orgId,
+      status: 'pending',
+      started_at: now,
+      created_at: now,
+    });
 
-    return this.findById(id)!;
+    return (await this.findById(id))!;
   },
 
-  findById(id: string): ScanRunResponse | null {
+  async findById(id: string): Promise<ScanRunResponse | null> {
     const db = getDatabase();
-    const row = db.prepare('SELECT * FROM scan_runs WHERE id = ?').get(id) as ScanRow | undefined;
+    const row = await db<ScanRow>('scan_runs').where({ id }).first();
     if (!row) return null;
     return rowToResponse(row);
   },
 
-  findByOrg(orgId: string, limit = 20): ScanRunResponse[] {
+  async findByOrg(orgId: string, limit = 20): Promise<ScanRunResponse[]> {
     const db = getDatabase();
-    const rows = db.prepare(
-      'SELECT * FROM scan_runs WHERE org_id = ? ORDER BY started_at DESC LIMIT ?'
-    ).all(orgId, limit) as ScanRow[];
+    const rows = await db<ScanRow>('scan_runs')
+      .where({ org_id: orgId })
+      .orderBy('started_at', 'desc')
+      .limit(limit);
     return rows.map(rowToResponse);
   },
 
-  findLatestByOrg(orgId: string): ScanRunResponse | null {
+  async findLatestByOrg(orgId: string): Promise<ScanRunResponse | null> {
     const db = getDatabase();
-    const row = db.prepare(
-      'SELECT * FROM scan_runs WHERE org_id = ? AND status = ? ORDER BY started_at DESC LIMIT 1'
-    ).get(orgId, 'completed') as ScanRow | undefined;
+    const row = await db<ScanRow>('scan_runs')
+      .where({ org_id: orgId, status: 'completed' })
+      .orderBy('started_at', 'desc')
+      .first();
     return row ? rowToResponse(row) : null;
   },
 
   // The most recent completed scan for the org that started strictly before
   // `beforeScanId`'s own start time — used as the default "previous scan" to
   // diff against when a comparison doesn't specify one explicitly.
-  findPreviousCompleted(orgId: string, beforeScanId: string): ScanRunResponse | null {
+  async findPreviousCompleted(orgId: string, beforeScanId: string): Promise<ScanRunResponse | null> {
     const db = getDatabase();
-    const row = db.prepare(`
-      SELECT * FROM scan_runs
-      WHERE org_id = ? AND status = 'completed'
-        AND started_at < (SELECT started_at FROM scan_runs WHERE id = ?)
-      ORDER BY started_at DESC LIMIT 1
-    `).get(orgId, beforeScanId) as ScanRow | undefined;
+    const row = await db<ScanRow>('scan_runs')
+      .where({ org_id: orgId, status: 'completed' })
+      .andWhere('started_at', '<', db('scan_runs').select('started_at').where({ id: beforeScanId }))
+      .orderBy('started_at', 'desc')
+      .first();
     return row ? rowToResponse(row) : null;
   },
 
-  updateStatus(
+  async updateStatus(
     id: string,
     status: ScanRunResponse['status'],
     error?: string
-  ): void {
+  ): Promise<void> {
     const db = getDatabase();
     const now = new Date().toISOString();
     if (status === 'completed' || status === 'failed') {
-      db.prepare(`
-        UPDATE scan_runs SET status = ?, completed_at = ?, error = ? WHERE id = ?
-      `).run(status, now, error ?? null, id);
+      await db('scan_runs').where({ id }).update({
+        status,
+        completed_at: now,
+        error: error ?? null,
+      });
     } else {
-      db.prepare(`UPDATE scan_runs SET status = ? WHERE id = ?`).run(status, id);
+      await db('scan_runs').where({ id }).update({ status });
     }
   },
 
-  updateCollectorResults(id: string, results: CollectorResultSummary[]): void {
+  async updateCollectorResults(id: string, results: CollectorResultSummary[]): Promise<void> {
     const db = getDatabase();
-    db.prepare(`
-      UPDATE scan_runs SET collector_results = ? WHERE id = ?
-    `).run(JSON.stringify(results), id);
+    await db('scan_runs').where({ id }).update({ collector_results: JSON.stringify(results) });
   },
 
-  updateFindingCount(id: string, count: number): void {
+  async updateFindingCount(id: string, count: number): Promise<void> {
     const db = getDatabase();
-    db.prepare('UPDATE scan_runs SET finding_count = ? WHERE id = ?').run(count, id);
+    await db('scan_runs').where({ id }).update({ finding_count: count });
   },
 
   // Every child table's scan_run_id FK is ON DELETE CASCADE (with foreign_keys=ON
   // set at connection time), so this single delete cleans up all collected data.
-  delete(id: string): void {
+  async delete(id: string): Promise<void> {
     const db = getDatabase();
-    db.prepare('DELETE FROM scan_runs WHERE id = ?').run(id);
+    await db('scan_runs').where({ id }).delete();
   },
 };
 

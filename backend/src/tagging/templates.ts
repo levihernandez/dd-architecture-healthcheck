@@ -1338,18 +1338,20 @@ function caseFold(s: string) {
   return s.toLowerCase().replace(/[-.\s]/g, '_');
 }
 
-export function scoreAgainstTemplate(orgId: string, scanRunId: string, templateId: string): TemplateScore {
+export async function scoreAgainstTemplate(orgId: string, scanRunId: string, templateId: string): Promise<TemplateScore> {
   const allTemplates = [...INDUSTRY_TEMPLATES, ...ORG_TEMPLATES];
   const template = allTemplates.find((t) => t.id === templateId) ?? INDUSTRY_TEMPLATES[0];
 
   const db = getDatabase();
-  const tagRows = db.prepare(
-    `SELECT tag_key, host_occurrence_count FROM tag_analysis WHERE org_id = ? AND scan_run_id = ?`
-  ).all(orgId, scanRunId) as Array<{ tag_key: string; host_occurrence_count: number }>;
+  const tagRows = await db<{ org_id: string; scan_run_id: string; tag_key: string; host_occurrence_count: number }>('tag_analysis')
+    .select('tag_key', 'host_occurrence_count')
+    .where({ org_id: orgId, scan_run_id: scanRunId });
 
-  const totalHosts = (db.prepare(
-    'SELECT COUNT(*) as c FROM hosts WHERE org_id = ? AND scan_run_id = ?'
-  ).get(orgId, scanRunId) as { c: number })?.c ?? 1;
+  const totalHostsRow = await db('hosts')
+    .count({ c: '*' })
+    .where({ org_id: orgId, scan_run_id: scanRunId })
+    .first() as { c: number | string } | undefined;
+  const totalHosts = Number(totalHostsRow?.c ?? 1) || 1;
 
   const tagMap = new Map(tagRows.map((r) => [r.tag_key, r]));
   const tagKeys = tagRows.map((r) => r.tag_key);
@@ -1410,14 +1412,17 @@ export function scoreAgainstTemplate(orgId: string, scanRunId: string, templateI
   };
 }
 
-export function detectRecommendedTemplate(orgId: string, scanRunId: string): string {
+export async function detectRecommendedTemplate(orgId: string, scanRunId: string): Promise<string> {
   const db = getDatabase();
-  const tagKeys = new Set(
-    (db.prepare('SELECT tag_key FROM tag_analysis WHERE org_id = ? AND scan_run_id = ?')
-      .all(orgId, scanRunId) as { tag_key: string }[]).map((r) => r.tag_key)
-  );
-  const serviceNames = (db.prepare('SELECT service_name FROM services WHERE org_id = ? AND scan_run_id = ?')
-    .all(orgId, scanRunId) as { service_name: string }[]).map((r) => r.service_name.toLowerCase());
+  const tagKeyRows = await db<{ org_id: string; scan_run_id: string; tag_key: string }>('tag_analysis')
+    .select('tag_key')
+    .where({ org_id: orgId, scan_run_id: scanRunId });
+  const tagKeys = new Set(tagKeyRows.map((r) => r.tag_key));
+
+  const serviceNameRows = await db<{ org_id: string; scan_run_id: string; service_name: string }>('services')
+    .select('service_name')
+    .where({ org_id: orgId, scan_run_id: scanRunId });
+  const serviceNames = serviceNameRows.map((r) => r.service_name.toLowerCase());
 
   const scores: [string, number][] = [];
   for (const t of [...INDUSTRY_TEMPLATES, ...ORG_TEMPLATES]) {

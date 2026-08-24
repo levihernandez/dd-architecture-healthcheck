@@ -129,6 +129,7 @@ OPENAI_KEY=""; ANTHROPIC_KEY=""
 heading "Writing configuration"
 
 ENCRYPTION_KEY_VAL="$(openssl rand -base64 32)"
+JWT_SECRET_VAL="$(openssl rand -base64 32)"
 
 cp .env.example .env
 
@@ -145,6 +146,7 @@ set_env() {
 }
 
 set_env ENCRYPTION_KEY "$ENCRYPTION_KEY_VAL"
+set_env JWT_SECRET "$JWT_SECRET_VAL"
 set_env AI_PROVIDER "$AI_PROVIDER"
 [[ -n "$OPENAI_KEY" ]] && set_env OPENAI_API_KEY "$OPENAI_KEY"
 [[ -n "$ANTHROPIC_KEY" ]] && set_env ANTHROPIC_API_KEY "$ANTHROPIC_KEY"

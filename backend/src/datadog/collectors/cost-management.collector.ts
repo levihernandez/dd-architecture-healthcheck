@@ -29,17 +29,6 @@ export async function collectCostManagement(
     PROVIDERS.map(({ endpoint }) => client.get<DDCostConfig>(endpoint))
   );
 
-  const insertPermission = db.prepare(`
-    INSERT OR REPLACE INTO permissions_report
-      (id, org_id, scan_run_id, endpoint, status, status_code, error, tested_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-  const insertConfig = db.prepare(`
-    INSERT OR REPLACE INTO cost_management_config
-      (id, org_id, scan_run_id, provider, configured, account_count, raw_json, first_seen, last_seen)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-
   let configuredCount = 0;
   let anySuccess = false;
   let lastError: string | undefined;
@@ -52,18 +41,36 @@ export async function collectCostManagement(
     requestCount += result.requestCount;
     rateLimitRemaining = result.rateLimitRemaining ?? rateLimitRemaining;
 
-    insertPermission.run(uuidv4(), orgId, scanRunId, endpoint, result.status, null, result.error ?? null, now);
+    // permissions_report has no unique constraint, so a plain insert is always safe.
+    await db('permissions_report').insert({
+      id: uuidv4(),
+      org_id: orgId,
+      scan_run_id: scanRunId,
+      endpoint,
+      status: result.status,
+      status_code: null,
+      error: result.error ?? null,
+      tested_at: now,
+    });
 
     if (result.status === 'success') {
       anySuccess = true;
       const configured = result.data.length > 0;
       if (configured) configuredCount++;
       try {
-        insertConfig.run(
-          uuidv4(), orgId, scanRunId, provider,
-          configured ? 1 : 0, result.data.length,
-          safeJsonSnapshot(result.data), now, now
-        );
+        // cost_management_config's UNIQUE(org_id, scan_run_id, provider) always includes a
+        // fresh scan_run_id per call, so a plain insert never collides — no upsert needed.
+        await db('cost_management_config').insert({
+          id: uuidv4(),
+          org_id: orgId,
+          scan_run_id: scanRunId,
+          provider,
+          configured: configured ? 1 : 0,
+          account_count: result.data.length,
+          raw_json: safeJsonSnapshot(result.data),
+          first_seen: now,
+          last_seen: now,
+        });
       } catch (err) {
         logger.error(`[${orgId}] Failed to store cost management config for ${provider}`, err);
       }

@@ -4,6 +4,11 @@ function pct(count: number, total: number): number {
   return total === 0 ? 100 : Math.round((count / total) * 100);
 }
 
+async function countMonitors(db: AssessmentContext['db'], orgId: string, scanRunId: string, extra?: Record<string, unknown>): Promise<number> {
+  const row = await db('monitors').where({ org_id: orgId, scan_run_id: scanRunId, ...extra }).count({ c: '*' }).first();
+  return Number(row?.c ?? 0);
+}
+
 const mutedMonitorsRule: AssessmentRule = {
   id: 'mon-001',
   name: 'Long-muted monitors',
@@ -12,8 +17,8 @@ const mutedMonitorsRule: AssessmentRule = {
   description: 'Monitors muted indefinitely represent blind spots in alerting coverage',
   async run(ctx: AssessmentContext): Promise<RuleResult> {
     const { orgId, scanRunId, db } = ctx;
-    const total = (db.prepare('SELECT COUNT(*) as c FROM monitors WHERE org_id = ? AND scan_run_id = ?').get(orgId, scanRunId) as { c: number })?.c ?? 0;
-    const muted = (db.prepare('SELECT COUNT(*) as c FROM monitors WHERE org_id = ? AND scan_run_id = ? AND is_muted = 1').get(orgId, scanRunId) as { c: number })?.c ?? 0;
+    const total = await countMonitors(db, orgId, scanRunId);
+    const muted = await countMonitors(db, orgId, scanRunId, { is_muted: 1 });
     const percentage = pct(muted, total);
     const passed = percentage < 10;
 
@@ -42,8 +47,10 @@ const monitorsWithoutPriorityRule: AssessmentRule = {
   description: 'Monitors should have priority levels for effective on-call triage',
   async run(ctx: AssessmentContext): Promise<RuleResult> {
     const { orgId, scanRunId, db } = ctx;
-    const total = (db.prepare('SELECT COUNT(*) as c FROM monitors WHERE org_id = ? AND scan_run_id = ?').get(orgId, scanRunId) as { c: number })?.c ?? 0;
-    const withPriority = (db.prepare('SELECT COUNT(*) as c FROM monitors WHERE org_id = ? AND scan_run_id = ? AND priority IS NOT NULL').get(orgId, scanRunId) as { c: number })?.c ?? 0;
+    const total = await countMonitors(db, orgId, scanRunId);
+    const withPriority = Number(
+      (await db('monitors').where({ org_id: orgId, scan_run_id: scanRunId }).whereNotNull('priority').count({ c: '*' }).first())?.c ?? 0
+    );
     const missing = total - withPriority;
     const percentage = pct(withPriority, total);
     const passed = percentage >= 80;
@@ -73,8 +80,8 @@ const monitorsWithoutNotificationsRule: AssessmentRule = {
   description: 'Monitors need notification routing to alert the right people',
   async run(ctx: AssessmentContext): Promise<RuleResult> {
     const { orgId, scanRunId, db } = ctx;
-    const total = (db.prepare('SELECT COUNT(*) as c FROM monitors WHERE org_id = ? AND scan_run_id = ?').get(orgId, scanRunId) as { c: number })?.c ?? 0;
-    const withNotification = (db.prepare('SELECT COUNT(*) as c FROM monitors WHERE org_id = ? AND scan_run_id = ? AND has_notification = 1').get(orgId, scanRunId) as { c: number })?.c ?? 0;
+    const total = await countMonitors(db, orgId, scanRunId);
+    const withNotification = await countMonitors(db, orgId, scanRunId, { has_notification: 1 });
     const missing = total - withNotification;
     const percentage = pct(withNotification, total);
     const passed = percentage >= 90;
@@ -104,10 +111,14 @@ const alertingMonitorsRule: AssessmentRule = {
   description: 'Monitors stuck in ALERT state for extended periods indicate alert fatigue or stale monitors',
   async run(ctx: AssessmentContext): Promise<RuleResult> {
     const { orgId, scanRunId, db } = ctx;
-    const alerting = (db.prepare(
-      "SELECT COUNT(*) as c FROM monitors WHERE org_id = ? AND scan_run_id = ? AND overall_state IN ('Alert', 'ALERT')"
-    ).get(orgId, scanRunId) as { c: number })?.c ?? 0;
-    const total = (db.prepare('SELECT COUNT(*) as c FROM monitors WHERE org_id = ? AND scan_run_id = ?').get(orgId, scanRunId) as { c: number })?.c ?? 0;
+    const alerting = Number(
+      (await db('monitors')
+        .where({ org_id: orgId, scan_run_id: scanRunId })
+        .whereIn('overall_state', ['Alert', 'ALERT'])
+        .count({ c: '*' })
+        .first())?.c ?? 0
+    );
+    const total = await countMonitors(db, orgId, scanRunId);
     const percentage = pct(alerting, total);
     const passed = percentage < 20;
 

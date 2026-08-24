@@ -10,6 +10,47 @@ const api = axios.create({
   headers: { 'Content-Type': 'application/json' },
 });
 
+// Attach the stored auth token to every request. Reads localStorage directly
+// (rather than through React context) since interceptors run outside the
+// component tree — same source-of-truth approach OrgScanContext already uses.
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem('dd_auth_token');
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+// A 401 means the stored token is missing/invalid/expired — clear it and send
+// the user back to log in rather than leaving the app stuck on a failed call.
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (axios.isAxiosError(error) && error.response?.status === 401 && !error.config?.url?.includes('/auth/login')) {
+      localStorage.removeItem('dd_auth_token');
+      if (window.location.pathname !== '/login') {
+        window.location.href = '/login';
+      }
+    }
+    return Promise.reject(error);
+  }
+);
+
+export interface PublicUser {
+  id: string;
+  email: string;
+  name: string | null;
+}
+
+// Auth
+export const authApi = {
+  register: (email: string, password: string, name?: string) =>
+    api.post<{ token: string; user: PublicUser }>('/auth/register', { email, password, name }).then((r) => r.data),
+  login: (email: string, password: string) =>
+    api.post<{ token: string; user: PublicUser }>('/auth/login', { email, password }).then((r) => r.data),
+  me: () => api.get<PublicUser>('/auth/me').then((r) => r.data),
+};
+
 // Org context (Getting to Know You)
 export const orgContextApi = {
   get: (orgId: string) => api.get<OrgContextData | null>(`/orgs/${orgId}/context`).then(r => r.data),

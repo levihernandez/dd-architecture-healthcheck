@@ -34,11 +34,17 @@ import EventsHealth from './pages/EventsHealth';
 import FeatureFlags from './pages/FeatureFlags';
 import ScanComparison from './pages/ScanComparison';
 import FeatureGate from './components/FeatureGate';
+import PrivateRoute from './components/PrivateRoute';
+import Login from './pages/Login';
+import Register from './pages/Register';
 
 export default function App() {
   return (
     <BrowserRouter>
       <Routes>
+        <Route path="login" element={<Login />} />
+        <Route path="register" element={<Register />} />
+        <Route element={<PrivateRoute />}>
         <Route path="/" element={<Layout />}>
           <Route index element={<Navigate to="/overview" replace />} />
           <Route path="overview" element={<Overview />} />
@@ -74,6 +80,7 @@ export default function App() {
           <Route path="recommendations" element={<FeatureGate featureKey="page.recommendations"><Recommendations /></FeatureGate>} />
           <Route path="export" element={<FeatureGate featureKey="page.export"><ExportCenter /></FeatureGate>} />
           <Route path="feature-flags" element={<FeatureFlags />} />
+        </Route>
         </Route>
       </Routes>
     </BrowserRouter>
