@@ -112,6 +112,70 @@ const chargeColumns: Column<{ charge_type: string; product_name: string; cost: n
   { key: 'cost', header: 'Cost', sortable: true, render: (c) => <span className="font-mono text-sm font-semibold text-ink">{money(c.cost)}</span> },
 ];
 
+function ProductSpendGraph({ orgId, productName }: { orgId: string; productName: string }) {
+  const { data, isLoading } = useQuery({
+    queryKey: ['usage-product-cost-history', orgId, productName],
+    queryFn: () => usageApi.productCostHistory(orgId, productName),
+    enabled: Boolean(orgId && productName),
+  });
+
+  if (isLoading) {
+    return <div className="text-xs text-ink-faint py-2">Loading {productName}'s spend history…</div>;
+  }
+
+  const history = data?.history ?? [];
+  if (history.length < 2) {
+    return (
+      <div className="text-xs text-ink-faint py-2">
+        Not enough scan history yet to chart {productName}'s spend over time — each completed scan adds one
+        month to this graph, so it fills in as you re-run scans.
+      </div>
+    );
+  }
+
+  return (
+    <div className="py-1">
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-xs font-semibold text-ink-muted">{productName} — spend by month</span>
+        <div className="flex items-center gap-3 text-[11px] text-ink-faint">
+          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-green-500 inline-block" /> Committed</span>
+          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-500 inline-block" /> On-demand</span>
+        </div>
+      </div>
+      <div className="h-40">
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={history} margin={{ top: 4, right: 8, bottom: 0, left: 8 }} barCategoryGap="25%">
+            <XAxis
+              dataKey="month"
+              tickFormatter={(m: string) => m.slice(5)}
+              tick={{ fontSize: 10, fill: CHART_INK.muted }}
+              axisLine={{ stroke: CHART_INK.gridline }}
+              tickLine={false}
+            />
+            <Tooltip
+              cursor={{ fill: 'rgba(15, 23, 42, 0.06)' }}
+              content={({ active, payload }) => {
+                if (!active || !payload?.length) return null;
+                const p = payload[0].payload as { month: string; committedCost: number; onDemandCost: number; totalCost: number };
+                return (
+                  <div className="bg-gray-800 text-white border border-gray-700 text-xs px-2.5 py-1.5 rounded shadow-popover whitespace-nowrap">
+                    <div className="font-semibold mb-0.5">{p.month}</div>
+                    <div className="text-green-400">Committed: {money(p.committedCost) || '$0'}</div>
+                    {p.onDemandCost > 0 && <div className="text-red-400">On-demand: {money(p.onDemandCost)}</div>}
+                    <div className="text-ink-faint mt-0.5">Total: {money(p.totalCost) || '$0'}</div>
+                  </div>
+                );
+              }}
+            />
+            <Bar dataKey="committedCost" stackId="cost" name="Committed" fill="#4ade80" />
+            <Bar dataKey="onDemandCost" stackId="cost" name="On-Demand" fill="#f87171" radius={[4, 4, 0, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
+}
+
 function UsageBarChart({ history, metricKey, unit }: {
   history: Array<Record<string, unknown>>;
   metricKey: string;
@@ -295,7 +359,9 @@ export default function Usage() {
           <div className="flex items-center justify-between">
             <div>
               <h2 className="font-bold text-ink">Product Usage Breakdown</h2>
-              <p className="text-xs text-ink-muted mt-0.5">Usage metrics and estimated costs by product for {data.reportMonth}</p>
+              <p className="text-xs text-ink-muted mt-0.5">
+                Usage metrics and estimated costs by product for {data.reportMonth}. Expand a billed product (▸) for its own spend-over-time graph.
+              </p>
             </div>
             {data.products.length > 0 && (
               <div className="flex items-center gap-3 text-xs">
@@ -312,6 +378,8 @@ export default function Usage() {
               tableId="usage-products"
               searchable
               pageSize={10}
+              expandable={(p) => p.committedCost > 0 || p.onDemandCost > 0}
+              expandedRowRender={(p) => <ProductSpendGraph orgId={selectedOrgId} productName={p.name} />}
             />
           ) : (
             <div className="card text-center py-10 text-ink-faint text-sm">

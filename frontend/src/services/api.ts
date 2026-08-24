@@ -135,6 +135,8 @@ export const analyticsApi = {
 export const usageApi = {
   get: (orgId: string, scanRunId?: string) =>
     api.get<import('../types').UsageData | null>('/usage', { params: { orgId, ...(scanRunId ? { scanRunId } : {}) } }).then(r => r.data),
+  productCostHistory: (orgId: string, productName: string) =>
+    api.get<import('../types').ProductCostHistoryResult>('/usage/product-cost-history', { params: { orgId, productName } }).then(r => r.data),
 };
 
 export const eventsApi = {
