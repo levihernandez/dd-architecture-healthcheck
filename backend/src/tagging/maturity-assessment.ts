@@ -112,7 +112,7 @@ export function buildRemediationExecutionPrompt(req: MaturityAssessmentRequest):
   const industry = template.sector || template.name;
 
   const promptText = getPrompt('tagging-remediation-execution')
-    .replace('{{INDUSTRY}}', () => industry)
+    .replaceAll('{{INDUSTRY}}', () => industry)
     .replace('{{SCAN_STATUS_NOTE}}', () => buildScanStatusNote(hasScanData, hostCount, serviceCount))
     .replace('{{SUGGESTED_TAGS}}', () => suggestedTagsMarkdown)
     .replace('{{GENERATED_AT}}', new Date().toISOString());
