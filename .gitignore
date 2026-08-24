@@ -10,3 +10,9 @@ certs/
 .compose-files
 .claude/skills/dd-architecture-healthcheck/snapshots/
 .DS_Store
+
+# Claude Code's permission-allowlist files record approved shell commands
+# verbatim, which can end up containing credentials/secrets typed during a
+# session — never safe to version.
+.claude/settings.json
+.claude/settings.local.json
