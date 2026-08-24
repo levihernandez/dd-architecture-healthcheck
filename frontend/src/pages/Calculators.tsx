@@ -5488,6 +5488,15 @@ export default function Calculators() {
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto px-8 py-6 min-w-0">
+        <div className="mb-4 flex items-start gap-2 text-xs text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2">
+          <span className="shrink-0">⚠</span>
+          <span>
+            <strong>Reference only, not a quote.</strong> These figures use simplified list-price assumptions and
+            won't reflect newly released products, your actual contract, committed-use discounts, or plan-specific
+            pricing. Use this to gauge order-of-magnitude cost and tradeoffs, then confirm real numbers with your
+            Datadog account team.
+          </span>
+        </div>
         <ModeToggle mode={mode} onChange={setMode} hasOrgs={orgs.length > 0} hasMultipleOrgs={orgs.length > 1} />
         <ActiveComponent scanData={effectiveScanData} {...modeProps} />
       </div>
